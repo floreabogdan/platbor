@@ -42,3 +42,36 @@ WHERE project_id = ? AND repository = ? AND tag = ?;
 -- name: DeleteTagsForDigest :exec
 DELETE FROM oci_tags
 WHERE project_id = ? AND repository = ? AND digest = ?;
+
+-- name: ListAllRepositories :many
+-- Every repository across all projects, with tag and manifest counts, for the
+-- registry browser's project-grouped index. A repository exists once it has at
+-- least one manifest.
+SELECT
+    p.key                    AS project_key,
+    p.name                   AS project_name,
+    m.repository             AS repository,
+    COUNT(DISTINCT m.digest) AS manifest_count,
+    (SELECT COUNT(*) FROM oci_tags t
+       WHERE t.project_id = m.project_id AND t.repository = m.repository) AS tag_count,
+    MAX(m.created_at)        AS updated_at
+FROM oci_manifests m
+JOIN projects p ON p.id = m.project_id
+GROUP BY m.project_id, m.repository
+ORDER BY p.key ASC, m.repository ASC;
+
+-- name: ListTagsWithManifest :many
+-- Tags in a repository joined to the manifest each points at, so the browser can
+-- show media type and size without a second round-trip. Newest push first.
+SELECT
+    t.tag        AS tag,
+    t.digest     AS digest,
+    t.updated_at AS updated_at,
+    m.media_type AS media_type,
+    m.size       AS size,
+    m.payload    AS payload
+FROM oci_tags t
+JOIN oci_manifests m
+  ON m.project_id = t.project_id AND m.repository = t.repository AND m.digest = t.digest
+WHERE t.project_id = ? AND t.repository = ?
+ORDER BY t.updated_at DESC, t.tag ASC;
