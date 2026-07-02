@@ -87,7 +87,7 @@ func (q *Queries) DeleteTagsForDigest(ctx context.Context, arg DeleteTagsForDige
 }
 
 const getManifest = `-- name: GetManifest :one
-SELECT id, project_id, repository, digest, media_type, payload, size, created_at FROM oci_manifests
+SELECT id, project_id, repository, digest, media_type, payload, size, created_at, subject, artifact_type FROM oci_manifests
 WHERE project_id = ? AND repository = ? AND digest = ?
 `
 
@@ -109,6 +109,8 @@ func (q *Queries) GetManifest(ctx context.Context, arg GetManifestParams) (OciMa
 		&i.Payload,
 		&i.Size,
 		&i.CreatedAt,
+		&i.Subject,
+		&i.ArtifactType,
 	)
 	return i, err
 }
@@ -180,6 +182,58 @@ func (q *Queries) ListAllRepositories(ctx context.Context) ([]ListAllRepositorie
 			&i.ManifestCount,
 			&i.TagCount,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReferrers = `-- name: ListReferrers :many
+SELECT digest, media_type, size, artifact_type, payload
+FROM oci_manifests
+WHERE project_id = ? AND repository = ? AND subject = ?
+ORDER BY created_at DESC
+`
+
+type ListReferrersParams struct {
+	ProjectID  string `json:"project_id"`
+	Repository string `json:"repository"`
+	Subject    string `json:"subject"`
+}
+
+type ListReferrersRow struct {
+	Digest       string `json:"digest"`
+	MediaType    string `json:"media_type"`
+	Size         int64  `json:"size"`
+	ArtifactType string `json:"artifact_type"`
+	Payload      []byte `json:"payload"`
+}
+
+// Manifests whose subject is the given digest (a subject's signatures, SBOMs,
+// and other attestations) for the referrers API. Newest first.
+func (q *Queries) ListReferrers(ctx context.Context, arg ListReferrersParams) ([]ListReferrersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listReferrers, arg.ProjectID, arg.Repository, arg.Subject)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListReferrersRow{}
+	for rows.Next() {
+		var i ListReferrersRow
+		if err := rows.Scan(
+			&i.Digest,
+			&i.MediaType,
+			&i.Size,
+			&i.ArtifactType,
+			&i.Payload,
 		); err != nil {
 			return nil, err
 		}
@@ -318,24 +372,27 @@ func (q *Queries) ManifestExists(ctx context.Context, arg ManifestExistsParams) 
 }
 
 const upsertManifest = `-- name: UpsertManifest :exec
-INSERT INTO oci_manifests (id, project_id, repository, digest, media_type, payload, size, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO oci_manifests (id, project_id, repository, digest, media_type, payload, size, subject, artifact_type, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (project_id, repository, digest) DO NOTHING
 `
 
 type UpsertManifestParams struct {
-	ID         string `json:"id"`
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Digest     string `json:"digest"`
-	MediaType  string `json:"media_type"`
-	Payload    []byte `json:"payload"`
-	Size       int64  `json:"size"`
-	CreatedAt  string `json:"created_at"`
+	ID           string `json:"id"`
+	ProjectID    string `json:"project_id"`
+	Repository   string `json:"repository"`
+	Digest       string `json:"digest"`
+	MediaType    string `json:"media_type"`
+	Payload      []byte `json:"payload"`
+	Size         int64  `json:"size"`
+	Subject      string `json:"subject"`
+	ArtifactType string `json:"artifact_type"`
+	CreatedAt    string `json:"created_at"`
 }
 
 // Store a manifest by digest. Re-pushing identical content is a no-op, so an
-// image can be tagged repeatedly without duplicating the payload.
+// image can be tagged repeatedly without duplicating the payload. subject and
+// artifact_type are denormalized from the payload for the referrers API.
 func (q *Queries) UpsertManifest(ctx context.Context, arg UpsertManifestParams) error {
 	_, err := q.db.ExecContext(ctx, upsertManifest,
 		arg.ID,
@@ -345,6 +402,8 @@ func (q *Queries) UpsertManifest(ctx context.Context, arg UpsertManifestParams) 
 		arg.MediaType,
 		arg.Payload,
 		arg.Size,
+		arg.Subject,
+		arg.ArtifactType,
 		arg.CreatedAt,
 	)
 	return err

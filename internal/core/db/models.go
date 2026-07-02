@@ -30,14 +30,16 @@ type AuditLog struct {
 }
 
 type OciManifest struct {
-	ID         string `json:"id"`
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Digest     string `json:"digest"`
-	MediaType  string `json:"media_type"`
-	Payload    []byte `json:"payload"`
-	Size       int64  `json:"size"`
-	CreatedAt  string `json:"created_at"`
+	ID           string `json:"id"`
+	ProjectID    string `json:"project_id"`
+	Repository   string `json:"repository"`
+	Digest       string `json:"digest"`
+	MediaType    string `json:"media_type"`
+	Payload      []byte `json:"payload"`
+	Size         int64  `json:"size"`
+	CreatedAt    string `json:"created_at"`
+	Subject      string `json:"subject"`
+	ArtifactType string `json:"artifact_type"`
 }
 
 type OciTag struct {

@@ -46,6 +46,9 @@ type Querier interface {
 	// Instance-wide recent mutations for the dashboard feed, joined to the project
 	// they touched (project_id is nullable for instance-level events).
 	ListRecentActivity(ctx context.Context, limit int64) ([]ListRecentActivityRow, error)
+	// Manifests whose subject is the given digest (a subject's signatures, SBOMs,
+	// and other attestations) for the referrers API. Newest first.
+	ListReferrers(ctx context.Context, arg ListReferrersParams) ([]ListReferrersRow, error)
 	// Keyset pagination on `tag`: the empty string sorts before any tag, so the
 	// first page and subsequent pages share one query.
 	ListTags(ctx context.Context, arg ListTagsParams) ([]string, error)
@@ -54,7 +57,8 @@ type Querier interface {
 	ListTagsWithManifest(ctx context.Context, arg ListTagsWithManifestParams) ([]ListTagsWithManifestRow, error)
 	ManifestExists(ctx context.Context, arg ManifestExistsParams) (int64, error)
 	// Store a manifest by digest. Re-pushing identical content is a no-op, so an
-	// image can be tagged repeatedly without duplicating the payload.
+	// image can be tagged repeatedly without duplicating the payload. subject and
+	// artifact_type are denormalized from the payload for the referrers API.
 	UpsertManifest(ctx context.Context, arg UpsertManifestParams) error
 	UpsertTag(ctx context.Context, arg UpsertTagParams) error
 }
