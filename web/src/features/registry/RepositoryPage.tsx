@@ -1,10 +1,12 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Breadcrumb, Card, CopyButton, EmptyState, PageHeader } from '../../components/ui';
-import { LayersIcon, RegistryIcon } from '../../components/icons';
+import { LayersIcon, RegistryIcon, TrashIcon } from '../../components/icons';
 import { cx } from '../../lib/cx';
 import { formatBytes, formatDate, shortDigest } from '../../lib/format';
 import type { IndexEntry, Layer, ManifestDetail, ManifestKind, TagSummary } from '../../lib/types';
+import { DeleteDialog, type DeleteTarget } from './DeleteDialog';
 import { useManifest, useRepoTags } from './useRegistry';
 
 // Repository detail: the tags in a repository and, for the selected tag, the
@@ -16,13 +18,38 @@ export function RepositoryPage() {
   const repository = params['*'] ?? '';
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const { tags, state, error } = useRepoTags(project, repository);
+  const { tags, state, error, reload } = useRepoTags(project, repository);
 
   const selected = searchParams.get('ref') ?? tags[0]?.tag;
   const { manifest, state: manifestState } = useManifest(project, repository, selected);
 
+  const [pendingDelete, setPendingDelete] = useState<DeleteTarget | null>(null);
+
   function select(ref: string) {
     setSearchParams({ ref }, { replace: true });
+  }
+
+  function requestDeleteTag(tag: TagSummary) {
+    setPendingDelete({ mode: 'tag', label: tag.tag, reference: tag.tag });
+  }
+
+  function requestDeleteManifest() {
+    if (!manifest) {
+      return;
+    }
+    const affectedTags = tags.filter((t) => t.digest === manifest.digest).length;
+    setPendingDelete({
+      mode: 'manifest',
+      label: shortDigest(manifest.digest),
+      reference: manifest.digest,
+      affectedTags,
+    });
+  }
+
+  function afterDeleted() {
+    setPendingDelete(null);
+    setSearchParams({}, { replace: true }); // reset selection to the first remaining tag
+    void reload();
   }
 
   if (!project || !repository) {
@@ -56,15 +83,26 @@ export function RepositoryPage() {
 
       {state === 'ready' && tags.length > 0 ? (
         <div className="space-y-5">
-          <TagsTable tags={tags} selected={selected} onSelect={select} />
+          <TagsTable tags={tags} selected={selected} onSelect={select} onDelete={requestDeleteTag} />
           <ManifestPanel
             project={project}
             repository={repository}
             reference={selected}
             manifest={manifest}
             loading={manifestState === 'loading'}
+            onDelete={requestDeleteManifest}
           />
         </div>
+      ) : null}
+
+      {pendingDelete ? (
+        <DeleteDialog
+          project={project}
+          repository={repository}
+          target={pendingDelete}
+          onClose={() => setPendingDelete(null)}
+          onDeleted={afterDeleted}
+        />
       ) : null}
     </div>
   );
@@ -76,10 +114,12 @@ function TagsTable({
   tags,
   selected,
   onSelect,
+  onDelete,
 }: {
   tags: TagSummary[];
   selected?: string;
   onSelect: (ref: string) => void;
+  onDelete: (tag: TagSummary) => void;
 }) {
   return (
     <Card className="overflow-hidden">
@@ -92,6 +132,9 @@ function TagsTable({
             <Th className="text-right">Layers</Th>
             <Th>Pushed</Th>
             <Th>Digest</Th>
+            <Th>
+              <span className="sr-only">Actions</span>
+            </Th>
           </tr>
         </thead>
         <tbody>
@@ -123,6 +166,19 @@ function TagsTable({
                 <Td>
                   <span className="font-mono text-xs text-slate-400">{shortDigest(tag.digest)}</span>
                 </Td>
+                <Td className="text-right">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(tag);
+                    }}
+                    aria-label={`Delete tag ${tag.tag}`}
+                    className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                  >
+                    <TrashIcon className="h-4 w-4" />
+                  </button>
+                </Td>
               </tr>
             );
           })}
@@ -140,12 +196,14 @@ function ManifestPanel({
   reference,
   manifest,
   loading,
+  onDelete,
 }: {
   project: string;
   repository: string;
   reference?: string;
   manifest?: ManifestDetail;
   loading: boolean;
+  onDelete: () => void;
 }) {
   if (loading) {
     return <Card className="h-48 animate-pulse bg-slate-50" />;
@@ -166,11 +224,21 @@ function ManifestPanel({
           <h2 className="font-semibold text-slate-900">Manifest</h2>
           <KindBadge kind={manifest.kind} />
         </div>
-        {manifest.kind === 'image' ? (
-          <span className="text-sm text-slate-500">
-            Total size <span className="font-medium text-slate-700">{formatBytes(manifest.totalSize)}</span>
-          </span>
-        ) : null}
+        <div className="flex items-center gap-3">
+          {manifest.kind === 'image' ? (
+            <span className="text-sm text-slate-500">
+              Total size <span className="font-medium text-slate-700">{formatBytes(manifest.totalSize)}</span>
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={onDelete}
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-inset ring-red-200 transition-colors hover:bg-red-50"
+          >
+            <TrashIcon className="h-4 w-4" />
+            Delete manifest
+          </button>
+        </div>
       </div>
 
       <dl className="mt-4 grid gap-3 sm:grid-cols-2">

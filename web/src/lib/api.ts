@@ -97,4 +97,12 @@ export const api = {
     request<ManifestDetail>(
       `/registry/${encodeURIComponent(project)}/manifests${query({ repository, reference })}`,
     ),
+
+  // Delete a tag (reference is a tag) or a whole manifest and its tags
+  // (reference is a digest).
+  deleteManifest: (project: string, repository: string, reference: string): Promise<void> =>
+    request<undefined>(
+      `/registry/${encodeURIComponent(project)}/manifests${query({ repository, reference })}`,
+      { method: 'DELETE' },
+    ),
 };
