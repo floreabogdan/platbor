@@ -6,12 +6,12 @@ Each phase ships something demoable. "Done" means: works via the real client (do
 
 Goal: one binary that boots, authenticates, and serves the UI shell.
 
-- [ ] Repo scaffolding: Go module, `cmd/platbor`, config loading (file + env), CI (lint, test, build)
-- [ ] SQLite + migrations + sqlc wiring; Postgres behind the same interface
+- [x] Repo scaffolding: Go module, `cmd/platbor`, config loading (file + env), CI (lint, test, build)
+- [x] SQLite + migrations + sqlc wiring; Postgres behind the same interface (SQLite done; Postgres seam present, driver not yet implemented)
 - [ ] Blob store: `fs` driver, upload sessions, sha256 verification
 - [ ] Auth: local users, sessions, API tokens, projects + roles, instance admin bootstrap
-- [ ] Audit log table + middleware
-- [ ] React app shell: login, sidebar layout, projects list (per DESIGN-SYSTEM.md), embedded via `go:embed`
+- [~] Audit log table + middleware (table + transactional writes on project create done; generic middleware pending)
+- [~] React app shell: sidebar layout + projects list (per DESIGN-SYSTEM.md) wired to the API, embedded via `go:embed` (login pending auth)
 - [ ] `docker run` quickstart works end to end
 
 **Demo:** log in, create a project, create an API token.
