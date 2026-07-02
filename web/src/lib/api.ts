@@ -3,6 +3,9 @@ import type {
   CreateTokenRequest,
   CreateTokenResponse,
   ListProjectsResponse,
+  ListRepositoriesResponse,
+  ListTagsResponse,
+  ManifestDetail,
   Problem,
   Project,
   Token,
@@ -82,4 +85,16 @@ export const api = {
 
   deleteToken: (id: string): Promise<void> =>
     request<undefined>(`/tokens/${id}`, { method: 'DELETE' }),
+
+  // Registry browser (read-only view of what was pushed over /v2)
+  listRepositories: (): Promise<ListRepositoriesResponse> =>
+    request<ListRepositoriesResponse>(`/registry/repositories`),
+
+  listRepoTags: (project: string, repository: string): Promise<ListTagsResponse> =>
+    request<ListTagsResponse>(`/registry/${encodeURIComponent(project)}/tags${query({ repository })}`),
+
+  getManifest: (project: string, repository: string, reference: string): Promise<ManifestDetail> =>
+    request<ManifestDetail>(
+      `/registry/${encodeURIComponent(project)}/manifests${query({ repository, reference })}`,
+    ),
 };

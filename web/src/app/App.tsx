@@ -5,6 +5,8 @@ import { LoginPage } from '../features/auth/LoginPage';
 import { DashboardPage } from '../features/dashboard/DashboardPage';
 import { ProjectsPage } from '../features/projects/ProjectsPage';
 import { ProfilePage } from '../features/profile/ProfilePage';
+import { RegistryPage } from '../features/registry/RegistryPage';
+import { RepositoryPage } from '../features/registry/RepositoryPage';
 import { PlaceholderPage } from '../features/placeholder/PlaceholderPage';
 
 // Route table. Feature pages live under src/features/<name>/ and never import
@@ -38,10 +40,8 @@ function Gate() {
       <Route element={<Layout />}>
         <Route index element={<DashboardPage />} />
         <Route path="projects" element={<ProjectsPage />} />
-        <Route
-          path="registry"
-          element={<PlaceholderPage title="Registry" subtitle="Container images and packages land in Phase 1." />}
-        />
+        <Route path="registry" element={<RegistryPage />} />
+        <Route path="registry/:project/*" element={<RepositoryPage />} />
         <Route
           path="catalog"
           element={<PlaceholderPage title="Catalog" subtitle="Components, owners, and dependencies land in Phase 3." />}

@@ -1,0 +1,95 @@
+import { useCallback, useEffect, useState } from 'react';
+import { api } from '../../lib/api';
+import type { ManifestDetail, Repository, TagSummary } from '../../lib/types';
+
+// Server state lives in these hooks, one per browse level (KISS —
+// docs/CODING-STANDARDS.md): repositories → tags → manifest.
+type LoadState = 'loading' | 'ready' | 'error';
+
+/** useRepositories loads the global, project-grouped repository index. */
+export function useRepositories() {
+  const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.listRepositories();
+      setRepositories(res.repositories);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load repositories');
+      setState('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { repositories, state, error, reload };
+}
+
+/** useRepoTags loads one repository's tags (with per-tag manifest summary). */
+export function useRepoTags(project: string, repository: string) {
+  const [tags, setTags] = useState<TagSummary[]>([]);
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.listRepoTags(project, repository);
+      setTags(res.tags);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load tags');
+      setState('error');
+    }
+  }, [project, repository]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { tags, state, error, reload };
+}
+
+/** useManifest loads the detail for the selected reference. With no reference it
+ *  stays idle (ready, empty) so the panel can prompt for a selection. */
+export function useManifest(project: string, repository: string, reference: string | undefined) {
+  const [manifest, setManifest] = useState<ManifestDetail>();
+  const [state, setState] = useState<LoadState>('ready');
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    if (!reference) {
+      setManifest(undefined);
+      setState('ready');
+      return;
+    }
+    let active = true;
+    setState('loading');
+    setError(undefined);
+    api
+      .getManifest(project, repository, reference)
+      .then((m) => {
+        if (active) {
+          setManifest(m);
+          setState('ready');
+        }
+      })
+      .catch((err: unknown) => {
+        if (active) {
+          setError(err instanceof Error ? err.message : 'Failed to load manifest');
+          setState('error');
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [project, repository, reference]);
+
+  return { manifest, state, error };
+}

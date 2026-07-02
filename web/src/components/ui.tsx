@@ -1,9 +1,11 @@
 // Shared UI primitives — the only place these visual patterns live (DRY).
 // Every class here traces to a recipe in docs/DESIGN-SYSTEM.md.
-import { forwardRef, useEffect, useRef } from 'react';
+import { forwardRef, useEffect, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { cx } from '../lib/cx';
+import { CheckIcon, ChevronRightIcon, CopyIcon } from './icons';
 
 /** Card — the standard raised surface. */
 export const Card = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
@@ -110,6 +112,70 @@ export function Button({
       )}
       {...props}
     />
+  );
+}
+
+/** Crumb — one segment of a Breadcrumb: a link when `to` is set, else plain
+ *  text (the current page). */
+export interface Crumb {
+  label: string;
+  to?: string;
+}
+
+/** Breadcrumb — the trail that keeps deep views (registry → repo → tag)
+ *  oriented. The last crumb is the current location and is never a link. */
+export function Breadcrumb({ items }: { items: Crumb[] }) {
+  return (
+    <nav aria-label="Breadcrumb" className="mb-4 flex items-center gap-1 text-sm">
+      {items.map((item, i) => {
+        const last = i === items.length - 1;
+        return (
+          <span key={`${item.label}-${String(i)}`} className="flex items-center gap-1">
+            {i > 0 ? <ChevronRightIcon className="h-4 w-4 text-slate-300" /> : null}
+            {item.to && !last ? (
+              <Link to={item.to} className="text-slate-500 transition-colors hover:text-teal-700">
+                {item.label}
+              </Link>
+            ) : (
+              <span className={cx(last ? 'font-medium text-slate-900' : 'text-slate-500')}>
+                {item.label}
+              </span>
+            )}
+          </span>
+        );
+      })}
+    </nav>
+  );
+}
+
+/** CopyButton — copies `value` to the clipboard and confirms with a check for a
+ *  moment. Used for pull commands and digests. */
+export function CopyButton({ value, label = 'Copy', className }: { value: string; label?: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard can be unavailable (insecure context); fail quietly.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      aria-label={label}
+      className={cx(
+        'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700',
+        className,
+      )}
+    >
+      {copied ? <CheckIcon className="h-3.5 w-3.5 text-emerald-600" /> : <CopyIcon className="h-3.5 w-3.5" />}
+      {copied ? 'Copied' : label}
+    </button>
   );
 }
 

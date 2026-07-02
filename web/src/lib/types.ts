@@ -54,3 +54,65 @@ export interface Problem {
   status: number;
   detail?: string;
 }
+
+// --- Registry browser ---
+
+/** A manifest is either a single-platform image or a multi-platform index. */
+export type ManifestKind = 'image' | 'index';
+
+/** Repository — one artifact repository in a project (registry index). */
+export interface Repository {
+  projectKey: string;
+  projectName: string;
+  repository: string;
+  tagCount: number;
+  manifestCount: number;
+  updatedAt: string;
+}
+
+export interface ListRepositoriesResponse {
+  repositories: Repository[];
+}
+
+/** TagSummary — a tag with the media type and size of the manifest it points at.
+ *  `count` is the layer count for an image, or the platform count for an index. */
+export interface TagSummary {
+  tag: string;
+  digest: string;
+  mediaType: string;
+  kind: ManifestKind;
+  size: number;
+  count: number;
+  pushedAt: string;
+}
+
+export interface ListTagsResponse {
+  repository: string;
+  tags: TagSummary[];
+}
+
+/** Layer — a config or layer blob referenced by an image manifest. */
+export interface Layer {
+  mediaType: string;
+  digest: string;
+  size: number;
+}
+
+/** IndexEntry — a child manifest referenced by a multi-platform index. */
+export interface IndexEntry {
+  mediaType: string;
+  digest: string;
+  size: number;
+  platform?: string;
+}
+
+/** ManifestDetail — the full detail of one manifest (image or index). */
+export interface ManifestDetail {
+  digest: string;
+  mediaType: string;
+  kind: ManifestKind;
+  totalSize: number;
+  config?: Layer;
+  layers: Layer[];
+  manifests: IndexEntry[];
+}
