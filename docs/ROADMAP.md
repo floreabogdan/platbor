@@ -8,7 +8,7 @@ Goal: one binary that boots, authenticates, and serves the UI shell.
 
 - [x] Repo scaffolding: Go module, `cmd/platbor`, config loading (file + env), CI (lint, test, build)
 - [x] SQLite + migrations + sqlc wiring; Postgres behind the same interface (SQLite done; Postgres seam present, driver not yet implemented)
-- [ ] Blob store: `fs` driver, upload sessions, sha256 verification
+- [x] Blob store: `fs` driver, upload sessions, sha256 verification (content-addressable, resumable, dedup; served to a consumer in Phase 1, GC later)
 - [~] Auth: local users, sessions, instance admin bootstrap, and API tokens (bearer auth) done; project roles/RBAC pending
 - [~] Audit log table + middleware (table + transactional writes with the authenticated actor done; generic middleware pending)
 - [x] React app shell: login, sidebar layout, projects list (per DESIGN-SYSTEM.md) wired to the API, embedded via `go:embed`
