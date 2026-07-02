@@ -1,0 +1,10 @@
+# Normalize line endings to LF for all text files so Windows checkouts don't
+# introduce CRLF churn that fights gofmt/prettier and the Linux CI runners.
+* text=auto eol=lf
+
+# Binary assets — never touch.
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.woff  binary
+*.woff2 binary
