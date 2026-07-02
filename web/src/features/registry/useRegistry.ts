@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
-import type { ManifestDetail, Repository, TagSummary } from '../../lib/types';
+import type { ManifestDetail, Referrer, Repository, TagSummary } from '../../lib/types';
 
 // Server state lives in these hooks, one per browse level (KISS —
 // docs/CODING-STANDARDS.md): repositories → tags → manifest.
@@ -92,4 +92,35 @@ export function useManifest(project: string, repository: string, reference: stri
   }, [project, repository, reference]);
 
   return { manifest, state, error };
+}
+
+/** useReferrers loads the artifacts (signatures, SBOMs) attached to a manifest.
+ *  With no subject it stays idle so the panel simply shows nothing. */
+export function useReferrers(project: string, repository: string, subject: string | undefined) {
+  const [referrers, setReferrers] = useState<Referrer[]>([]);
+
+  useEffect(() => {
+    if (!subject) {
+      setReferrers([]);
+      return;
+    }
+    let active = true;
+    api
+      .listReferrers(project, repository, subject)
+      .then((res) => {
+        if (active) {
+          setReferrers(res.referrers);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setReferrers([]);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [project, repository, subject]);
+
+  return referrers;
 }

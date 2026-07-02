@@ -5,9 +5,9 @@ import { Breadcrumb, Card, CopyButton, EmptyState, PageHeader } from '../../comp
 import { LayersIcon, RegistryIcon, TrashIcon } from '../../components/icons';
 import { cx } from '../../lib/cx';
 import { formatBytes, formatDate, shortDigest } from '../../lib/format';
-import type { IndexEntry, Layer, ManifestDetail, ManifestKind, TagSummary } from '../../lib/types';
+import type { IndexEntry, Layer, ManifestDetail, ManifestKind, Referrer, TagSummary } from '../../lib/types';
 import { DeleteDialog, type DeleteTarget } from './DeleteDialog';
-import { useManifest, useRepoTags } from './useRegistry';
+import { useManifest, useReferrers, useRepoTags } from './useRegistry';
 
 // Repository detail: the tags in a repository and, for the selected tag, the
 // manifest it points at — media type, layers, sizes, and a copy-paste pull
@@ -205,6 +205,10 @@ function ManifestPanel({
   loading: boolean;
   onDelete: () => void;
 }) {
+  // Hooks run before any early return (rules of hooks); an absent digest keeps
+  // this idle.
+  const referrers = useReferrers(project, repository, manifest?.digest);
+
   if (loading) {
     return <Card className="h-48 animate-pulse bg-slate-50" />;
   }
@@ -258,7 +262,72 @@ function ManifestPanel({
       ) : (
         <PlatformsTable manifests={manifest.manifests} />
       )}
+
+      {referrers.length > 0 ? <ReferrersSection referrers={referrers} /> : null}
     </Card>
+  );
+}
+
+// referrerLabel maps a known artifact type to a friendly noun, falling back to
+// the raw type so unknown attestations are still legible.
+function referrerLabel(artifactType?: string): string {
+  if (!artifactType) {
+    return 'Artifact';
+  }
+  const t = artifactType.toLowerCase();
+  if (t.includes('cosign') && t.includes('sig')) {
+    return 'Signature';
+  }
+  if (t.includes('sbom') || t.includes('spdx') || t.includes('cyclonedx')) {
+    return 'SBOM';
+  }
+  if (t.includes('cosign') || t.includes('sig')) {
+    return 'Signature';
+  }
+  if (t.includes('attestation') || t.includes('in-toto')) {
+    return 'Attestation';
+  }
+  return artifactType;
+}
+
+function ReferrersSection({ referrers }: { referrers: Referrer[] }) {
+  return (
+    <div className="mt-6">
+      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+        {referrers.length} {referrers.length === 1 ? 'referrer' : 'referrers'}
+        <span className="ml-1 normal-case text-slate-300">· signatures, SBOMs & attestations</span>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-slate-200/80">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200/80 text-left text-xs uppercase tracking-wide text-slate-400">
+              <Th>Type</Th>
+              <Th>Artifact type</Th>
+              <Th>Digest</Th>
+              <Th className="text-right">Size</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {referrers.map((ref, i) => (
+              <tr key={`${ref.digest}-${String(i)}`} className="border-b border-slate-100 last:border-0">
+                <Td>
+                  <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+                    {referrerLabel(ref.artifactType)}
+                  </span>
+                </Td>
+                <Td>
+                  <span className="font-mono text-xs text-slate-400">{ref.artifactType || '—'}</span>
+                </Td>
+                <Td>
+                  <span className="font-mono text-xs text-slate-600">{shortDigest(ref.digest)}</span>
+                </Td>
+                <Td className="text-right tabular-nums text-slate-600">{formatBytes(ref.size)}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

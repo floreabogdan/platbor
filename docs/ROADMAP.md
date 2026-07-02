@@ -20,7 +20,7 @@ Goal: one binary that boots, authenticates, and serves the UI shell.
 
 Goal: a real container registry. This is the hardest protocol and the anchor feature.
 
-- [~] OCI Distribution Spec v1.1: blob + manifest + tag API done (resumable/chunked + monolithic upload, pull, existence, digest verification, manifest push/pull by tag or digest with blob-reference validation, tag listing + deletion, all under `/v2`); referrers next
+- [~] OCI Distribution Spec v1.1: blob + manifest + tag + referrers API done (resumable/chunked + monolithic upload, pull, existence, digest verification, manifest push/pull by tag or digest with blob-reference validation, tag listing + deletion, and the referrers API with artifactType filtering, all under `/v2`)
 - [~] Auth: HTTP Basic challenge on `/v2` done (password or PAT); bearer-token JWT flow later
 - [~] Tag listing + deletion done (paginated `tags/list`, manifest/tag delete); per-repo storage accounting pending
 - [ ] Pull-through proxy repo type (Docker Hub, ghcr.io) with cache

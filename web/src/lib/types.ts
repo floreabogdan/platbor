@@ -117,6 +117,20 @@ export interface ManifestDetail {
   manifests: IndexEntry[];
 }
 
+/** Referrer — an artifact attached to a manifest via its subject field
+ *  (signature, SBOM, attestation). */
+export interface Referrer {
+  digest: string;
+  mediaType: string;
+  size: number;
+  artifactType?: string;
+  annotations?: Record<string, string>;
+}
+
+export interface ListReferrersResponse {
+  referrers: Referrer[];
+}
+
 // --- Dashboard ---
 
 /** DashboardSummary — coarse instance counts. */

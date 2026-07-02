@@ -4,6 +4,7 @@ import type {
   CreateTokenResponse,
   DashboardResponse,
   ListProjectsResponse,
+  ListReferrersResponse,
   ListRepositoriesResponse,
   ListTagsResponse,
   ManifestDetail,
@@ -105,6 +106,11 @@ export const api = {
     request<undefined>(
       `/registry/${encodeURIComponent(project)}/manifests${query({ repository, reference })}`,
       { method: 'DELETE' },
+    ),
+
+  listReferrers: (project: string, repository: string, subject: string): Promise<ListReferrersResponse> =>
+    request<ListReferrersResponse>(
+      `/registry/${encodeURIComponent(project)}/referrers${query({ repository, subject })}`,
     ),
 
   // Dashboard
