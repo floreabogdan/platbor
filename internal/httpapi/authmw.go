@@ -4,33 +4,61 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/platbor/platbor/internal/core/auth"
 )
 
-// loadSession resolves the session cookie (if any) and attaches the user to the
-// request context. A missing or invalid cookie is not an error here — requests
-// simply proceed anonymously, and requireUser decides what needs a login.
-func loadSession(svc *auth.Service, log *slog.Logger) func(http.Handler) http.Handler {
+// authenticate attaches the user to the request context using either an
+// `Authorization: Bearer <token>` header (machines/CLI) or the session cookie
+// (browsers). A missing or invalid credential is not an error here — requests
+// proceed anonymously, and requireUser decides what needs a login.
+func authenticate(svc *auth.Service, log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			cookie, err := r.Cookie(sessionCookieName)
-			if err != nil {
-				next.ServeHTTP(w, r)
-				return
+			if user, ok := resolveIdentity(r, svc, log); ok {
+				r = r.WithContext(withUser(r.Context(), user))
 			}
-
-			user, err := svc.ResolveSession(r.Context(), cookie.Value)
-			if err != nil {
-				if !errors.Is(err, auth.ErrNoSession) {
-					log.Error("resolving session", slog.String("error", err.Error()))
-				}
-				next.ServeHTTP(w, r)
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(withUser(r.Context(), user)))
+			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// resolveIdentity tries a bearer token first, then the session cookie.
+func resolveIdentity(r *http.Request, svc *auth.Service, log *slog.Logger) (auth.User, bool) {
+	if token, ok := bearerToken(r); ok {
+		user, err := svc.AuthenticateToken(r.Context(), token)
+		if err != nil {
+			if !errors.Is(err, auth.ErrInvalidToken) {
+				log.Error("authenticating token", slog.String("error", err.Error()))
+			}
+			return auth.User{}, false
+		}
+		return user, true
+	}
+
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return auth.User{}, false
+	}
+	user, err := svc.ResolveSession(r.Context(), cookie.Value)
+	if err != nil {
+		if !errors.Is(err, auth.ErrNoSession) {
+			log.Error("resolving session", slog.String("error", err.Error()))
+		}
+		return auth.User{}, false
+	}
+	return user, true
+}
+
+// bearerToken extracts a token from an Authorization: Bearer header.
+func bearerToken(r *http.Request) (string, bool) {
+	const prefix = "Bearer "
+	header := r.Header.Get("Authorization")
+	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return "", false
+	}
+	return header[len(prefix):], true
 }
 
 // requireUser rejects requests that have no authenticated user in context.

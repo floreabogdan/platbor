@@ -112,3 +112,75 @@ func TestResolveUnknownTokenIsNoSession(t *testing.T) {
 		t.Errorf("got %v, want ErrNoSession", err)
 	}
 }
+
+// bootstrapUser returns the admin created for a fresh service.
+func bootstrapUser(t *testing.T, svc *auth.Service) auth.User {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := svc.Bootstrap(ctx, "admin", "correct-horse"); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	user, err := svc.Authenticate(ctx, "admin", "correct-horse")
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	return user
+}
+
+func TestTokenLifecycle(t *testing.T) {
+	svc := newService(t)
+	ctx := context.Background()
+	user := bootstrapUser(t, svc)
+
+	raw, tok, err := svc.CreateToken(ctx, user.ID, "ci", 0)
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+	if tok.ExpiresAt != nil {
+		t.Errorf("ttl 0 should mean no expiry, got %v", tok.ExpiresAt)
+	}
+	if len(raw) < 20 || raw[:4] != "pbt_" {
+		t.Fatalf("unexpected raw token %q", raw)
+	}
+
+	// The raw token authenticates back to its owner.
+	got, err := svc.AuthenticateToken(ctx, raw)
+	if err != nil {
+		t.Fatalf("AuthenticateToken: %v", err)
+	}
+	if got.ID != user.ID {
+		t.Errorf("token resolved to %q, want %q", got.ID, user.ID)
+	}
+
+	// It appears in the list, without exposing the secret.
+	tokens, err := svc.ListTokens(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("ListTokens: %v", err)
+	}
+	if len(tokens) != 1 || tokens[0].Name != "ci" {
+		t.Fatalf("unexpected token list: %+v", tokens)
+	}
+
+	// Revoking it makes the raw token stop working.
+	if err := svc.DeleteToken(ctx, user.ID, tok.ID); err != nil {
+		t.Fatalf("DeleteToken: %v", err)
+	}
+	if _, err := svc.AuthenticateToken(ctx, raw); err != auth.ErrInvalidToken {
+		t.Errorf("after delete: got %v, want ErrInvalidToken", err)
+	}
+}
+
+func TestDeleteUnknownTokenReturnsNotFound(t *testing.T) {
+	svc := newService(t)
+	user := bootstrapUser(t, svc)
+	if err := svc.DeleteToken(context.Background(), user.ID, "tok_does_not_exist"); err != auth.ErrTokenNotFound {
+		t.Errorf("got %v, want ErrTokenNotFound", err)
+	}
+}
+
+func TestAuthenticateUnknownTokenIsInvalid(t *testing.T) {
+	svc := newService(t)
+	if _, err := svc.AuthenticateToken(context.Background(), "pbt_bogus"); err != auth.ErrInvalidToken {
+		t.Errorf("got %v, want ErrInvalidToken", err)
+	}
+}

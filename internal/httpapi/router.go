@@ -27,7 +27,7 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 	// Application/automation API.
 	r.Route("/api/v1", func(r chi.Router) {
 		// Attach the authenticated user (if any) to every API request.
-		r.Use(loadSession(api.Auth, log))
+		r.Use(authenticate(api.Auth, log))
 		r.Get("/health", health)
 
 		ah := authHandler{svc: api.Auth, log: log, cookieSecure: api.CookieSecure}
@@ -39,9 +39,10 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 			})
 		})
 
-		// Domain routes require an authenticated user.
+		// Authenticated routes require a valid session or token.
 		r.Group(func(r chi.Router) {
 			r.Use(requireUser)
+			r.Route("/tokens", tokensHandler{svc: api.Auth, log: log}.mount)
 			r.Route("/projects", projectsHandler{svc: api.Projects, log: log}.mount)
 		})
 	})
