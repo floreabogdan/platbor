@@ -60,6 +60,13 @@ JOIN projects p ON p.id = m.project_id
 GROUP BY m.project_id, m.repository
 ORDER BY p.key ASC, m.repository ASC;
 
+-- name: CountRepositories :one
+-- Distinct repositories across all projects, for the dashboard summary.
+SELECT COUNT(*) FROM (SELECT DISTINCT project_id, repository FROM oci_manifests) AS repos;
+
+-- name: CountTags :one
+SELECT COUNT(*) FROM oci_tags;
+
 -- name: ListTagsWithManifest :many
 -- Tags in a repository joined to the manifest each points at, so the browser can
 -- show media type and size without a second round-trip. Newest push first.
