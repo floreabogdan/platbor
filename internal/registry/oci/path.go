@@ -59,6 +59,30 @@ func validName(name string) bool {
 	return name != "" && namePattern.MatchString(name)
 }
 
+// tagPattern is the distribution-spec tag grammar: an alphanumeric or underscore
+// followed by up to 127 more of the same plus '.' and '-'.
+// https://github.com/opencontainers/distribution-spec/blob/main/spec.md#pulling-manifests
+var tagPattern = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$`)
+
+// validTag reports whether ref is a well-formed tag.
+func validTag(ref string) bool { return tagPattern.MatchString(ref) }
+
+// isDigestRef reports whether a manifest reference is a digest rather than a
+// tag. Digests carry an "algorithm:" prefix; tags may not contain a colon, so
+// the presence of one is decisive.
+func isDigestRef(ref string) bool { return strings.Contains(ref, ":") }
+
+// splitName divides an OCI name into its leading project component and the
+// remaining repository path. A single-component name has no project and returns
+// ok=false.
+func splitName(name string) (project, repo string, ok bool) {
+	project, repo, found := strings.Cut(name, "/")
+	if !found || project == "" || repo == "" {
+		return "", "", false
+	}
+	return project, repo, true
+}
+
 // parseContentRange parses a "start-end" Content-Range value used by chunked
 // blob uploads, returning the start offset.
 func parseContentRange(v string) (start int64, ok bool) {

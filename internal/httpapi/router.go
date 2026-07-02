@@ -53,7 +53,7 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 	// Format-protocol routes. Each adapter owns its URL prefix and its own
 	// protocol-native auth and errors.
 	r.Route("/v2", func(sub chi.Router) {
-		oci.New().Mount(sub, registry.Deps{Blobs: api.Blobs, Auth: api.Auth, Log: log})
+		oci.New().Mount(sub, registry.Deps{Blobs: api.Blobs, Auth: api.Auth, DB: api.DB, Log: log})
 	})
 
 	// Everything else falls through to the embedded SPA.

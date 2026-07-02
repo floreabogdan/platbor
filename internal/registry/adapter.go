@@ -5,6 +5,7 @@
 package registry
 
 import (
+	"database/sql"
 	"log/slog"
 
 	"github.com/go-chi/chi/v5"
@@ -14,11 +15,16 @@ import (
 )
 
 // Deps is exactly what an adapter needs from the core: blob storage,
-// authentication, and a logger. It is deliberately small (interface
-// segregation) and grows only when an adapter proves a need.
+// authentication, the metadata database, and a logger. It is deliberately small
+// (interface segregation) and grows only when an adapter proves a need.
+//
+// DB is the shared metadata store. An adapter that persists format-specific
+// tables (OCI manifests/tags, npm dist-tags, ...) owns its own project-scoped
+// queries through sqlc — core domain services stay format-agnostic.
 type Deps struct {
 	Blobs blob.Store
 	Auth  *auth.Service
+	DB    *sql.DB
 	Log   *slog.Logger
 }
 

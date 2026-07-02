@@ -9,15 +9,18 @@ import (
 // OCI distribution-spec error codes used by the blob API.
 // https://github.com/opencontainers/distribution-spec/blob/main/spec.md#error-codes
 const (
-	codeBlobUnknown       = "BLOB_UNKNOWN"
-	codeBlobUploadUnknown = "BLOB_UPLOAD_UNKNOWN"
-	codeBlobUploadInvalid = "BLOB_UPLOAD_INVALID"
-	codeDigestInvalid     = "DIGEST_INVALID"
-	codeNameInvalid       = "NAME_INVALID"
-	codeUnsupported       = "UNSUPPORTED"
-	codeUnauthorized      = "UNAUTHORIZED"
-	codeDenied            = "DENIED"
-	codeManifestUnknown   = "MANIFEST_UNKNOWN"
+	codeBlobUnknown         = "BLOB_UNKNOWN"
+	codeBlobUploadUnknown   = "BLOB_UPLOAD_UNKNOWN"
+	codeBlobUploadInvalid   = "BLOB_UPLOAD_INVALID"
+	codeDigestInvalid       = "DIGEST_INVALID"
+	codeNameInvalid         = "NAME_INVALID"
+	codeNameUnknown         = "NAME_UNKNOWN"
+	codeUnsupported         = "UNSUPPORTED"
+	codeUnauthorized        = "UNAUTHORIZED"
+	codeDenied              = "DENIED"
+	codeManifestUnknown     = "MANIFEST_UNKNOWN"
+	codeManifestInvalid     = "MANIFEST_INVALID"
+	codeManifestBlobUnknown = "MANIFEST_BLOB_UNKNOWN"
 )
 
 // ociError is one entry in the spec's error envelope.

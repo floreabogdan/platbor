@@ -77,6 +77,7 @@ func run() error {
 		Auth:         authSvc,
 		Projects:     project.NewService(sqlDB),
 		Blobs:        blobStore,
+		DB:           sqlDB,
 		CookieSecure: cfg.Auth.CookieSecure,
 	}
 

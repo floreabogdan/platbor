@@ -29,16 +29,22 @@ func (a *Adapter) Key() string { return "oci" }
 
 // Mount registers the /v2 routes. r is already scoped to /v2 by the caller.
 func (a *Adapter) Mount(r chi.Router, deps registry.Deps) {
-	h := &handler{blobs: deps.Blobs, auth: deps.Auth, log: deps.Log}
+	h := &handler{
+		blobs:     deps.Blobs,
+		auth:      deps.Auth,
+		manifests: newManifestStore(deps.DB),
+		log:       deps.Log,
+	}
 	r.Use(h.requireAuth)
 	r.Get("/", h.versionCheck)
 	r.Handle("/*", http.HandlerFunc(h.serve))
 }
 
 type handler struct {
-	blobs blob.Store
-	auth  *auth.Service
-	log   *slog.Logger
+	blobs     blob.Store
+	auth      *auth.Service
+	manifests *manifestStore
+	log       *slog.Logger
 }
 
 // versionCheck answers the GET /v2/ probe that clients use to detect a v2
@@ -61,8 +67,10 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 		h.serveUpload(w, r, p)
 	case opBlob:
 		h.serveBlob(w, r, p)
-	case opManifest, opTags:
-		writeError(w, h.log, http.StatusNotFound, codeUnsupported, "manifests and tags are not yet implemented")
+	case opManifest:
+		h.serveManifest(w, r, p)
+	case opTags:
+		h.serveTags(w, r, p)
 	default:
 		writeError(w, h.log, http.StatusNotFound, codeNameInvalid, "unsupported path")
 	}

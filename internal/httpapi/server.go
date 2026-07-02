@@ -6,6 +6,7 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -25,6 +26,9 @@ type API struct {
 	Auth     *auth.Service
 	Projects *project.Service
 	Blobs    blob.Store
+	// DB is the shared metadata store, handed to format adapters that persist
+	// their own project-scoped tables (e.g. OCI manifests/tags).
+	DB *sql.DB
 	// CookieSecure sets the Secure flag on the session cookie.
 	CookieSecure bool
 }
