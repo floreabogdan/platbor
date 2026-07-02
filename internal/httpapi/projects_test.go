@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"io/fs"
@@ -13,6 +14,7 @@ import (
 	"testing/fstest"
 
 	"github.com/platbor/platbor/internal/core/auth"
+	"github.com/platbor/platbor/internal/core/blob"
 	"github.com/platbor/platbor/internal/core/config"
 	"github.com/platbor/platbor/internal/core/db"
 	"github.com/platbor/platbor/internal/core/project"
@@ -32,6 +34,8 @@ func emptyAssets(t *testing.T) fs.FS {
 type testAPI struct {
 	handler http.Handler
 	cookie  *http.Cookie
+	db      *sql.DB
+	auth    *auth.Service
 }
 
 func newTestAPI(t *testing.T) testAPI {
@@ -62,9 +66,14 @@ func newTestAPI(t *testing.T) testAPI {
 		t.Fatalf("StartSession: %v", err)
 	}
 
+	store, err := blob.NewFS(cfg.DataDir)
+	if err != nil {
+		t.Fatalf("NewFS: %v", err)
+	}
+
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := newRouter(log, emptyAssets(t), API{Auth: authSvc, Projects: project.NewService(sqlDB), DB: sqlDB})
-	return testAPI{handler: handler, cookie: &http.Cookie{Name: sessionCookieName, Value: token}}
+	handler := newRouter(log, emptyAssets(t), API{Auth: authSvc, Projects: project.NewService(sqlDB), Blobs: store, DB: sqlDB})
+	return testAPI{handler: handler, cookie: &http.Cookie{Name: sessionCookieName, Value: token}, db: sqlDB, auth: authSvc}
 }
 
 func (a testAPI) do(t *testing.T, method, path, body string, authed bool) *httptest.ResponseRecorder {

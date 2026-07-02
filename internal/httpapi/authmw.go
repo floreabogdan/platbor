@@ -71,3 +71,20 @@ func requireUser(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// requireAdmin rejects requests whose user is not an instance admin. It layers
+// on top of requireUser, so an absent user is a 401 and a non-admin is a 403.
+func requireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, ok := userFromContext(r.Context())
+		if !ok {
+			writeProblem(w, http.StatusUnauthorized, "Not authenticated", "a valid session is required")
+			return
+		}
+		if !user.IsAdmin {
+			writeProblem(w, http.StatusForbidden, "Forbidden", "instance admin required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}

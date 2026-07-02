@@ -49,10 +49,11 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 			r.Route("/tokens", tokensHandler{svc: api.Auth, log: log}.mount)
 			r.Route("/projects", projectsHandler{svc: api.Projects, log: log}.mount)
 			r.Route("/registry", registryHandler{
-				browser:  oci.NewBrowser(api.DB),
-				manager:  oci.NewManager(api.DB),
-				projects: api.Projects,
-				log:      log,
+				browser:   oci.NewBrowser(api.DB),
+				manager:   oci.NewManager(api.DB),
+				collector: oci.NewCollector(api.Blobs, api.DB),
+				projects:  api.Projects,
+				log:       log,
 			}.mount)
 			r.Route("/dashboard", dashboardHandler{
 				projects: api.Projects,

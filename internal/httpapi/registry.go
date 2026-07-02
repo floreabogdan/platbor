@@ -13,19 +13,26 @@ import (
 	"github.com/platbor/platbor/internal/registry/oci"
 )
 
+// gcGracePeriod spares blobs written within this window of a sweep: they may be
+// freshly uploaded layers whose manifest has not been pushed yet.
+const gcGracePeriod = time.Hour
+
 // registryHandler serves the /api/v1/registry endpoints that back the UI
 // repository browser: a browsable view of what was pushed over /v2, plus
-// session-authenticated deletion.
+// session-authenticated deletion and admin garbage collection.
 type registryHandler struct {
-	browser  *oci.Browser
-	manager  *oci.Manager
-	projects *project.Service
-	log      *slog.Logger
+	browser   *oci.Browser
+	manager   *oci.Manager
+	collector *oci.Collector
+	projects  *project.Service
+	log       *slog.Logger
 }
 
 func (h registryHandler) mount(r chi.Router) {
 	// Global index across every project (grouped by project in the UI).
 	r.Get("/repositories", h.listRepositories)
+	// Garbage collection is instance-wide and destructive: admins only.
+	r.With(requireAdmin).Post("/gc", h.runGC) // ?dryRun=true|false
 	// Everything below is scoped to one project.
 	r.Route("/{project}", func(r chi.Router) {
 		r.Get("/tags", h.listTags)               // ?repository=<repo>
@@ -171,6 +178,34 @@ func (h registryHandler) getManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, h.log, http.StatusOK, toManifestResponse(view))
+}
+
+type gcResponse struct {
+	DryRun         bool  `json:"dryRun"`
+	Scanned        int   `json:"scanned"`
+	Deleted        int   `json:"deleted"`
+	ReclaimedBytes int64 `json:"reclaimedBytes"`
+	Kept           int   `json:"kept"`
+}
+
+// runGC marks blobs referenced by any manifest and sweeps the rest (older than
+// the grace window). ?dryRun=true reports what would be removed without deleting.
+func (h registryHandler) runGC(w http.ResponseWriter, r *http.Request) {
+	dryRun := r.URL.Query().Get("dryRun") == "true"
+
+	report, err := h.collector.Collect(r.Context(), actorFrom(r), gcGracePeriod, dryRun, time.Now().UTC())
+	if err != nil {
+		h.log.Error("garbage collection", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	writeJSON(w, h.log, http.StatusOK, gcResponse{
+		DryRun:         dryRun,
+		Scanned:        report.Scanned,
+		Deleted:        report.Deleted,
+		ReclaimedBytes: report.ReclaimedBytes,
+		Kept:           report.Kept,
+	})
 }
 
 // listReferrers returns the artifacts (signatures, SBOMs, attestations) whose
