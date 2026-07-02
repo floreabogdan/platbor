@@ -13,11 +13,10 @@ import (
 // newRouter assembles the top-level request tree. Ordering matters: operational
 // endpoints and the /api/v1 tree are registered before the SPA fallback so the
 // UI's catch-all never shadows a real API route.
-func newRouter(log *slog.Logger, assets fs.FS) http.Handler {
+func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
 	r.Use(requestLogger(log))
 	r.Use(middleware.Recoverer)
 
@@ -25,9 +24,10 @@ func newRouter(log *slog.Logger, assets fs.FS) http.Handler {
 	r.Get("/healthz", health)
 	r.Get("/readyz", health)
 
-	// Application/automation API. Fills out as features land.
+	// Application/automation API.
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", health)
+		r.Route("/projects", projectsHandler{svc: api.Projects, log: log}.mount)
 	})
 
 	// Everything else falls through to the embedded SPA.
@@ -53,14 +53,14 @@ func spaHandler(assets fs.FS) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		if path == "/" {
-			serveIndex(w, r, assets)
+			serveIndex(w, assets)
 			return
 		}
 
 		// A concrete asset (has an extension and exists) is served directly;
 		// anything else is a client-side route and gets index.html.
 		if _, err := fs.Stat(assets, cleanAssetPath(path)); errors.Is(err, fs.ErrNotExist) {
-			serveIndex(w, r, assets)
+			serveIndex(w, assets)
 			return
 		}
 		fileServer.ServeHTTP(w, r)
@@ -82,7 +82,7 @@ func cleanAssetPath(p string) string {
 
 // serveIndex writes index.html with no-cache so a freshly deployed SPA is picked
 // up immediately, while hashed assets under /assets remain cacheable.
-func serveIndex(w http.ResponseWriter, r *http.Request, assets fs.FS) {
+func serveIndex(w http.ResponseWriter, assets fs.FS) {
 	index, err := fs.ReadFile(assets, "index.html")
 	if err != nil {
 		http.Error(w, "UI not built", http.StatusInternalServerError)

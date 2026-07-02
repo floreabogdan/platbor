@@ -14,7 +14,14 @@ import (
 	"time"
 
 	"github.com/platbor/platbor/internal/core/config"
+	"github.com/platbor/platbor/internal/core/project"
 )
+
+// API bundles the application services the HTTP layer depends on. It grows one
+// field per domain as features land.
+type API struct {
+	Projects *project.Service
+}
 
 // Server owns the HTTP listener and its graceful-shutdown lifecycle.
 type Server struct {
@@ -23,13 +30,13 @@ type Server struct {
 	shutdown time.Duration
 }
 
-// NewServer builds the server from resolved config, a logger, and the embedded
-// UI assets. It does not begin listening; call Run for that.
-func NewServer(cfg config.Config, log *slog.Logger, assets fs.FS) *Server {
+// NewServer builds the server from resolved config, a logger, the embedded UI
+// assets, and the application services. It does not begin listening; call Run.
+func NewServer(cfg config.Config, log *slog.Logger, assets fs.FS, api API) *Server {
 	return &Server{
 		http: &http.Server{
 			Addr:              cfg.Addr,
-			Handler:           newRouter(log, assets),
+			Handler:           newRouter(log, assets, api),
 			ReadHeaderTimeout: 10 * time.Second,
 		},
 		log:      log,

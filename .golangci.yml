@@ -11,6 +11,9 @@ linters:
     - gosec
     - misspell
   exclusions:
+    paths:
+      # Frontend dependencies occasionally ship stray Go files (e.g. flatted).
+      - web/node_modules
     rules:
       # Tests may ignore errors and use weaker constructs for brevity.
       - path: _test\.go

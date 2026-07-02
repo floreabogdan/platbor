@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -26,11 +27,22 @@ type Config struct {
 	Addr string `yaml:"addr"`
 	// DataDir holds the SQLite database and the filesystem blob store.
 	DataDir string `yaml:"dataDir"`
+	// Database configures the metadata store.
+	Database DatabaseConfig `yaml:"database"`
 	// Log configures structured logging.
 	Log LogConfig `yaml:"log"`
 	// ShutdownTimeout bounds how long graceful shutdown waits for in-flight
 	// requests before forcing termination.
 	ShutdownTimeout time.Duration `yaml:"shutdownTimeout"`
+}
+
+// DatabaseConfig selects and locates the metadata store.
+type DatabaseConfig struct {
+	// Driver is sqlite (default, zero-config) or postgres.
+	Driver string `yaml:"driver"`
+	// DSN is the data source name. When empty, sqlite uses
+	// {DataDir}/platbor.db; postgres requires an explicit DSN.
+	DSN string `yaml:"dsn"`
 }
 
 // LogConfig configures the slog handler.
@@ -47,6 +59,10 @@ func Default() Config {
 	return Config{
 		Addr:    ":8080",
 		DataDir: "platbor-data",
+		Database: DatabaseConfig{
+			Driver: "sqlite",
+			DSN:    "",
+		},
 		Log: LogConfig{
 			Level:  "info",
 			Format: "text",
@@ -79,7 +95,9 @@ func Load(path string) (Config, error) {
 // applyFile overlays a YAML file onto cfg. A missing file is not an error —
 // zero-config is a supported mode — but an unreadable or malformed file is.
 func applyFile(cfg *Config, path string) error {
-	data, err := os.ReadFile(path)
+	// The config path is supplied by the operator via --config or a file we
+	// resolved ourselves; reading it is the intended behavior.
+	data, err := os.ReadFile(path) //nolint:gosec // operator-supplied config path
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -101,6 +119,12 @@ func applyEnv(cfg *Config) error {
 	}
 	if v, ok := lookup("DATA_DIR"); ok {
 		cfg.DataDir = v
+	}
+	if v, ok := lookup("DB_DRIVER"); ok {
+		cfg.Database.Driver = v
+	}
+	if v, ok := lookup("DB_DSN"); ok {
+		cfg.Database.DSN = v
 	}
 	if v, ok := lookup("LOG_LEVEL"); ok {
 		cfg.Log.Level = v
@@ -131,6 +155,7 @@ func lookup(key string) (string, bool) {
 var (
 	validLevels  = map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
 	validFormats = map[string]bool{"text": true, "json": true}
+	validDrivers = map[string]bool{"sqlite": true, "postgres": true}
 )
 
 // validate rejects any configuration that would fail confusingly at runtime,
@@ -144,6 +169,12 @@ func (c Config) validate() error {
 	}
 	if c.DataDir == "" {
 		return errors.New("dataDir must not be empty")
+	}
+	if !validDrivers[c.Database.Driver] {
+		return fmt.Errorf("database.driver %q must be one of sqlite, postgres", c.Database.Driver)
+	}
+	if c.Database.Driver == "postgres" && c.Database.DSN == "" {
+		return errors.New("database.dsn is required when database.driver is postgres")
 	}
 	if !validLevels[c.Log.Level] {
 		return fmt.Errorf("log.level %q must be one of debug, info, warn, error", c.Log.Level)
@@ -171,4 +202,10 @@ func parsePort(addr string) (int, error) {
 		return 0, fmt.Errorf("addr %q port out of range", addr)
 	}
 	return port, nil
+}
+
+// SQLitePath is the on-disk location of the SQLite database when no explicit
+// DSN is configured: {DataDir}/platbor.db.
+func (c Config) SQLitePath() string {
+	return filepath.Join(c.DataDir, "platbor.db")
 }

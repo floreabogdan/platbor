@@ -73,6 +73,8 @@ func TestValidateRejectsBadValues(t *testing.T) {
 		"bad level":         func(c *Config) { c.Log.Level = "verbose" },
 		"bad format":        func(c *Config) { c.Log.Format = "xml" },
 		"zero timeout":      func(c *Config) { c.ShutdownTimeout = 0 },
+		"bad db driver":     func(c *Config) { c.Database.Driver = "mysql" },
+		"postgres no dsn":   func(c *Config) { c.Database.Driver = "postgres"; c.Database.DSN = "" },
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {

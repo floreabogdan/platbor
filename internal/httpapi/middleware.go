@@ -19,7 +19,8 @@ func requestLogger(log *slog.Logger) func(http.Handler) http.Handler {
 			start := time.Now()
 
 			defer func() {
-				log.LogAttrs(r.Context(), slog.LevelInfo, "http request",
+				log.LogAttrs(
+					r.Context(), slog.LevelInfo, "http request",
 					slog.String("method", r.Method),
 					slog.String("path", r.URL.Path),
 					slog.Int("status", ww.Status()),

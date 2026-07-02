@@ -13,6 +13,8 @@ import (
 	"syscall"
 
 	"github.com/platbor/platbor/internal/core/config"
+	"github.com/platbor/platbor/internal/core/db"
+	"github.com/platbor/platbor/internal/core/project"
 	"github.com/platbor/platbor/internal/httpapi"
 	"github.com/platbor/platbor/web"
 )
@@ -49,8 +51,22 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	sqlDB, err := db.Open(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("opening database: %w", err)
+	}
+	defer func() { _ = sqlDB.Close() }()
+
+	if err := db.Migrate(ctx, sqlDB, log); err != nil {
+		return fmt.Errorf("running migrations: %w", err)
+	}
+
+	api := httpapi.API{
+		Projects: project.NewService(sqlDB),
+	}
+
 	log.Info("starting platbor", slog.String("addr", cfg.Addr), slog.String("dataDir", cfg.DataDir))
-	return httpapi.NewServer(cfg, log, assets).Run(ctx)
+	return httpapi.NewServer(cfg, log, assets, api).Run(ctx)
 }
 
 // newLogger builds the slog handler from config: text for humans, json for log
