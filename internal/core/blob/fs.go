@@ -84,6 +84,40 @@ func (s *FSStore) Delete(_ context.Context, digest string) error {
 	return nil
 }
 
+// Walk implements Store. It walks {root}/blobs/sha256/<ab>/<hex>, reconstructing
+// each digest from its path. Files whose name is not a valid hex digest (e.g. a
+// stray temp file) are skipped rather than reported as blobs.
+func (s *FSStore) Walk(_ context.Context, fn func(Info) error) error {
+	shaRoot := filepath.Join(s.root, "blobs", algoSHA256)
+	err := filepath.WalkDir(shaRoot, func(_ string, d os.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil // nothing committed yet
+			}
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		digest := algoSHA256 + ":" + d.Name()
+		if ValidateDigest(digest) != nil {
+			return nil // not a blob file
+		}
+		info, err := d.Info()
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil // removed concurrently
+			}
+			return fmt.Errorf("stat blob %s: %w", digest, err)
+		}
+		return fn(Info{Digest: digest, Size: info.Size(), ModTime: info.ModTime()})
+	})
+	if err != nil {
+		return fmt.Errorf("walking blobs: %w", err)
+	}
+	return nil
+}
+
 // StartUpload implements Store.
 func (s *FSStore) StartUpload(_ context.Context) (Upload, error) {
 	id, err := newUploadID()

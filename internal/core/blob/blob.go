@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 )
 
 var (
@@ -36,6 +37,15 @@ type Descriptor struct {
 	Size   int64
 }
 
+// Info describes a stored blob during enumeration: its descriptor plus when
+// it was last written, so garbage collection can spare blobs freshly uploaded
+// but not yet referenced by a manifest.
+type Info struct {
+	Digest  string
+	Size    int64
+	ModTime time.Time
+}
+
 // Store is a content-addressable blob store. Implementations (fs, s3 later) are
 // fully substitutable — the contract test suite enforces it.
 type Store interface {
@@ -46,6 +56,10 @@ type Store interface {
 	// Delete removes a blob. It is used only by garbage collection; a missing
 	// blob is not an error.
 	Delete(ctx context.Context, digest string) error
+	// Walk calls fn for every committed blob, in no guaranteed order. Garbage
+	// collection uses it to enumerate what is stored. If fn returns an error,
+	// Walk stops and returns it.
+	Walk(ctx context.Context, fn func(Info) error) error
 
 	// StartUpload begins a new resumable upload session.
 	StartUpload(ctx context.Context) (Upload, error)

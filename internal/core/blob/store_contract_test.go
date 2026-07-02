@@ -134,6 +134,49 @@ func runStoreContract(t *testing.T, newStore func(t *testing.T) blob.Store) {
 		}
 	})
 
+	t.Run("walk visits every committed blob once", func(t *testing.T) {
+		s := newStore(t)
+		want := map[string]int64{}
+		for _, c := range [][]byte{[]byte("blob one"), []byte("blob two"), []byte("third blob!")} {
+			desc := putBlob(t, s, c)
+			want[desc.Digest] = desc.Size
+		}
+
+		got := map[string]int64{}
+		if err := s.Walk(ctx, func(info blob.Info) error {
+			if _, seen := got[info.Digest]; seen {
+				t.Errorf("blob %s visited twice", info.Digest)
+			}
+			got[info.Digest] = info.Size
+			if info.ModTime.IsZero() {
+				t.Errorf("blob %s has zero ModTime", info.Digest)
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("Walk: %v", err)
+		}
+
+		if len(got) != len(want) {
+			t.Fatalf("walked %d blobs, want %d", len(got), len(want))
+		}
+		for digest, size := range want {
+			if got[digest] != size {
+				t.Errorf("blob %s size = %d, want %d", digest, got[digest], size)
+			}
+		}
+	})
+
+	t.Run("walk on an empty store visits nothing", func(t *testing.T) {
+		s := newStore(t)
+		count := 0
+		if err := s.Walk(ctx, func(blob.Info) error { count++; return nil }); err != nil {
+			t.Fatalf("Walk: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("walked %d blobs on empty store, want 0", count)
+		}
+	})
+
 	t.Run("malformed digests are rejected", func(t *testing.T) {
 		s := newStore(t)
 		for _, bad := range []string{"", "sha256:xyz", "md5:abc", "deadbeef"} {
