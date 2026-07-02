@@ -33,12 +33,34 @@ var (
 	}
 )
 
-// descriptor is the subset of an OCI descriptor we validate against: the digest
-// of a referenced blob (config/layer) or child manifest.
+// descriptor is the subset of an OCI descriptor we read: the digest and size of
+// a referenced blob (config/layer) or child manifest, plus the platform an
+// index entry targets.
 type descriptor struct {
-	MediaType string `json:"mediaType"`
-	Digest    string `json:"digest"`
-	Size      int64  `json:"size"`
+	MediaType string    `json:"mediaType"`
+	Digest    string    `json:"digest"`
+	Size      int64     `json:"size"`
+	Platform  *platform `json:"platform,omitempty"`
+}
+
+// platform is an index entry's target OS/architecture.
+type platform struct {
+	OS           string `json:"os"`
+	Architecture string `json:"architecture"`
+	Variant      string `json:"variant,omitempty"`
+}
+
+// platformString renders "os/arch" (with an optional "/variant"), or "" when the
+// descriptor carries no platform.
+func (d descriptor) platformString() string {
+	if d.Platform == nil || d.Platform.OS == "" {
+		return ""
+	}
+	s := d.Platform.OS + "/" + d.Platform.Architecture
+	if d.Platform.Variant != "" {
+		s += "/" + d.Platform.Variant
+	}
+	return s
 }
 
 // manifestDoc is the union of the manifest shapes we parse: an image manifest
@@ -169,7 +191,7 @@ func (h *handler) getManifest(w http.ResponseWriter, r *http.Request, projectID,
 	} else {
 		resolved, err := h.manifests.resolveTag(r.Context(), projectID, repo, p.ref)
 		if err != nil {
-			if errors.Is(err, errManifestNotFound) {
+			if errors.Is(err, ErrManifestNotFound) {
 				writeError(w, h.log, http.StatusNotFound, codeManifestUnknown, "manifest unknown")
 				return
 			}
@@ -181,7 +203,7 @@ func (h *handler) getManifest(w http.ResponseWriter, r *http.Request, projectID,
 
 	m, err := h.manifests.getManifest(r.Context(), projectID, repo, digest)
 	if err != nil {
-		if errors.Is(err, errManifestNotFound) {
+		if errors.Is(err, ErrManifestNotFound) {
 			writeError(w, h.log, http.StatusNotFound, codeManifestUnknown, "manifest unknown")
 			return
 		}
@@ -221,7 +243,7 @@ func (h *handler) deleteManifest(w http.ResponseWriter, r *http.Request, project
 		err = h.manifests.deleteTag(r.Context(), projectID, repo, p.ref, actor)
 	}
 	if err != nil {
-		if errors.Is(err, errManifestNotFound) {
+		if errors.Is(err, ErrManifestNotFound) {
 			writeError(w, h.log, http.StatusNotFound, codeManifestUnknown, "manifest unknown")
 			return
 		}

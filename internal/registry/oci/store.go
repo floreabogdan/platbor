@@ -15,8 +15,11 @@ import (
 // Store-level sentinels. Handlers translate these into spec error envelopes;
 // the store itself never speaks HTTP.
 var (
-	errProjectNotFound  = errors.New("project not found")
-	errManifestNotFound = errors.New("manifest not found")
+	errProjectNotFound = errors.New("project not found")
+	// ErrManifestNotFound is returned by reads (Browser) and mutations when a
+	// manifest or tag reference resolves to nothing. Exported so the HTTP layer
+	// can map it to 404.
+	ErrManifestNotFound = errors.New("manifest not found")
 )
 
 // manifestStore is the OCI adapter's own project-scoped metadata layer. The SQL
@@ -64,19 +67,19 @@ func (s *manifestStore) getManifest(ctx context.Context, projectID, repo, digest
 	row, err := s.q.GetManifest(ctx, db.GetManifestParams{ProjectID: projectID, Repository: repo, Digest: digest})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return storedManifest{}, errManifestNotFound
+			return storedManifest{}, ErrManifestNotFound
 		}
 		return storedManifest{}, fmt.Errorf("getting manifest: %w", err)
 	}
 	return storedManifest{Digest: row.Digest, MediaType: row.MediaType, Payload: row.Payload, Size: row.Size}, nil
 }
 
-// resolveTag returns the digest a tag currently points at, or errManifestNotFound.
+// resolveTag returns the digest a tag currently points at, or ErrManifestNotFound.
 func (s *manifestStore) resolveTag(ctx context.Context, projectID, repo, tag string) (string, error) {
 	row, err := s.q.GetTag(ctx, db.GetTagParams{ProjectID: projectID, Repository: repo, Tag: tag})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", errManifestNotFound
+			return "", ErrManifestNotFound
 		}
 		return "", fmt.Errorf("resolving tag: %w", err)
 	}
@@ -154,7 +157,7 @@ func (s *manifestStore) putManifest(ctx context.Context, m manifestWrite) error 
 }
 
 // deleteManifest removes a manifest by digest along with every tag that pointed
-// at it. Deleting an unknown manifest returns errManifestNotFound.
+// at it. Deleting an unknown manifest returns ErrManifestNotFound.
 func (s *manifestStore) deleteManifest(ctx context.Context, projectID, repo, digest, actor string) error {
 	ts := s.now().Format(time.RFC3339Nano)
 
@@ -164,7 +167,7 @@ func (s *manifestStore) deleteManifest(ctx context.Context, projectID, repo, dig
 			return fmt.Errorf("deleting manifest: %w", err)
 		}
 		if n == 0 {
-			return errManifestNotFound
+			return ErrManifestNotFound
 		}
 		if err := qtx.DeleteTagsForDigest(ctx, db.DeleteTagsForDigestParams{ProjectID: projectID, Repository: repo, Digest: digest}); err != nil {
 			return fmt.Errorf("deleting tags for digest: %w", err)
@@ -184,7 +187,7 @@ func (s *manifestStore) deleteTag(ctx context.Context, projectID, repo, tag, act
 			return fmt.Errorf("deleting tag: %w", err)
 		}
 		if n == 0 {
-			return errManifestNotFound
+			return ErrManifestNotFound
 		}
 		return s.audit(ctx, qtx, projectID, actor, "oci.tag.delete", "tag", tag, ts,
 			map[string]string{"repository": repo})

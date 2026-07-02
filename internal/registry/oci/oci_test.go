@@ -3,7 +3,9 @@ package oci_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -24,6 +26,7 @@ import (
 type harness struct {
 	router http.Handler
 	auth   *auth.Service
+	db     *sql.DB
 }
 
 func newHarness(t *testing.T) *harness {
@@ -58,7 +61,7 @@ func newHarness(t *testing.T) *harness {
 	r.Route("/v2", func(sub chi.Router) {
 		oci.New().Mount(sub, registry.Deps{Blobs: store, Auth: authSvc, DB: sqlDB, Log: discardLogger()})
 	})
-	return &harness{router: r, auth: authSvc}
+	return &harness{router: r, auth: authSvc, db: sqlDB}
 }
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -452,4 +455,91 @@ func TestTagsList(t *testing.T) {
 type tagListResponse struct {
 	Name string   `json:"name"`
 	Tags []string `json:"tags"`
+}
+
+// --- Browser (read side) ---
+
+func TestBrowserRepositoriesTagsAndManifest(t *testing.T) {
+	h := newHarness(t)
+	const name = "library/alpine"
+	body, digest := h.buildImage(t, name)
+	for _, tag := range []string{"v1.0", "latest"} {
+		if put := h.putManifest(t, name, tag, body); put.Code != http.StatusCreated {
+			t.Fatalf("seed PUT %s: status = %d", tag, put.Code)
+		}
+	}
+
+	ctx := context.Background()
+	browser := oci.NewBrowser(h.db)
+
+	// Repositories: one repo, two tags, one manifest, categorised under "library".
+	repos, err := browser.Repositories(ctx)
+	if err != nil {
+		t.Fatalf("Repositories: %v", err)
+	}
+	if len(repos) != 1 {
+		t.Fatalf("repositories = %d, want 1", len(repos))
+	}
+	repo := repos[0]
+	if repo.ProjectKey != "library" || repo.Repository != "alpine" {
+		t.Errorf("repo = %s/%s, want library/alpine", repo.ProjectKey, repo.Repository)
+	}
+	if repo.TagCount != 2 || repo.ManifestCount != 1 {
+		t.Errorf("tagCount=%d manifestCount=%d, want 2/1", repo.TagCount, repo.ManifestCount)
+	}
+
+	// Tags: both present, each an image with a computed total size.
+	projectID := mustProjectID(t, h, "library")
+	tags, err := browser.Tags(ctx, projectID, "alpine")
+	if err != nil {
+		t.Fatalf("Tags: %v", err)
+	}
+	if len(tags) != 2 {
+		t.Fatalf("tags = %d, want 2", len(tags))
+	}
+	for _, tg := range tags {
+		if tg.Kind != oci.KindImage {
+			t.Errorf("tag %s kind = %q, want image", tg.Tag, tg.Kind)
+		}
+		if tg.Size <= 0 || tg.Count != 1 {
+			t.Errorf("tag %s size=%d count=%d, want size>0 count=1", tg.Tag, tg.Size, tg.Count)
+		}
+		if tg.Digest != digest {
+			t.Errorf("tag %s digest = %s, want %s", tg.Tag, tg.Digest, digest)
+		}
+	}
+
+	// Manifest detail (by tag): config + one layer, total size is their sum.
+	view, err := browser.Manifest(ctx, projectID, "alpine", "v1.0")
+	if err != nil {
+		t.Fatalf("Manifest: %v", err)
+	}
+	if view.Kind != oci.KindImage || view.Config == nil || len(view.Layers) != 1 {
+		t.Fatalf("view kind=%q config=%v layers=%d", view.Kind, view.Config, len(view.Layers))
+	}
+	if want := view.Config.Size + view.Layers[0].Size; view.TotalSize != want {
+		t.Errorf("totalSize = %d, want %d (config+layers)", view.TotalSize, want)
+	}
+	if view.Digest != digest {
+		t.Errorf("view digest = %s, want %s", view.Digest, digest)
+	}
+
+	// Manifest detail (by digest) resolves to the same view.
+	if byDigest, err := browser.Manifest(ctx, projectID, "alpine", digest); err != nil || byDigest.Digest != digest {
+		t.Fatalf("Manifest by digest: view=%+v err=%v", byDigest, err)
+	}
+
+	// An unknown reference is a not-found, not an empty view.
+	if _, err := browser.Manifest(ctx, projectID, "alpine", "nope"); !errors.Is(err, oci.ErrManifestNotFound) {
+		t.Errorf("unknown ref error = %v, want ErrManifestNotFound", err)
+	}
+}
+
+func mustProjectID(t *testing.T, h *harness, key string) string {
+	t.Helper()
+	p, err := project.NewService(h.db).GetByKey(context.Background(), key)
+	if err != nil {
+		t.Fatalf("resolve project %q: %v", key, err)
+	}
+	return p.ID
 }
