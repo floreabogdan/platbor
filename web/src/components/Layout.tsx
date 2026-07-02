@@ -2,7 +2,8 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { cx } from '../lib/cx';
-import { CatalogIcon, DashboardIcon, ProjectsIcon, RegistryIcon, SettingsIcon } from './icons';
+import { useAuth } from '../lib/auth';
+import { CatalogIcon, DashboardIcon, LogoutIcon, ProjectsIcon, RegistryIcon, SettingsIcon } from './icons';
 
 interface NavItem {
   to: string;
@@ -77,18 +78,38 @@ function Sidebar() {
         ))}
       </nav>
 
-      <div className="border-t border-white/5 px-5 py-4">
-        <div className="flex items-center gap-3">
-          <div className="grid h-8 w-8 place-items-center rounded-full bg-white/10 text-xs font-semibold text-white">
-            A
-          </div>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-medium text-white">admin</div>
-            <div className="truncate text-xs text-slate-500">instance admin</div>
+      <UserBlock />
+    </aside>
+  );
+}
+
+function UserBlock() {
+  const { state, logout } = useAuth();
+  const user = state.status === 'authenticated' ? state.user : undefined;
+
+  return (
+    <div className="border-t border-white/5 px-5 py-4">
+      <div className="flex items-center gap-3">
+        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/10 text-xs font-semibold uppercase text-white">
+          {user ? user.username.charAt(0) : '?'}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium text-white">{user?.username ?? 'unknown'}</div>
+          <div className="truncate text-xs text-slate-500">
+            {user?.isAdmin ? 'instance admin' : 'member'}
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => void logout()}
+          title="Sign out"
+          aria-label="Sign out"
+          className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
+        >
+          <LogoutIcon />
+        </button>
       </div>
-    </aside>
+    </div>
   );
 }
 

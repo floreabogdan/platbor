@@ -1,4 +1,4 @@
-import type { CreateProjectRequest, ListProjectsResponse, Problem, Project } from './types';
+import type { CreateProjectRequest, ListProjectsResponse, Problem, Project, User } from './types';
 
 const BASE = '/api/v1';
 
@@ -50,6 +50,15 @@ function query(params: Record<string, string | number | undefined>): string {
 }
 
 export const api = {
+  // Auth
+  me: (): Promise<User> => request<User>(`/auth/me`),
+
+  login: (username: string, password: string): Promise<User> =>
+    request<User>(`/auth/login`, { method: 'POST', body: JSON.stringify({ username, password }) }),
+
+  logout: (): Promise<void> => request<undefined>(`/auth/logout`, { method: 'POST' }),
+
+  // Projects
   listProjects: (params: { cursor?: string; limit?: number } = {}): Promise<ListProjectsResponse> =>
     request<ListProjectsResponse>(`/projects${query(params)}`),
 

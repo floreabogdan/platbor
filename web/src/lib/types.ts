@@ -1,6 +1,14 @@
 // API types mirror the Go /api/v1 shapes (camelCase, RFC 3339 timestamps).
 // One source of truth per shape — keep in sync with internal/httpapi.
 
+export interface User {
+  id: string;
+  username: string;
+  email: string;
+  isAdmin: boolean;
+  createdAt: string;
+}
+
 export interface Project {
   id: string;
   key: string;
