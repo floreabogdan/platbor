@@ -63,7 +63,7 @@ func newTestAPI(t *testing.T) testAPI {
 	}
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	handler := newRouter(log, emptyAssets(t), API{Auth: authSvc, Projects: project.NewService(sqlDB)})
+	handler := newRouter(log, emptyAssets(t), API{Auth: authSvc, Projects: project.NewService(sqlDB), DB: sqlDB})
 	return testAPI{handler: handler, cookie: &http.Cookie{Name: sessionCookieName, Value: token}}
 }
 

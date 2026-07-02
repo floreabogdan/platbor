@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/platbor/platbor/internal/core/audit"
 	"github.com/platbor/platbor/internal/registry"
 	"github.com/platbor/platbor/internal/registry/oci"
 )
@@ -51,6 +52,12 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 				browser:  oci.NewBrowser(api.DB),
 				manager:  oci.NewManager(api.DB),
 				projects: api.Projects,
+				log:      log,
+			}.mount)
+			r.Route("/dashboard", dashboardHandler{
+				projects: api.Projects,
+				browser:  oci.NewBrowser(api.DB),
+				audit:    audit.NewService(api.DB),
 				log:      log,
 			}.mount)
 		})
