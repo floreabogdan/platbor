@@ -1,0 +1,94 @@
+package httpapi
+
+import (
+	"errors"
+	"io/fs"
+	"log/slog"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+)
+
+// newRouter assembles the top-level request tree. Ordering matters: operational
+// endpoints and the /api/v1 tree are registered before the SPA fallback so the
+// UI's catch-all never shadows a real API route.
+func newRouter(log *slog.Logger, assets fs.FS) http.Handler {
+	r := chi.NewRouter()
+
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(requestLogger(log))
+	r.Use(middleware.Recoverer)
+
+	// Operational endpoints — unauthenticated, never cached.
+	r.Get("/healthz", health)
+	r.Get("/readyz", health)
+
+	// Application/automation API. Fills out as features land.
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/health", health)
+	})
+
+	// Everything else falls through to the embedded SPA.
+	r.Handle("/*", spaHandler(assets))
+
+	return r
+}
+
+// health is the liveness/readiness probe. It reports nothing but reachability
+// today; readiness gains real dependency checks (DB, blob store) as those land.
+func health(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+// spaHandler serves the embedded single-page app: static files when they exist,
+// falling back to index.html so client-side routes resolve on deep links and
+// refreshes.
+func spaHandler(assets fs.FS) http.HandlerFunc {
+	fileServer := http.FileServer(http.FS(assets))
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path == "/" {
+			serveIndex(w, r, assets)
+			return
+		}
+
+		// A concrete asset (has an extension and exists) is served directly;
+		// anything else is a client-side route and gets index.html.
+		if _, err := fs.Stat(assets, cleanAssetPath(path)); errors.Is(err, fs.ErrNotExist) {
+			serveIndex(w, r, assets)
+			return
+		}
+		fileServer.ServeHTTP(w, r)
+	}
+}
+
+// cleanAssetPath maps a request path to an fs.FS key (no leading slash, "." for
+// root), which is what fs.Stat expects.
+func cleanAssetPath(p string) string {
+	trimmed := p
+	if len(trimmed) > 0 && trimmed[0] == '/' {
+		trimmed = trimmed[1:]
+	}
+	if trimmed == "" {
+		return "."
+	}
+	return trimmed
+}
+
+// serveIndex writes index.html with no-cache so a freshly deployed SPA is picked
+// up immediately, while hashed assets under /assets remain cacheable.
+func serveIndex(w http.ResponseWriter, r *http.Request, assets fs.FS) {
+	index, err := fs.ReadFile(assets, "index.html")
+	if err != nil {
+		http.Error(w, "UI not built", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(index)
+}
