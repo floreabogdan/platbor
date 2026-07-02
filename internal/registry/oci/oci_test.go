@@ -546,6 +546,106 @@ func mustProjectID(t *testing.T, h *harness, key string) string {
 
 // --- Manager (write side) ---
 
+// --- Referrers ---
+
+// buildReferrer pushes a referrer's config + layer blobs and returns a manifest
+// that refers to subjectDigest, carrying the given artifactType and an
+// annotation (the shape cosign/SBOM tooling uses).
+func (h *harness) buildReferrer(t *testing.T, name, subjectDigest string, subjectSize int, artifactType string) (body []byte, digest string) {
+	t.Helper()
+	config := []byte("{}")
+	layer := []byte("signature blob bytes")
+	configDigest := h.pushBlob(t, name, config)
+	layerDigest := h.pushBlob(t, name, layer)
+
+	m := map[string]any{
+		"schemaVersion": 2,
+		"mediaType":     imageManifestType,
+		"artifactType":  artifactType,
+		"config":        map[string]any{"mediaType": "application/vnd.oci.empty.v1+json", "digest": configDigest, "size": len(config)},
+		"layers":        []any{map[string]any{"mediaType": "application/vnd.example.layer", "digest": layerDigest, "size": len(layer)}},
+		"subject":       map[string]any{"mediaType": imageManifestType, "digest": subjectDigest, "size": subjectSize},
+		"annotations":   map[string]string{"kind": "signature"},
+	}
+	body, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal referrer: %v", err)
+	}
+	return body, blob.DigestBytes(body)
+}
+
+type referrersIndex struct {
+	MediaType string `json:"mediaType"`
+	Manifests []struct {
+		Digest       string            `json:"digest"`
+		ArtifactType string            `json:"artifactType"`
+		Annotations  map[string]string `json:"annotations"`
+	} `json:"manifests"`
+}
+
+func TestReferrersAPI(t *testing.T) {
+	h := newHarness(t)
+	const name = "library/alpine"
+	const sigType = "application/vnd.example.signature"
+
+	imgBody, imgDigest := h.buildImage(t, name)
+	if put := h.putManifest(t, name, "v1.0", imgBody); put.Code != http.StatusCreated {
+		t.Fatalf("push image: status = %d", put.Code)
+	}
+	refBody, refDigest := h.buildReferrer(t, name, imgDigest, len(imgBody), sigType)
+	if put := h.putManifest(t, name, refDigest, refBody); put.Code != http.StatusCreated {
+		t.Fatalf("push referrer: status = %d; body=%s", put.Code, put.Body.String())
+	}
+
+	// Referrers of the image list the signature, with its artifactType + annotations.
+	rr := h.req(t, http.MethodGet, "/v2/"+name+"/referrers/"+imgDigest, nil, "password")
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET referrers: status = %d", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "application/vnd.oci.image.index.v1+json" {
+		t.Errorf("content-type = %q, want image index", ct)
+	}
+	var idx referrersIndex
+	if err := json.Unmarshal(rr.Body.Bytes(), &idx); err != nil {
+		t.Fatalf("decode index: %v", err)
+	}
+	if len(idx.Manifests) != 1 {
+		t.Fatalf("referrers = %d, want 1", len(idx.Manifests))
+	}
+	got := idx.Manifests[0]
+	if got.Digest != refDigest || got.ArtifactType != sigType || got.Annotations["kind"] != "signature" {
+		t.Errorf("unexpected referrer entry: %+v", got)
+	}
+
+	// Filtering by the matching artifactType keeps it and advertises the filter.
+	match := h.req(t, http.MethodGet, "/v2/"+name+"/referrers/"+imgDigest+"?artifactType="+sigType, nil, "password")
+	if match.Header().Get("OCI-Filters-Applied") != "artifactType" {
+		t.Error("expected OCI-Filters-Applied header")
+	}
+	var matchIdx referrersIndex
+	_ = json.Unmarshal(match.Body.Bytes(), &matchIdx)
+	if len(matchIdx.Manifests) != 1 {
+		t.Errorf("filtered (match) referrers = %d, want 1", len(matchIdx.Manifests))
+	}
+
+	// A non-matching filter yields an empty index (still 200).
+	miss := h.req(t, http.MethodGet, "/v2/"+name+"/referrers/"+imgDigest+"?artifactType=application/vnd.other", nil, "password")
+	var missIdx referrersIndex
+	_ = json.Unmarshal(miss.Body.Bytes(), &missIdx)
+	if miss.Code != http.StatusOK || len(missIdx.Manifests) != 0 {
+		t.Errorf("non-matching filter: status = %d, referrers = %d, want 200/0", miss.Code, len(missIdx.Manifests))
+	}
+
+	// An unreferenced subject yields an empty index, not a 404.
+	unknown := blob.DigestBytes([]byte("no such subject"))
+	empty := h.req(t, http.MethodGet, "/v2/"+name+"/referrers/"+unknown, nil, "password")
+	var emptyIdx referrersIndex
+	_ = json.Unmarshal(empty.Body.Bytes(), &emptyIdx)
+	if empty.Code != http.StatusOK || len(emptyIdx.Manifests) != 0 {
+		t.Errorf("unknown subject: status = %d, referrers = %d, want 200/0", empty.Code, len(emptyIdx.Manifests))
+	}
+}
+
 func TestManagerDeleteTagAndManifest(t *testing.T) {
 	h := newHarness(t)
 	const name = "library/alpine"

@@ -71,6 +71,8 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 		h.serveManifest(w, r, p)
 	case opTags:
 		h.serveTags(w, r, p)
+	case opReferrers:
+		h.serveReferrers(w, r, p)
 	default:
 		writeError(w, h.log, http.StatusNotFound, codeNameInvalid, "unsupported path")
 	}

@@ -109,16 +109,48 @@ func (s *manifestStore) listTags(ctx context.Context, projectID, repo, last stri
 	return tags, nil
 }
 
-// manifestWrite is the input to putManifest. Tag is empty for a push by digest.
+// referrerRow is a manifest that refers to a subject, read back for the
+// referrers API (payload carried so the handler can extract annotations).
+type referrerRow struct {
+	Digest       string
+	MediaType    string
+	Size         int64
+	ArtifactType string
+	Payload      []byte
+}
+
+// listReferrers returns the manifests whose subject is the given digest.
+func (s *manifestStore) listReferrers(ctx context.Context, projectID, repo, subject string) ([]referrerRow, error) {
+	rows, err := s.q.ListReferrers(ctx, db.ListReferrersParams{ProjectID: projectID, Repository: repo, Subject: subject})
+	if err != nil {
+		return nil, fmt.Errorf("listing referrers: %w", err)
+	}
+	out := make([]referrerRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, referrerRow{
+			Digest:       r.Digest,
+			MediaType:    r.MediaType,
+			Size:         r.Size,
+			ArtifactType: r.ArtifactType,
+			Payload:      r.Payload,
+		})
+	}
+	return out, nil
+}
+
+// manifestWrite is the input to putManifest. Tag is empty for a push by digest;
+// Subject/ArtifactType are denormalized from the payload for the referrers API.
 type manifestWrite struct {
-	ProjectID  string
-	Repository string
-	Digest     string
-	MediaType  string
-	Payload    []byte
-	Size       int64
-	Tag        string
-	Actor      string
+	ProjectID    string
+	Repository   string
+	Digest       string
+	MediaType    string
+	Payload      []byte
+	Size         int64
+	Tag          string
+	Subject      string
+	ArtifactType string
+	Actor        string
 }
 
 // putManifest stores a manifest and, when Tag is set, repoints that tag at it —
@@ -129,14 +161,16 @@ func (s *manifestStore) putManifest(ctx context.Context, m manifestWrite) error 
 
 	return s.inTx(ctx, func(qtx *db.Queries) error {
 		if err := qtx.UpsertManifest(ctx, db.UpsertManifestParams{
-			ID:         id.New("mfst"),
-			ProjectID:  m.ProjectID,
-			Repository: m.Repository,
-			Digest:     m.Digest,
-			MediaType:  m.MediaType,
-			Payload:    m.Payload,
-			Size:       m.Size,
-			CreatedAt:  ts,
+			ID:           id.New("mfst"),
+			ProjectID:    m.ProjectID,
+			Repository:   m.Repository,
+			Digest:       m.Digest,
+			MediaType:    m.MediaType,
+			Payload:      m.Payload,
+			Size:         m.Size,
+			Subject:      m.Subject,
+			ArtifactType: m.ArtifactType,
+			CreatedAt:    ts,
 		}); err != nil {
 			return fmt.Errorf("storing manifest: %w", err)
 		}

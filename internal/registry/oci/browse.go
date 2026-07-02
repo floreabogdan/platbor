@@ -137,6 +137,36 @@ func (b *Browser) Tags(ctx context.Context, projectID, repo string) ([]TagSummar
 	return out, nil
 }
 
+// Referrer is a manifest that refers to a subject — a signature, SBOM, or other
+// attestation attached to an image.
+type Referrer struct {
+	Digest       string
+	MediaType    string
+	Size         int64
+	ArtifactType string
+	Annotations  map[string]string
+}
+
+// Referrers returns the manifests whose subject is the given digest, newest
+// first, for the browser's manifest detail view.
+func (b *Browser) Referrers(ctx context.Context, projectID, repo, subject string) ([]Referrer, error) {
+	rows, err := b.q.ListReferrers(ctx, db.ListReferrersParams{ProjectID: projectID, Repository: repo, Subject: subject})
+	if err != nil {
+		return nil, fmt.Errorf("listing referrers: %w", err)
+	}
+	out := make([]Referrer, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Referrer{
+			Digest:       r.Digest,
+			MediaType:    r.MediaType,
+			Size:         r.Size,
+			ArtifactType: r.ArtifactType,
+			Annotations:  annotationsFromPayload(r.Payload),
+		})
+	}
+	return out, nil
+}
+
 // Manifest returns the detail of a manifest referenced by tag or digest.
 func (b *Browser) Manifest(ctx context.Context, projectID, repo, ref string) (ManifestView, error) {
 	digest := ref

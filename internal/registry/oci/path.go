@@ -15,6 +15,7 @@ const (
 	opBlob
 	opManifest
 	opTags
+	opReferrers
 )
 
 // parsedPath is a decoded /v2 request path: the repository name plus the
@@ -47,6 +48,9 @@ func parsePath(tail string) parsedPath {
 	}
 	if i := strings.LastIndex(tail, "/manifests/"); i >= 0 {
 		return parsedPath{name: tail[:i], kind: opManifest, ref: tail[i+len("/manifests/"):]}
+	}
+	if i := strings.LastIndex(tail, "/referrers/"); i >= 0 {
+		return parsedPath{name: tail[:i], kind: opReferrers, ref: tail[i+len("/referrers/"):]}
 	}
 	if name, ok := strings.CutSuffix(tail, "/tags/list"); ok {
 		return parsedPath{name: name, kind: opTags}

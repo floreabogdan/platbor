@@ -65,12 +65,37 @@ func (d descriptor) platformString() string {
 
 // manifestDoc is the union of the manifest shapes we parse: an image manifest
 // (config + layers, which are blobs) or an index (manifests, which are other
-// manifests). Only the reference fields matter for validation.
+// manifests), plus the fields the referrers API denormalizes — subject,
+// artifactType, and annotations.
 type manifestDoc struct {
-	MediaType string       `json:"mediaType"`
-	Config    *descriptor  `json:"config"`
-	Layers    []descriptor `json:"layers"`
-	Manifests []descriptor `json:"manifests"`
+	MediaType    string            `json:"mediaType"`
+	ArtifactType string            `json:"artifactType"`
+	Config       *descriptor       `json:"config"`
+	Layers       []descriptor      `json:"layers"`
+	Manifests    []descriptor      `json:"manifests"`
+	Subject      *descriptor       `json:"subject"`
+	Annotations  map[string]string `json:"annotations"`
+}
+
+// subjectDigest is the digest of the manifest this one refers to, or "" if it
+// stands alone.
+func (d manifestDoc) subjectDigest() string {
+	if d.Subject == nil {
+		return ""
+	}
+	return d.Subject.Digest
+}
+
+// effectiveArtifactType is the manifest's artifactType, falling back to the
+// config media type for image manifests (per the distribution spec).
+func (d manifestDoc) effectiveArtifactType() string {
+	if d.ArtifactType != "" {
+		return d.ArtifactType
+	}
+	if d.Config != nil {
+		return d.Config.MediaType
+	}
+	return ""
 }
 
 // manifestError is a client-facing rejection with its spec error code and HTTP
@@ -161,14 +186,16 @@ func (h *handler) putManifest(w http.ResponseWriter, r *http.Request, projectID,
 	}
 
 	if err := h.manifests.putManifest(r.Context(), manifestWrite{
-		ProjectID:  projectID,
-		Repository: repo,
-		Digest:     digest,
-		MediaType:  mediaType,
-		Payload:    body,
-		Size:       int64(len(body)),
-		Tag:        tag,
-		Actor:      usernameFromContext(r.Context()),
+		ProjectID:    projectID,
+		Repository:   repo,
+		Digest:       digest,
+		MediaType:    mediaType,
+		Payload:      body,
+		Size:         int64(len(body)),
+		Tag:          tag,
+		Subject:      doc.subjectDigest(),
+		ArtifactType: doc.effectiveArtifactType(),
+		Actor:        usernameFromContext(r.Context()),
 	}); err != nil {
 		h.internalError(w, "storing manifest", err)
 		return
