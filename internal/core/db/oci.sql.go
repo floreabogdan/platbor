@@ -196,6 +196,36 @@ func (q *Queries) ListAllRepositories(ctx context.Context) ([]ListAllRepositorie
 	return items, nil
 }
 
+const listManifestPayloads = `-- name: ListManifestPayloads :many
+SELECT payload FROM oci_manifests
+`
+
+// Every manifest's raw bytes, for garbage collection to mark the config and
+// layer blobs each one references. Blobs are a global CAS, so this spans all
+// projects.
+func (q *Queries) ListManifestPayloads(ctx context.Context) ([][]byte, error) {
+	rows, err := q.db.QueryContext(ctx, listManifestPayloads)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := [][]byte{}
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		items = append(items, payload)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReferrers = `-- name: ListReferrers :many
 SELECT digest, media_type, size, artifact_type, payload
 FROM oci_manifests
