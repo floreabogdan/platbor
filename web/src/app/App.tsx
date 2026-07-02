@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from '../lib/auth';
 import { LoginPage } from '../features/auth/LoginPage';
 import { DashboardPage } from '../features/dashboard/DashboardPage';
 import { ProjectsPage } from '../features/projects/ProjectsPage';
-import { SettingsPage } from '../features/settings/SettingsPage';
+import { ProfilePage } from '../features/profile/ProfilePage';
 import { PlaceholderPage } from '../features/placeholder/PlaceholderPage';
 
 // Route table. Feature pages live under src/features/<name>/ and never import
@@ -46,7 +46,11 @@ function Gate() {
           path="catalog"
           element={<PlaceholderPage title="Catalog" subtitle="Components, owners, and dependencies land in Phase 3." />}
         />
-        <Route path="settings" element={<SettingsPage />} />
+        <Route path="profile" element={<ProfilePage />} />
+        <Route
+          path="settings"
+          element={<PlaceholderPage title="Settings" subtitle="Instance configuration and user management land in a later phase." />}
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

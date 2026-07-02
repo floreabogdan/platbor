@@ -1,22 +1,29 @@
 import { useState } from 'react';
-import { Button, Card, EmptyState, PageHeader } from '../../components/ui';
+import { Button, Card, EmptyState } from '../../components/ui';
 import { api } from '../../lib/api';
 import { formatDate } from '../../lib/format';
 import type { Token } from '../../lib/types';
 import { useTokens } from './useTokens';
 import { CreateTokenModal } from './CreateTokenModal';
 
-export function SettingsPage() {
+// TokensPanel manages the current user's personal access tokens. It is one tab
+// of the Profile page — PATs are personal, not instance settings.
+export function TokensPanel() {
   const { tokens, state, error, reload } = useTokens();
   const [creating, setCreating] = useState(false);
 
   return (
-    <div className="animate-rise">
-      <PageHeader
-        title="Settings"
-        subtitle="Personal access tokens for CLI, CI, and automation."
-        actions={<Button onClick={() => setCreating(true)}>New token</Button>}
-      />
+    <div>
+      <div className="mb-4 flex items-start justify-between gap-4">
+        <p className="max-w-xl text-sm text-slate-500">
+          Personal access tokens authenticate the CLI and scripts as you. Send one as{' '}
+          <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">
+            Authorization: Bearer &lt;token&gt;
+          </code>
+          .
+        </p>
+        <Button onClick={() => setCreating(true)}>New token</Button>
+      </div>
 
       {state === 'loading' ? <Card className="h-32 animate-pulse bg-slate-50" /> : null}
 
@@ -31,7 +38,7 @@ export function SettingsPage() {
 
       {state === 'ready' && tokens.length === 0 ? (
         <EmptyState
-          message="No tokens yet. Create one to authenticate the CLI or CI against Platbor."
+          message="No tokens yet. Create one to authenticate the CLI or scripts as you."
           action={<Button onClick={() => setCreating(true)}>New token</Button>}
         />
       ) : null}

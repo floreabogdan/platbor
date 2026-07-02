@@ -89,22 +89,28 @@ function UserBlock() {
 
   return (
     <div className="border-t border-white/5 px-5 py-4">
-      <div className="flex items-center gap-3">
-        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/10 text-xs font-semibold uppercase text-white">
-          {user ? user.username.charAt(0) : '?'}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-white">{user?.username ?? 'unknown'}</div>
-          <div className="truncate text-xs text-slate-500">
-            {user?.isAdmin ? 'instance admin' : 'member'}
+      <div className="flex items-center gap-2">
+        <NavLink
+          to="/profile"
+          title="Profile"
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 transition-colors hover:bg-white/5"
+        >
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/10 text-xs font-semibold uppercase text-white">
+            {user ? user.username.charAt(0) : '?'}
           </div>
-        </div>
+          <div className="min-w-0 flex-1 text-left">
+            <div className="truncate text-sm font-medium text-white">{user?.username ?? 'unknown'}</div>
+            <div className="truncate text-xs text-slate-500">
+              {user?.isAdmin ? 'instance admin' : 'member'}
+            </div>
+          </div>
+        </NavLink>
         <button
           type="button"
           onClick={() => void logout()}
           title="Sign out"
           aria-label="Sign out"
-          className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
+          className="shrink-0 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-white/5 hover:text-white"
         >
           <LogoutIcon />
         </button>
