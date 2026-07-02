@@ -9,6 +9,29 @@ import (
 	"context"
 )
 
+const countRepositories = `-- name: CountRepositories :one
+SELECT COUNT(*) FROM (SELECT DISTINCT project_id, repository FROM oci_manifests) AS repos
+`
+
+// Distinct repositories across all projects, for the dashboard summary.
+func (q *Queries) CountRepositories(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRepositories)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTags = `-- name: CountTags :one
+SELECT COUNT(*) FROM oci_tags
+`
+
+func (q *Queries) CountTags(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countTags)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteManifest = `-- name: DeleteManifest :execrows
 DELETE FROM oci_manifests
 WHERE project_id = ? AND repository = ? AND digest = ?

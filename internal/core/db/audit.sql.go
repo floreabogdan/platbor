@@ -95,3 +95,64 @@ func (q *Queries) ListAuditByProject(ctx context.Context, arg ListAuditByProject
 	}
 	return items, nil
 }
+
+const listRecentActivity = `-- name: ListRecentActivity :many
+SELECT
+    a.actor,
+    a.action,
+    a.target_type,
+    a.target_id,
+    a.metadata,
+    a.created_at,
+    p.key  AS project_key,
+    p.name AS project_name
+FROM audit_log a
+LEFT JOIN projects p ON p.id = a.project_id
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT ?
+`
+
+type ListRecentActivityRow struct {
+	Actor       string         `json:"actor"`
+	Action      string         `json:"action"`
+	TargetType  string         `json:"target_type"`
+	TargetID    string         `json:"target_id"`
+	Metadata    string         `json:"metadata"`
+	CreatedAt   string         `json:"created_at"`
+	ProjectKey  sql.NullString `json:"project_key"`
+	ProjectName sql.NullString `json:"project_name"`
+}
+
+// Instance-wide recent mutations for the dashboard feed, joined to the project
+// they touched (project_id is nullable for instance-level events).
+func (q *Queries) ListRecentActivity(ctx context.Context, limit int64) ([]ListRecentActivityRow, error) {
+	rows, err := q.db.QueryContext(ctx, listRecentActivity, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRecentActivityRow{}
+	for rows.Next() {
+		var i ListRecentActivityRow
+		if err := rows.Scan(
+			&i.Actor,
+			&i.Action,
+			&i.TargetType,
+			&i.TargetID,
+			&i.Metadata,
+			&i.CreatedAt,
+			&i.ProjectKey,
+			&i.ProjectName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

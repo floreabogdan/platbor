@@ -10,6 +10,9 @@ import (
 
 type Querier interface {
 	CountProjects(ctx context.Context) (int64, error)
+	// Distinct repositories across all projects, for the dashboard summary.
+	CountRepositories(ctx context.Context) (int64, error)
+	CountTags(ctx context.Context) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (ApiToken, error)
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
@@ -40,6 +43,9 @@ type Querier interface {
 	// string, which sorts before any valid key, so a single query serves both the
 	// first page and subsequent pages.
 	ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error)
+	// Instance-wide recent mutations for the dashboard feed, joined to the project
+	// they touched (project_id is nullable for instance-level events).
+	ListRecentActivity(ctx context.Context, limit int64) ([]ListRecentActivityRow, error)
 	// Keyset pagination on `tag`: the empty string sorts before any tag, so the
 	// first page and subsequent pages share one query.
 	ListTags(ctx context.Context, arg ListTagsParams) ([]string, error)
