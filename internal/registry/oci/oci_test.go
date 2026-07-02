@@ -543,3 +543,56 @@ func mustProjectID(t *testing.T, h *harness, key string) string {
 	}
 	return p.ID
 }
+
+// --- Manager (write side) ---
+
+func TestManagerDeleteTagAndManifest(t *testing.T) {
+	h := newHarness(t)
+	const name = "library/alpine"
+	body, digest := h.buildImage(t, name)
+	for _, tag := range []string{"v1.0", "latest"} {
+		if put := h.putManifest(t, name, tag, body); put.Code != http.StatusCreated {
+			t.Fatalf("seed PUT %s: status = %d", tag, put.Code)
+		}
+	}
+
+	ctx := context.Background()
+	projectID := mustProjectID(t, h, "library")
+	manager := oci.NewManager(h.db)
+	browser := oci.NewBrowser(h.db)
+
+	// Deleting one tag leaves the other and the manifest intact.
+	if err := manager.DeleteTag(ctx, projectID, "alpine", "v1.0", "admin"); err != nil {
+		t.Fatalf("DeleteTag: %v", err)
+	}
+	tags, err := browser.Tags(ctx, projectID, "alpine")
+	if err != nil {
+		t.Fatalf("Tags: %v", err)
+	}
+	if len(tags) != 1 || tags[0].Tag != "latest" {
+		t.Fatalf("after tag delete, tags = %+v, want [latest]", tags)
+	}
+	if _, err := browser.Manifest(ctx, projectID, "alpine", digest); err != nil {
+		t.Fatalf("manifest should survive tag delete: %v", err)
+	}
+
+	// Deleting a missing tag is a not-found.
+	if err := manager.DeleteTag(ctx, projectID, "alpine", "v1.0", "admin"); !errors.Is(err, oci.ErrManifestNotFound) {
+		t.Errorf("delete missing tag error = %v, want ErrManifestNotFound", err)
+	}
+
+	// Deleting by digest removes the manifest and its remaining tag.
+	if err := manager.DeleteManifest(ctx, projectID, "alpine", digest, "admin"); err != nil {
+		t.Fatalf("DeleteManifest: %v", err)
+	}
+	if _, err := browser.Manifest(ctx, projectID, "alpine", digest); !errors.Is(err, oci.ErrManifestNotFound) {
+		t.Errorf("manifest should be gone: err = %v", err)
+	}
+	tags, err = browser.Tags(ctx, projectID, "alpine")
+	if err != nil {
+		t.Fatalf("Tags after manifest delete: %v", err)
+	}
+	if len(tags) != 0 {
+		t.Errorf("after manifest delete, tags = %+v, want none", tags)
+	}
+}
