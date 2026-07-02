@@ -1,8 +1,9 @@
 -- name: UpsertManifest :exec
 -- Store a manifest by digest. Re-pushing identical content is a no-op, so an
--- image can be tagged repeatedly without duplicating the payload.
-INSERT INTO oci_manifests (id, project_id, repository, digest, media_type, payload, size, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+-- image can be tagged repeatedly without duplicating the payload. subject and
+-- artifact_type are denormalized from the payload for the referrers API.
+INSERT INTO oci_manifests (id, project_id, repository, digest, media_type, payload, size, subject, artifact_type, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (project_id, repository, digest) DO NOTHING;
 
 -- name: GetManifest :one
@@ -59,6 +60,14 @@ FROM oci_manifests m
 JOIN projects p ON p.id = m.project_id
 GROUP BY m.project_id, m.repository
 ORDER BY p.key ASC, m.repository ASC;
+
+-- name: ListReferrers :many
+-- Manifests whose subject is the given digest (a subject's signatures, SBOMs,
+-- and other attestations) for the referrers API. Newest first.
+SELECT digest, media_type, size, artifact_type, payload
+FROM oci_manifests
+WHERE project_id = ? AND repository = ? AND subject = ?
+ORDER BY created_at DESC;
 
 -- name: CountRepositories :one
 -- Distinct repositories across all projects, for the dashboard summary.
