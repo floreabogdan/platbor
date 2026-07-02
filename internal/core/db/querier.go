@@ -10,9 +10,17 @@ import (
 
 type Querier interface {
 	CountProjects(ctx context.Context) (int64, error)
+	CountUsers(ctx context.Context) (int64, error)
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
+	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
+	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	DeleteExpiredSessions(ctx context.Context, expiresAt string) error
+	DeleteSessionByTokenHash(ctx context.Context, tokenHash string) error
 	GetProjectByID(ctx context.Context, id string) (Project, error)
 	GetProjectByKey(ctx context.Context, key string) (Project, error)
+	GetSessionByTokenHash(ctx context.Context, tokenHash string) (GetSessionByTokenHashRow, error)
+	GetUserByID(ctx context.Context, id string) (User, error)
+	GetUserByUsername(ctx context.Context, username string) (User, error)
 	InsertAuditEntry(ctx context.Context, arg InsertAuditEntryParams) (AuditLog, error)
 	ListAuditByProject(ctx context.Context, arg ListAuditByProjectParams) ([]AuditLog, error)
 	// Keyset pagination on the unique `key` column. The first page passes the empty

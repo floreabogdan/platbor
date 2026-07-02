@@ -27,3 +27,21 @@ type Project struct {
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }
+
+type Session struct {
+	ID        string `json:"id"`
+	TokenHash string `json:"token_hash"`
+	UserID    string `json:"user_id"`
+	CreatedAt string `json:"created_at"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+type User struct {
+	ID           string `json:"id"`
+	Username     string `json:"username"`
+	Email        string `json:"email"`
+	PasswordHash string `json:"password_hash"`
+	IsAdmin      int64  `json:"is_admin"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+}
