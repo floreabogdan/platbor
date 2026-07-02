@@ -31,6 +31,10 @@ type Querier interface {
 	GetUserByUsername(ctx context.Context, username string) (User, error)
 	InsertAuditEntry(ctx context.Context, arg InsertAuditEntryParams) (AuditLog, error)
 	ListAPITokensByUser(ctx context.Context, userID string) ([]ApiToken, error)
+	// Every repository across all projects, with tag and manifest counts, for the
+	// registry browser's project-grouped index. A repository exists once it has at
+	// least one manifest.
+	ListAllRepositories(ctx context.Context) ([]ListAllRepositoriesRow, error)
 	ListAuditByProject(ctx context.Context, arg ListAuditByProjectParams) ([]AuditLog, error)
 	// Keyset pagination on the unique `key` column. The first page passes the empty
 	// string, which sorts before any valid key, so a single query serves both the
@@ -39,6 +43,9 @@ type Querier interface {
 	// Keyset pagination on `tag`: the empty string sorts before any tag, so the
 	// first page and subsequent pages share one query.
 	ListTags(ctx context.Context, arg ListTagsParams) ([]string, error)
+	// Tags in a repository joined to the manifest each points at, so the browser can
+	// show media type and size without a second round-trip. Newest push first.
+	ListTagsWithManifest(ctx context.Context, arg ListTagsWithManifestParams) ([]ListTagsWithManifestRow, error)
 	ManifestExists(ctx context.Context, arg ManifestExistsParams) (int64, error)
 	// Store a manifest by digest. Re-pushing identical content is a no-op, so an
 	// image can be tagged repeatedly without duplicating the payload.
