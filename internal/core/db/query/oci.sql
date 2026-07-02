@@ -61,6 +61,12 @@ JOIN projects p ON p.id = m.project_id
 GROUP BY m.project_id, m.repository
 ORDER BY p.key ASC, m.repository ASC;
 
+-- name: ListManifestPayloads :many
+-- Every manifest's raw bytes, for garbage collection to mark the config and
+-- layer blobs each one references. Blobs are a global CAS, so this spans all
+-- projects.
+SELECT payload FROM oci_manifests;
+
 -- name: ListReferrers :many
 -- Manifests whose subject is the given digest (a subject's signatures, SBOMs,
 -- and other attestations) for the referrers API. Newest first.
