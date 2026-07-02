@@ -12,6 +12,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/platbor/platbor/internal/core/auth"
 	"github.com/platbor/platbor/internal/core/config"
 	"github.com/platbor/platbor/internal/core/db"
 	"github.com/platbor/platbor/internal/core/project"
@@ -26,7 +27,14 @@ func emptyAssets(t *testing.T) fs.FS {
 	}
 }
 
-func newTestHandler(t *testing.T) http.Handler {
+// testAPI is a router wired to a fresh migrated DB, plus a session cookie for a
+// bootstrapped admin so authenticated endpoints can be exercised.
+type testAPI struct {
+	handler http.Handler
+	cookie  *http.Cookie
+}
+
+func newTestAPI(t *testing.T) testAPI {
 	t.Helper()
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
@@ -41,23 +49,52 @@ func newTestHandler(t *testing.T) http.Handler {
 		t.Fatalf("Migrate: %v", err)
 	}
 
+	authSvc := auth.NewService(sqlDB)
+	if _, err := authSvc.Bootstrap(ctx, "admin", "password123"); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	user, err := authSvc.Authenticate(ctx, "admin", "password123")
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	token, _, err := authSvc.StartSession(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return newRouter(log, emptyAssets(t), API{Projects: project.NewService(sqlDB)})
+	handler := newRouter(log, emptyAssets(t), API{Auth: authSvc, Projects: project.NewService(sqlDB)})
+	return testAPI{handler: handler, cookie: &http.Cookie{Name: sessionCookieName, Value: token}}
 }
 
-func post(t *testing.T, h http.Handler, path, body string) *httptest.ResponseRecorder {
+func (a testAPI) do(t *testing.T, method, path, body string, authed bool) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	var reader io.Reader
+	if body != "" {
+		reader = strings.NewReader(body)
+	}
+	req := httptest.NewRequest(method, path, reader)
 	req.Header.Set("Content-Type", "application/json")
+	if authed {
+		req.AddCookie(a.cookie)
+	}
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	a.handler.ServeHTTP(rr, req)
 	return rr
 }
 
-func TestCreateProjectEndpoint(t *testing.T) {
-	h := newTestHandler(t)
+func (a testAPI) post(t *testing.T, path, body string) *httptest.ResponseRecorder {
+	return a.do(t, http.MethodPost, path, body, true)
+}
 
-	rr := post(t, h, "/api/v1/projects", `{"key":"acme","name":"Acme Corp"}`)
+func (a testAPI) get(t *testing.T, path string) *httptest.ResponseRecorder {
+	return a.do(t, http.MethodGet, path, "", true)
+}
+
+func TestCreateProjectEndpoint(t *testing.T) {
+	a := newTestAPI(t)
+
+	rr := a.post(t, "/api/v1/projects", `{"key":"acme","name":"Acme Corp"}`)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
 	}
@@ -74,11 +111,19 @@ func TestCreateProjectEndpoint(t *testing.T) {
 	}
 }
 
-func TestCreateProjectDuplicateReturns409(t *testing.T) {
-	h := newTestHandler(t)
-	_ = post(t, h, "/api/v1/projects", `{"key":"dup","name":"First"}`)
+func TestCreateProjectRequiresAuth(t *testing.T) {
+	a := newTestAPI(t)
+	rr := a.do(t, http.MethodPost, "/api/v1/projects", `{"key":"acme","name":"Acme"}`, false)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated create: status = %d, want 401", rr.Code)
+	}
+}
 
-	rr := post(t, h, "/api/v1/projects", `{"key":"dup","name":"Second"}`)
+func TestCreateProjectDuplicateReturns409(t *testing.T) {
+	a := newTestAPI(t)
+	_ = a.post(t, "/api/v1/projects", `{"key":"dup","name":"First"}`)
+
+	rr := a.post(t, "/api/v1/projects", `{"key":"dup","name":"Second"}`)
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409; body=%s", rr.Code, rr.Body.String())
 	}
@@ -88,7 +133,7 @@ func TestCreateProjectDuplicateReturns409(t *testing.T) {
 }
 
 func TestCreateProjectValidationReturns400(t *testing.T) {
-	h := newTestHandler(t)
+	a := newTestAPI(t)
 
 	for _, body := range []string{
 		`{"key":"BadCase","name":"x"}`,
@@ -97,7 +142,7 @@ func TestCreateProjectValidationReturns400(t *testing.T) {
 		`not json`,
 		`{"key":"acme","name":"x","bogus":true}`,
 	} {
-		rr := post(t, h, "/api/v1/projects", body)
+		rr := a.post(t, "/api/v1/projects", body)
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("body %q: status = %d, want 400", body, rr.Code)
 		}
@@ -105,14 +150,11 @@ func TestCreateProjectValidationReturns400(t *testing.T) {
 }
 
 func TestListProjectsEndpoint(t *testing.T) {
-	h := newTestHandler(t)
-	_ = post(t, h, "/api/v1/projects", `{"key":"acme","name":"Acme"}`)
-	_ = post(t, h, "/api/v1/projects", `{"key":"beta","name":"Beta"}`)
+	a := newTestAPI(t)
+	_ = a.post(t, "/api/v1/projects", `{"key":"acme","name":"Acme"}`)
+	_ = a.post(t, "/api/v1/projects", `{"key":"beta","name":"Beta"}`)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects?limit=10", nil)
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-
+	rr := a.get(t, "/api/v1/projects?limit=10")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}

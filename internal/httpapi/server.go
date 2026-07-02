@@ -13,14 +13,18 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/platbor/platbor/internal/core/auth"
 	"github.com/platbor/platbor/internal/core/config"
 	"github.com/platbor/platbor/internal/core/project"
 )
 
-// API bundles the application services the HTTP layer depends on. It grows one
-// field per domain as features land.
+// API bundles the application services the HTTP layer depends on, plus the few
+// HTTP-facing settings it needs. It grows one field per domain as features land.
 type API struct {
+	Auth     *auth.Service
 	Projects *project.Service
+	// CookieSecure sets the Secure flag on the session cookie.
+	CookieSecure bool
 }
 
 // Server owns the HTTP listener and its graceful-shutdown lifecycle.

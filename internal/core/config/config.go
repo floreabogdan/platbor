@@ -29,6 +29,8 @@ type Config struct {
 	DataDir string `yaml:"dataDir"`
 	// Database configures the metadata store.
 	Database DatabaseConfig `yaml:"database"`
+	// Auth configures identity and sessions.
+	Auth AuthConfig `yaml:"auth"`
 	// Log configures structured logging.
 	Log LogConfig `yaml:"log"`
 	// ShutdownTimeout bounds how long graceful shutdown waits for in-flight
@@ -43,6 +45,18 @@ type DatabaseConfig struct {
 	// DSN is the data source name. When empty, sqlite uses
 	// {DataDir}/platbor.db; postgres requires an explicit DSN.
 	DSN string `yaml:"dsn"`
+}
+
+// AuthConfig configures the identity layer.
+type AuthConfig struct {
+	// AdminUsername is the instance admin created on first run (empty → "admin").
+	AdminUsername string `yaml:"adminUsername"`
+	// AdminPassword sets the first-run admin password. When empty, a random one
+	// is generated and logged once at startup.
+	AdminPassword string `yaml:"adminPassword"`
+	// CookieSecure sets the Secure flag on the session cookie. Enable when
+	// serving over HTTPS (directly or behind a TLS-terminating proxy).
+	CookieSecure bool `yaml:"cookieSecure"`
 }
 
 // LogConfig configures the slog handler.
@@ -62,6 +76,11 @@ func Default() Config {
 		Database: DatabaseConfig{
 			Driver: "sqlite",
 			DSN:    "",
+		},
+		Auth: AuthConfig{
+			AdminUsername: "admin",
+			AdminPassword: "",
+			CookieSecure:  false,
 		},
 		Log: LogConfig{
 			Level:  "info",
@@ -125,6 +144,19 @@ func applyEnv(cfg *Config) error {
 	}
 	if v, ok := lookup("DB_DSN"); ok {
 		cfg.Database.DSN = v
+	}
+	if v, ok := lookup("ADMIN_USERNAME"); ok {
+		cfg.Auth.AdminUsername = v
+	}
+	if v, ok := lookup("ADMIN_PASSWORD"); ok {
+		cfg.Auth.AdminPassword = v
+	}
+	if v, ok := lookup("COOKIE_SECURE"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("parsing %sCOOKIE_SECURE %q: %w", envPrefix, v, err)
+		}
+		cfg.Auth.CookieSecure = b
 	}
 	if v, ok := lookup("LOG_LEVEL"); ok {
 		cfg.Log.Level = v

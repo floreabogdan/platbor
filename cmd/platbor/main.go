@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/platbor/platbor/internal/core/auth"
 	"github.com/platbor/platbor/internal/core/config"
 	"github.com/platbor/platbor/internal/core/db"
 	"github.com/platbor/platbor/internal/core/project"
@@ -61,12 +62,41 @@ func run() error {
 		return fmt.Errorf("running migrations: %w", err)
 	}
 
+	authSvc := auth.NewService(sqlDB)
+	if err := bootstrapAdmin(ctx, authSvc, cfg.Auth, log); err != nil {
+		return err
+	}
+
 	api := httpapi.API{
-		Projects: project.NewService(sqlDB),
+		Auth:         authSvc,
+		Projects:     project.NewService(sqlDB),
+		CookieSecure: cfg.Auth.CookieSecure,
 	}
 
 	log.Info("starting platbor", slog.String("addr", cfg.Addr), slog.String("dataDir", cfg.DataDir))
 	return httpapi.NewServer(cfg, log, assets, api).Run(ctx)
+}
+
+// bootstrapAdmin creates the instance admin on first run and, when it generated
+// the password, prints it prominently so the operator can log in.
+func bootstrapAdmin(ctx context.Context, authSvc *auth.Service, cfg config.AuthConfig, log *slog.Logger) error {
+	res, err := authSvc.Bootstrap(ctx, cfg.AdminUsername, cfg.AdminPassword)
+	if err != nil {
+		return fmt.Errorf("bootstrapping admin: %w", err)
+	}
+	if !res.Created {
+		return nil
+	}
+	if res.GeneratedPassword != "" {
+		log.Warn(
+			"created instance admin with a generated password — change it after logging in",
+			slog.String("username", res.Username),
+			slog.String("password", res.GeneratedPassword),
+		)
+	} else {
+		log.Info("created instance admin", slog.String("username", res.Username))
+	}
+	return nil
 }
 
 // newLogger builds the slog handler from config: text for humans, json for log

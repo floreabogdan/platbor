@@ -118,8 +118,12 @@ func (h projectsHandler) writeCreateError(w http.ResponseWriter, err error) {
 	}
 }
 
-// actorFrom identifies who is performing a request for the audit log. Until auth
-// lands (next Phase-0 slice), everything is attributed to "system".
-func actorFrom(_ *http.Request) string {
+// actorFrom identifies who is performing a request for the audit log. Domain
+// routes run behind requireUser, so a user is always present; "system" is a
+// defensive fallback.
+func actorFrom(r *http.Request) string {
+	if user, ok := userFromContext(r.Context()); ok {
+		return user.Username
+	}
 	return "system"
 }

@@ -26,8 +26,24 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 
 	// Application/automation API.
 	r.Route("/api/v1", func(r chi.Router) {
+		// Attach the authenticated user (if any) to every API request.
+		r.Use(loadSession(api.Auth, log))
 		r.Get("/health", health)
-		r.Route("/projects", projectsHandler{svc: api.Projects, log: log}.mount)
+
+		ah := authHandler{svc: api.Auth, log: log, cookieSecure: api.CookieSecure}
+		r.Route("/auth", func(r chi.Router) {
+			ah.mountPublic(r) // POST /login — public
+			r.Group(func(r chi.Router) {
+				r.Use(requireUser)
+				ah.mountAuthed(r) // /logout, /me
+			})
+		})
+
+		// Domain routes require an authenticated user.
+		r.Group(func(r chi.Router) {
+			r.Use(requireUser)
+			r.Route("/projects", projectsHandler{svc: api.Projects, log: log}.mount)
+		})
 	})
 
 	// Everything else falls through to the embedded SPA.
