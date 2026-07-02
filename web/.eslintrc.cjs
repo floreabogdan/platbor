@@ -16,5 +16,8 @@ module.exports = {
   ignorePatterns: ['dist', 'node_modules', '.eslintrc.cjs', 'vite.config.ts', 'postcss.config.js', 'tailwind.config.js'],
   rules: {
     'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+    // Idiomatic React event handlers (`onClick={() => setOpen(true)}`) return
+    // the void result of a setter; that is not confusing.
+    '@typescript-eslint/no-confusing-void-expression': ['error', { ignoreArrowShorthand: true }],
   },
 };

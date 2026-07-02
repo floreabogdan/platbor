@@ -1,17 +1,21 @@
 // Shared UI primitives — the only place these visual patterns live (DRY).
 // Every class here traces to a recipe in docs/DESIGN-SYSTEM.md.
-import type { HTMLAttributes, ReactNode } from 'react';
+import { forwardRef, useEffect, useRef } from 'react';
+import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { cx } from '../lib/cx';
 
 /** Card — the standard raised surface. */
-export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return (
+export const Card = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
     <div
+      ref={ref}
       className={cx('rounded-2xl border border-slate-200/80 bg-white shadow-card', className)}
       {...props}
     />
-  );
-}
+  ),
+);
+Card.displayName = 'Card';
 
 /** PageHeader — title + optional subtitle on the left, actions on the right. */
 export function PageHeader({
@@ -79,5 +83,81 @@ export function EmptyState({
       <p className="max-w-sm text-sm text-slate-500">{message}</p>
       {action}
     </Card>
+  );
+}
+
+type ButtonVariant = 'primary' | 'secondary';
+
+const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
+  primary: 'bg-teal-600 text-white shadow-sm hover:bg-teal-700 disabled:hover:bg-teal-600',
+  secondary: 'bg-white text-slate-700 ring-1 ring-inset ring-slate-200 hover:bg-slate-50',
+};
+
+/** Button — the standard action control. */
+export function Button({
+  variant = 'primary',
+  className,
+  type = 'button',
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant }) {
+  return (
+    <button
+      type={type}
+      className={cx(
+        'rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+        BUTTON_VARIANTS[variant],
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
+/** Modal — rendered via portal to document.body so it escapes transformed
+ *  ancestors. Closes on Escape and backdrop click; focuses its panel on open. */
+export function Modal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    panelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-900/50 p-6 backdrop-blur-sm"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <Card
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="mt-16 w-full max-w-md p-6 outline-none animate-rise"
+      >
+        <h2 className="mb-4 text-lg font-semibold tracking-tight text-slate-900">{title}</h2>
+        {children}
+      </Card>
+    </div>,
+    document.body,
   );
 }

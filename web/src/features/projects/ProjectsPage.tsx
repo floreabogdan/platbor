@@ -1,36 +1,88 @@
-import { EmptyState, PageHeader } from '../../components/ui';
+import { useState } from 'react';
+import { Button, Card, EmptyState, PageHeader } from '../../components/ui';
 import { ProjectsIcon } from '../../components/icons';
+import type { Project } from '../../lib/types';
+import { useProjects } from './useProjects';
+import { CreateProjectModal } from './CreateProjectModal';
 
-// Projects list. Data fetching moves into a useProjects() hook once the
-// /api/v1/projects endpoint exists (Phase 0 auth slice); for now it renders the
-// empty state so the shell is navigable.
 export function ProjectsPage() {
+  const { projects, state, error, reload } = useProjects();
+  const [creating, setCreating] = useState(false);
+
   return (
     <div className="animate-rise">
       <PageHeader
         title="Projects"
         subtitle="Every artifact and catalog entity is scoped to a project."
-        actions={
-          <button
-            type="button"
-            className="rounded-lg bg-teal-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-teal-700"
-          >
-            New project
-          </button>
-        }
+        actions={<Button onClick={() => setCreating(true)}>New project</Button>}
       />
-      <EmptyState
-        icon={<ProjectsIcon className="h-8 w-8" />}
-        message="No projects yet. Create one to start pushing artifacts and cataloging components."
-        action={
-          <button
-            type="button"
-            className="rounded-lg bg-teal-600 px-3.5 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-teal-700"
-          >
-            New project
-          </button>
-        }
-      />
+
+      {state === 'loading' ? <SkeletonList /> : null}
+
+      {state === 'error' ? (
+        <Card className="p-6">
+          <p className="text-sm text-red-700">{error ?? 'Failed to load projects.'}</p>
+          <Button variant="secondary" className="mt-3" onClick={() => void reload()}>
+            Retry
+          </Button>
+        </Card>
+      ) : null}
+
+      {state === 'ready' && projects.length === 0 ? (
+        <EmptyState
+          icon={<ProjectsIcon className="h-8 w-8" />}
+          message="No projects yet. Create one to start pushing artifacts and cataloging components."
+          action={<Button onClick={() => setCreating(true)}>New project</Button>}
+        />
+      ) : null}
+
+      {state === 'ready' && projects.length > 0 ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {projects.map((p) => (
+            <ProjectCard key={p.id} project={p} />
+          ))}
+        </div>
+      ) : null}
+
+      {creating ? (
+        <CreateProjectModal onClose={() => setCreating(false)} onCreated={() => void reload()} />
+      ) : null}
     </div>
   );
+}
+
+function ProjectCard({ project }: { project: Project }) {
+  return (
+    <Card className="p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate font-semibold text-slate-900">{project.name}</h3>
+          <span className="mt-1 inline-block rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">
+            {project.key}
+          </span>
+        </div>
+      </div>
+      {project.description ? (
+        <p className="mt-3 line-clamp-2 text-sm text-slate-500">{project.description}</p>
+      ) : null}
+      <p className="mt-4 text-xs text-slate-400">Created {formatDate(project.createdAt)}</p>
+    </Card>
+  );
+}
+
+function SkeletonList() {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {[0, 1, 2].map((i) => (
+        <Card key={i} className="h-28 animate-pulse bg-slate-50" />
+      ))}
+    </div>
+  );
+}
+
+function formatDate(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? iso
+    : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
