@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button, Card, EmptyState, PageHeader } from '../../components/ui';
 import { ProjectsIcon } from '../../components/icons';
+import { formatDate } from '../../lib/format';
 import type { Project } from '../../lib/types';
 import { useProjects } from './useProjects';
 import { CreateProjectModal } from './CreateProjectModal';
@@ -78,11 +79,4 @@ function SkeletonList() {
       ))}
     </div>
   );
-}
-
-function formatDate(iso: string): string {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime())
-    ? iso
-    : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }

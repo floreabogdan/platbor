@@ -29,6 +29,24 @@ export interface CreateProjectRequest {
   description?: string;
 }
 
+export interface Token {
+  id: string;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  expiresAt?: string;
+}
+
+export interface CreateTokenRequest {
+  name: string;
+  expiresInDays?: number;
+}
+
+/** The create response includes the raw secret, shown exactly once. */
+export interface CreateTokenResponse extends Token {
+  token: string;
+}
+
 /** RFC 7807 problem+json — the single error shape from the API. */
 export interface Problem {
   type: string;

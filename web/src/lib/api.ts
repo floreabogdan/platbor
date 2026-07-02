@@ -1,4 +1,13 @@
-import type { CreateProjectRequest, ListProjectsResponse, Problem, Project, User } from './types';
+import type {
+  CreateProjectRequest,
+  CreateTokenRequest,
+  CreateTokenResponse,
+  ListProjectsResponse,
+  Problem,
+  Project,
+  Token,
+  User,
+} from './types';
 
 const BASE = '/api/v1';
 
@@ -64,4 +73,13 @@ export const api = {
 
   createProject: (body: CreateProjectRequest): Promise<Project> =>
     request<Project>(`/projects`, { method: 'POST', body: JSON.stringify(body) }),
+
+  // Tokens
+  listTokens: (): Promise<{ tokens: Token[] }> => request<{ tokens: Token[] }>(`/tokens`),
+
+  createToken: (body: CreateTokenRequest): Promise<CreateTokenResponse> =>
+    request<CreateTokenResponse>(`/tokens`, { method: 'POST', body: JSON.stringify(body) }),
+
+  deleteToken: (id: string): Promise<void> =>
+    request<undefined>(`/tokens/${id}`, { method: 'DELETE' }),
 };
