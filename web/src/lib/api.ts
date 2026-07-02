@@ -2,6 +2,7 @@ import type {
   CreateProjectRequest,
   CreateTokenRequest,
   CreateTokenResponse,
+  DashboardResponse,
   ListProjectsResponse,
   ListRepositoriesResponse,
   ListTagsResponse,
@@ -105,4 +106,7 @@ export const api = {
       `/registry/${encodeURIComponent(project)}/manifests${query({ repository, reference })}`,
       { method: 'DELETE' },
     ),
+
+  // Dashboard
+  getDashboard: (): Promise<DashboardResponse> => request<DashboardResponse>(`/dashboard`),
 };

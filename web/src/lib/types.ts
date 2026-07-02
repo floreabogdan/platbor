@@ -116,3 +116,29 @@ export interface ManifestDetail {
   layers: Layer[];
   manifests: IndexEntry[];
 }
+
+// --- Dashboard ---
+
+/** DashboardSummary — coarse instance counts. */
+export interface DashboardSummary {
+  projects: number;
+  repositories: number;
+  tags: number;
+}
+
+/** ActivityEntry — one audited mutation, for the recent-activity feed. */
+export interface ActivityEntry {
+  actor: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  metadata?: Record<string, string>;
+  projectKey?: string;
+  projectName?: string;
+  at: string;
+}
+
+export interface DashboardResponse {
+  summary: DashboardSummary;
+  activity: ActivityEntry[];
+}
