@@ -24,7 +24,7 @@ Goal: a real container registry. This is the hardest protocol and the anchor fea
 - [~] Auth: HTTP Basic challenge on `/v2` done (password or PAT); bearer-token JWT flow later
 - [~] Tag listing + deletion done (paginated `tags/list`, manifest/tag delete); per-repo storage accounting pending
 - [ ] Pull-through proxy repo type (Docker Hub, ghcr.io) with cache
-- [ ] Mark-and-sweep GC job for unreferenced blobs
+- [x] Mark-and-sweep GC for unreferenced blobs — `blob.Sweep` (generic, with a grace window) + `oci.Collector` (marks config/layer blobs across all manifests); admin-triggered via `POST /api/v1/registry/gc` (dry-run supported) and the Settings page
 - [x] UI: repo browser — repositories grouped by project, tags, manifest detail (config + layers with sizes, multi-arch index platforms), copy-paste pull commands (`/api/v1/registry` read API + `/registry` pages)
 - [ ] Conformance: pass the `opencontainers/distribution-spec` conformance suite in CI; verify docker, podman, helm, oras clients
 

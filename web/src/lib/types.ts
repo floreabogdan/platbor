@@ -156,3 +156,14 @@ export interface DashboardResponse {
   summary: DashboardSummary;
   activity: ActivityEntry[];
 }
+
+// --- Maintenance ---
+
+/** GCResult — the outcome of a garbage-collection sweep. */
+export interface GCResult {
+  dryRun: boolean;
+  scanned: number;
+  deleted: number;
+  reclaimedBytes: number;
+  kept: number;
+}

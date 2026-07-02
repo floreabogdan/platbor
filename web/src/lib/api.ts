@@ -3,6 +3,7 @@ import type {
   CreateTokenRequest,
   CreateTokenResponse,
   DashboardResponse,
+  GCResult,
   ListProjectsResponse,
   ListReferrersResponse,
   ListRepositoriesResponse,
@@ -115,4 +116,8 @@ export const api = {
 
   // Dashboard
   getDashboard: (): Promise<DashboardResponse> => request<DashboardResponse>(`/dashboard`),
+
+  // Maintenance (instance admin)
+  runGarbageCollection: (dryRun: boolean): Promise<GCResult> =>
+    request<GCResult>(`/registry/gc?dryRun=${String(dryRun)}`, { method: 'POST' }),
 };

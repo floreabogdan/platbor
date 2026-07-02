@@ -171,13 +171,15 @@ function describeActivity(e: ActivityEntry): { verb: string; target?: string; to
       return { verb: 'deleted a tag' };
     case 'project.create':
       return { verb: 'created project', target: e.projectName ?? project };
+    case 'registry.gc':
+      return { verb: 'ran garbage collection' };
     default:
       return { verb: e.action };
   }
 }
 
 function actionIcon(action: string): ReactNode {
-  if (action.endsWith('.delete')) {
+  if (action.endsWith('.delete') || action === 'registry.gc') {
     return <TrashIcon className="h-4 w-4" />;
   }
   if (action === 'project.create') {
