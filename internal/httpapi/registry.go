@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -12,11 +13,12 @@ import (
 	"github.com/platbor/platbor/internal/registry/oci"
 )
 
-// registryHandler serves the read-only /api/v1/registry endpoints that back the
-// UI repository browser. Writes happen over the /v2 protocol; this is the
-// browsable view of what was pushed.
+// registryHandler serves the /api/v1/registry endpoints that back the UI
+// repository browser: a browsable view of what was pushed over /v2, plus
+// session-authenticated deletion.
 type registryHandler struct {
 	browser  *oci.Browser
+	manager  *oci.Manager
 	projects *project.Service
 	log      *slog.Logger
 }
@@ -26,8 +28,9 @@ func (h registryHandler) mount(r chi.Router) {
 	r.Get("/repositories", h.listRepositories)
 	// Everything below is scoped to one project.
 	r.Route("/{project}", func(r chi.Router) {
-		r.Get("/tags", h.listTags)         // ?repository=<repo>
-		r.Get("/manifests", h.getManifest) // ?repository=<repo>&reference=<tag|digest>
+		r.Get("/tags", h.listTags)               // ?repository=<repo>
+		r.Get("/manifests", h.getManifest)       // ?repository=<repo>&reference=<tag|digest>
+		r.Delete("/manifests", h.deleteManifest) // ?repository=<repo>&reference=<tag|digest>
 	})
 }
 
@@ -155,6 +158,40 @@ func (h registryHandler) getManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, h.log, http.StatusOK, toManifestResponse(view))
+}
+
+// deleteManifest removes a tag (reference is a tag) or a whole manifest and all
+// its tags (reference is a digest). Deletion is audited by the store as the
+// authenticated user.
+func (h registryHandler) deleteManifest(w http.ResponseWriter, r *http.Request) {
+	proj, repo, ok := h.resolveScope(w, r)
+	if !ok {
+		return
+	}
+	reference := r.URL.Query().Get("reference")
+	if reference == "" {
+		writeProblem(w, http.StatusBadRequest, "Missing reference", "the reference query parameter is required")
+		return
+	}
+
+	actor := actorFrom(r)
+	var err error
+	if strings.Contains(reference, ":") {
+		// A digest reference deletes the manifest and every tag pointing at it.
+		err = h.manager.DeleteManifest(r.Context(), proj.ID, repo, reference, actor)
+	} else {
+		err = h.manager.DeleteTag(r.Context(), proj.ID, repo, reference, actor)
+	}
+	if err != nil {
+		if errors.Is(err, oci.ErrManifestNotFound) {
+			writeProblem(w, http.StatusNotFound, "Not found", "no tag or manifest for that reference")
+			return
+		}
+		h.log.Error("deleting manifest", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // resolveScope validates the {project} path param and the required repository
