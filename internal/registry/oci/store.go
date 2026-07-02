@@ -109,6 +109,34 @@ func (s *manifestStore) listTags(ctx context.Context, projectID, repo, last stri
 	return tags, nil
 }
 
+// referencedBlobs returns the set of blob digests every stored manifest needs —
+// the config and layer descriptors across all manifests, spanning all projects
+// (blobs are a global CAS). An index references child manifests rather than
+// blobs and contributes nothing directly; each child's blobs are counted when
+// its own payload is parsed.
+func (s *manifestStore) referencedBlobs(ctx context.Context) (map[string]struct{}, error) {
+	payloads, err := s.q.ListManifestPayloads(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing manifest payloads: %w", err)
+	}
+	refs := make(map[string]struct{})
+	for _, payload := range payloads {
+		var doc manifestDoc
+		if err := json.Unmarshal(payload, &doc); err != nil {
+			continue // a stored manifest is well-formed; skip anything odd
+		}
+		if doc.Config != nil && doc.Config.Digest != "" {
+			refs[doc.Config.Digest] = struct{}{}
+		}
+		for _, l := range doc.Layers {
+			if l.Digest != "" {
+				refs[l.Digest] = struct{}{}
+			}
+		}
+	}
+	return refs, nil
+}
+
 // referrerRow is a manifest that refers to a subject, read back for the
 // referrers API (payload carried so the handler can extract annotations).
 type referrerRow struct {

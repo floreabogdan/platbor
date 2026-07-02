@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -27,6 +28,7 @@ type harness struct {
 	router http.Handler
 	auth   *auth.Service
 	db     *sql.DB
+	blobs  blob.Store
 }
 
 func newHarness(t *testing.T) *harness {
@@ -61,7 +63,7 @@ func newHarness(t *testing.T) *harness {
 	r.Route("/v2", func(sub chi.Router) {
 		oci.New().Mount(sub, registry.Deps{Blobs: store, Auth: authSvc, DB: sqlDB, Log: discardLogger()})
 	})
-	return &harness{router: r, auth: authSvc, db: sqlDB}
+	return &harness{router: r, auth: authSvc, db: sqlDB, blobs: store}
 }
 
 func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -532,6 +534,86 @@ func TestBrowserRepositoriesTagsAndManifest(t *testing.T) {
 	// An unknown reference is a not-found, not an empty view.
 	if _, err := browser.Manifest(ctx, projectID, "alpine", "nope"); !errors.Is(err, oci.ErrManifestNotFound) {
 		t.Errorf("unknown ref error = %v, want ErrManifestNotFound", err)
+	}
+}
+
+// --- Collector (garbage collection) ---
+
+func TestCollectorReclaimsOrphanBlobs(t *testing.T) {
+	h := newHarness(t)
+	const name = "library/alpine"
+	body, digest := h.buildImage(t, name) // pushes a config + a layer blob
+	if put := h.putManifest(t, name, "v1.0", body); put.Code != http.StatusCreated {
+		t.Fatalf("push: status = %d", put.Code)
+	}
+
+	ctx := context.Background()
+	projectID := mustProjectID(t, h, "library")
+	collector := oci.NewCollector(h.blobs, h.db)
+	// A "now" far in the future puts the just-written blobs outside any grace
+	// window, so eligibility is deterministic.
+	future := time.Now().Add(48 * time.Hour)
+
+	// While the manifest exists, its config + layer are referenced: GC frees nothing.
+	before, err := collector.Collect(ctx, "admin", time.Hour, false, future)
+	if err != nil {
+		t.Fatalf("Collect (referenced): %v", err)
+	}
+	if before.Deleted != 0 {
+		t.Errorf("expected 0 deletions while referenced, got %+v", before)
+	}
+
+	// Delete the manifest; its two blobs become orphans.
+	if err := oci.NewManager(h.db).DeleteManifest(ctx, projectID, "alpine", digest, "admin"); err != nil {
+		t.Fatalf("DeleteManifest: %v", err)
+	}
+
+	report, err := collector.Collect(ctx, "admin", time.Hour, false, future)
+	if err != nil {
+		t.Fatalf("Collect (orphans): %v", err)
+	}
+	if report.Deleted != 2 {
+		t.Errorf("expected 2 orphan blobs reclaimed, got %+v", report)
+	}
+	if report.ReclaimedBytes <= 0 {
+		t.Errorf("reclaimedBytes = %d, want > 0", report.ReclaimedBytes)
+	}
+
+	// The CAS is now empty.
+	remaining := 0
+	if err := h.blobs.Walk(ctx, func(blob.Info) error { remaining++; return nil }); err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if remaining != 0 {
+		t.Errorf("expected empty CAS after GC, %d blobs remain", remaining)
+	}
+}
+
+func TestCollectorDryRunKeepsBlobs(t *testing.T) {
+	h := newHarness(t)
+	const name = "library/alpine"
+	body, digest := h.buildImage(t, name)
+	_ = h.putManifest(t, name, "v1.0", body)
+
+	ctx := context.Background()
+	projectID := mustProjectID(t, h, "library")
+	if err := oci.NewManager(h.db).DeleteManifest(ctx, projectID, "alpine", digest, "admin"); err != nil {
+		t.Fatalf("DeleteManifest: %v", err)
+	}
+
+	collector := oci.NewCollector(h.blobs, h.db)
+	future := time.Now().Add(48 * time.Hour)
+	report, err := collector.Collect(ctx, "admin", time.Hour, true, future) // dry run
+	if err != nil {
+		t.Fatalf("Collect (dry): %v", err)
+	}
+	if report.Deleted != 2 {
+		t.Errorf("dry run should report 2 removable, got %+v", report)
+	}
+	remaining := 0
+	_ = h.blobs.Walk(ctx, func(blob.Info) error { remaining++; return nil })
+	if remaining != 2 {
+		t.Errorf("dry run must not delete: %d blobs remain, want 2", remaining)
 	}
 }
 
