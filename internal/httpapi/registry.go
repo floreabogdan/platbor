@@ -31,6 +31,7 @@ func (h registryHandler) mount(r chi.Router) {
 		r.Get("/tags", h.listTags)               // ?repository=<repo>
 		r.Get("/manifests", h.getManifest)       // ?repository=<repo>&reference=<tag|digest>
 		r.Delete("/manifests", h.deleteManifest) // ?repository=<repo>&reference=<tag|digest>
+		r.Get("/referrers", h.listReferrers)     // ?repository=<repo>&subject=<digest>
 	})
 }
 
@@ -85,6 +86,18 @@ type manifestResponse struct {
 	Config    *layerResponse       `json:"config,omitempty"`
 	Layers    []layerResponse      `json:"layers"`
 	Manifests []indexEntryResponse `json:"manifests"`
+}
+
+type referrerResponse struct {
+	Digest       string            `json:"digest"`
+	MediaType    string            `json:"mediaType"`
+	Size         int64             `json:"size"`
+	ArtifactType string            `json:"artifactType,omitempty"`
+	Annotations  map[string]string `json:"annotations,omitempty"`
+}
+
+type listReferrersResponse struct {
+	Referrers []referrerResponse `json:"referrers"`
 }
 
 // --- handlers ---
@@ -158,6 +171,38 @@ func (h registryHandler) getManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, h.log, http.StatusOK, toManifestResponse(view))
+}
+
+// listReferrers returns the artifacts (signatures, SBOMs, attestations) whose
+// subject is the given manifest digest.
+func (h registryHandler) listReferrers(w http.ResponseWriter, r *http.Request) {
+	proj, repo, ok := h.resolveScope(w, r)
+	if !ok {
+		return
+	}
+	subject := r.URL.Query().Get("subject")
+	if subject == "" {
+		writeProblem(w, http.StatusBadRequest, "Missing subject", "the subject query parameter is required")
+		return
+	}
+
+	refs, err := h.browser.Referrers(r.Context(), proj.ID, repo, subject)
+	if err != nil {
+		h.log.Error("listing referrers", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	items := make([]referrerResponse, 0, len(refs))
+	for _, ref := range refs {
+		items = append(items, referrerResponse{
+			Digest:       ref.Digest,
+			MediaType:    ref.MediaType,
+			Size:         ref.Size,
+			ArtifactType: ref.ArtifactType,
+			Annotations:  ref.Annotations,
+		})
+	}
+	writeJSON(w, h.log, http.StatusOK, listReferrersResponse{Referrers: items})
 }
 
 // deleteManifest removes a tag (reference is a tag) or a whole manifest and all
