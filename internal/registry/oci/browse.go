@@ -74,6 +74,25 @@ type ManifestView struct {
 	Manifests []IndexEntry // index children
 }
 
+// Stats is a coarse count of registry contents, for the dashboard summary.
+type Stats struct {
+	Repositories int
+	Tags         int
+}
+
+// Stats returns instance-wide repository and tag counts.
+func (b *Browser) Stats(ctx context.Context) (Stats, error) {
+	repos, err := b.q.CountRepositories(ctx)
+	if err != nil {
+		return Stats{}, fmt.Errorf("counting repositories: %w", err)
+	}
+	tags, err := b.q.CountTags(ctx)
+	if err != nil {
+		return Stats{}, fmt.Errorf("counting tags: %w", err)
+	}
+	return Stats{Repositories: int(repos), Tags: int(tags)}, nil
+}
+
 // Repositories returns every repository across all projects, ordered by project
 // then repository, for the browser's grouped index.
 func (b *Browser) Repositories(ctx context.Context) ([]RepositorySummary, error) {

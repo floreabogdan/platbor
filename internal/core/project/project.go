@@ -139,6 +139,15 @@ func (s *Service) GetByKey(ctx context.Context, key string) (Project, error) {
 	return toDomain(row)
 }
 
+// Count returns the total number of projects (for the dashboard summary).
+func (s *Service) Count(ctx context.Context) (int, error) {
+	n, err := s.q.CountProjects(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("counting projects: %w", err)
+	}
+	return int(n), nil
+}
+
 // Page is a slice of projects plus the cursor to fetch the next page, empty
 // when the last page has been reached.
 type Page struct {
