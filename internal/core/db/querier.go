@@ -17,11 +17,16 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, expiresAt string) error
+	DeleteManifest(ctx context.Context, arg DeleteManifestParams) (int64, error)
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash string) error
+	DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error)
+	DeleteTagsForDigest(ctx context.Context, arg DeleteTagsForDigestParams) error
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (GetAPITokenByHashRow, error)
+	GetManifest(ctx context.Context, arg GetManifestParams) (OciManifest, error)
 	GetProjectByID(ctx context.Context, id string) (Project, error)
 	GetProjectByKey(ctx context.Context, key string) (Project, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (GetSessionByTokenHashRow, error)
+	GetTag(ctx context.Context, arg GetTagParams) (OciTag, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
 	InsertAuditEntry(ctx context.Context, arg InsertAuditEntryParams) (AuditLog, error)
@@ -31,6 +36,14 @@ type Querier interface {
 	// string, which sorts before any valid key, so a single query serves both the
 	// first page and subsequent pages.
 	ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error)
+	// Keyset pagination on `tag`: the empty string sorts before any tag, so the
+	// first page and subsequent pages share one query.
+	ListTags(ctx context.Context, arg ListTagsParams) ([]string, error)
+	ManifestExists(ctx context.Context, arg ManifestExistsParams) (int64, error)
+	// Store a manifest by digest. Re-pushing identical content is a no-op, so an
+	// image can be tagged repeatedly without duplicating the payload.
+	UpsertManifest(ctx context.Context, arg UpsertManifestParams) error
+	UpsertTag(ctx context.Context, arg UpsertTagParams) error
 }
 
 var _ Querier = (*Queries)(nil)
