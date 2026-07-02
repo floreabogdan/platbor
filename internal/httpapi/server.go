@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/platbor/platbor/internal/core/auth"
+	"github.com/platbor/platbor/internal/core/blob"
 	"github.com/platbor/platbor/internal/core/config"
 	"github.com/platbor/platbor/internal/core/project"
 )
@@ -23,6 +24,7 @@ import (
 type API struct {
 	Auth     *auth.Service
 	Projects *project.Service
+	Blobs    blob.Store
 	// CookieSecure sets the Secure flag on the session cookie.
 	CookieSecure bool
 }

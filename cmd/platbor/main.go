@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/platbor/platbor/internal/core/auth"
+	"github.com/platbor/platbor/internal/core/blob"
 	"github.com/platbor/platbor/internal/core/config"
 	"github.com/platbor/platbor/internal/core/db"
 	"github.com/platbor/platbor/internal/core/project"
@@ -67,9 +68,15 @@ func run() error {
 		return err
 	}
 
+	blobStore, err := blob.NewFS(cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("initializing blob store: %w", err)
+	}
+
 	api := httpapi.API{
 		Auth:         authSvc,
 		Projects:     project.NewService(sqlDB),
+		Blobs:        blobStore,
 		CookieSecure: cfg.Auth.CookieSecure,
 	}
 

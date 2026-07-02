@@ -8,6 +8,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/platbor/platbor/internal/registry"
+	"github.com/platbor/platbor/internal/registry/oci"
 )
 
 // newRouter assembles the top-level request tree. Ordering matters: operational
@@ -45,6 +48,12 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 			r.Route("/tokens", tokensHandler{svc: api.Auth, log: log}.mount)
 			r.Route("/projects", projectsHandler{svc: api.Projects, log: log}.mount)
 		})
+	})
+
+	// Format-protocol routes. Each adapter owns its URL prefix and its own
+	// protocol-native auth and errors.
+	r.Route("/v2", func(sub chi.Router) {
+		oci.New().Mount(sub, registry.Deps{Blobs: api.Blobs, Auth: api.Auth, Log: log})
 	})
 
 	// Everything else falls through to the embedded SPA.
