@@ -8,10 +8,12 @@ import { formatBytes, formatRelativeTime } from '../../lib/format';
 import type { Repository } from '../../lib/types';
 import { useRepositories } from './useRegistry';
 
-// The registry index. Registries accumulate thousands of repositories, so this
-// is a dense, scannable table — filter by name or project, narrow to one
-// project, and sort any column — rather than a wall of cards. Every row says
-// what it is (Local vs Proxy), where it lives (project), and how big it is.
+// The registry index. Registries accumulate thousands of repositories across a
+// smaller number of projects, so the default is a "grouped" view — collapsible
+// per-project sections with rollups, which answers "what's where" at a glance
+// and matches the project-as-container model. A "flat" toggle swaps in one
+// sortable table for cross-project questions ("the biggest repo anywhere").
+// Both are one aligned table — never a literal table nested inside a cell.
 export function RegistryPage() {
   const { repositories, state, error, reload } = useRepositories();
 
@@ -41,7 +43,7 @@ export function RegistryPage() {
       ) : null}
 
       {state === 'ready' && repositories.length > 0 ? (
-        <RepositoryTable repositories={repositories} />
+        <RepositoryBrowser repositories={repositories} />
       ) : null}
     </div>
   );
@@ -51,6 +53,7 @@ export function RegistryPage() {
 
 type SortKey = 'repository' | 'project' | 'kind' | 'tags' | 'manifests' | 'size' | 'updated';
 type SortDir = 'asc' | 'desc';
+type Sort = { key: SortKey; dir: SortDir };
 
 // Text columns read best ascending; counts, size, and recency read best with the
 // largest/newest first, so that is each column's default direction on first click.
@@ -80,11 +83,31 @@ function stableKey(r: Repository): string {
   return `${r.projectKey}/${r.repository}`;
 }
 
-function RepositoryTable({ repositories }: { repositories: Repository[] }) {
-  const navigate = useNavigate();
+function sortRepos(list: Repository[], sort: Sort): Repository[] {
+  const dir = sort.dir === 'asc' ? 1 : -1;
+  return [...list].sort((a, b) => {
+    const primary = compareBy(a, b, sort.key) * dir;
+    return primary !== 0 ? primary : stableKey(a).localeCompare(stableKey(b));
+  });
+}
+
+// --- browser ---
+
+type View = 'grouped' | 'flat';
+
+interface ProjectGroup {
+  key: string;
+  name: string;
+  repos: Repository[];
+  sizeBytes: number;
+}
+
+function RepositoryBrowser({ repositories }: { repositories: Repository[] }) {
+  const [view, setView] = useState<View>('grouped');
   const [query, setQuery] = useState<string>('');
   const [project, setProject] = useState<string>('');
-  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'project', dir: 'asc' });
+  const [sort, setSort] = useState<Sort>({ key: 'repository', dir: 'asc' });
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   // The project filter offers each distinct project once, ordered as the server
   // returned them (already project-sorted).
@@ -98,9 +121,9 @@ function RepositoryTable({ repositories }: { repositories: Repository[] }) {
     return [...seen.entries()].map(([key, name]) => ({ key, name }));
   }, [repositories]);
 
-  const rows = useMemo(() => {
+  const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const filtered = repositories.filter((r) => {
+    return repositories.filter((r) => {
       if (project !== '' && r.projectKey !== project) {
         return false;
       }
@@ -113,12 +136,25 @@ function RepositoryTable({ repositories }: { repositories: Repository[] }) {
         r.projectName.toLowerCase().includes(q)
       );
     });
-    const dir = sort.dir === 'asc' ? 1 : -1;
-    return [...filtered].sort((a, b) => {
-      const primary = compareBy(a, b, sort.key) * dir;
-      return primary !== 0 ? primary : stableKey(a).localeCompare(stableKey(b));
-    });
-  }, [repositories, query, project, sort]);
+  }, [repositories, query, project]);
+
+  const sorted = useMemo(() => sortRepos(filtered, sort), [filtered, sort]);
+
+  // Grouped view: bucket the sorted rows by project (so within-group order still
+  // follows the active sort), with project sections in stable key order.
+  const groups = useMemo<ProjectGroup[]>(() => {
+    const byKey = new Map<string, ProjectGroup>();
+    for (const r of sorted) {
+      let g = byKey.get(r.projectKey);
+      if (!g) {
+        g = { key: r.projectKey, name: r.projectName, repos: [], sizeBytes: 0 };
+        byKey.set(r.projectKey, g);
+      }
+      g.repos.push(r);
+      g.sizeBytes += r.sizeBytes;
+    }
+    return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
+  }, [sorted]);
 
   function toggleSort(key: SortKey) {
     setSort((prev) =>
@@ -128,89 +164,209 @@ function RepositoryTable({ repositories }: { repositories: Repository[] }) {
     );
   }
 
+  function toggleGroup(key: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }
+
+  const allCollapsed = collapsed.size >= groups.length && groups.length > 0;
+
+  function toggleAll() {
+    setCollapsed(allCollapsed ? new Set() : new Set(groups.map((g) => g.key)));
+  }
+
   return (
     <div className="space-y-4">
       <Toolbar
+        view={view}
+        onView={setView}
         query={query}
         onQuery={setQuery}
         project={project}
         onProject={setProject}
         projects={projects}
-        shown={rows.length}
+        shown={filtered.length}
         total={repositories.length}
+        projectCount={groups.length}
+        allCollapsed={allCollapsed}
+        onToggleAll={toggleAll}
       />
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10 bg-white">
-              <tr className="border-b border-slate-200/80 text-left text-xs uppercase tracking-wide text-slate-400">
-                <SortableTh label="Repository" col="repository" sort={sort} onSort={toggleSort} />
-                <SortableTh label="Project" col="project" sort={sort} onSort={toggleSort} />
-                <SortableTh label="Type" col="kind" sort={sort} onSort={toggleSort} />
-                <SortableTh label="Tags" col="tags" sort={sort} onSort={toggleSort} align="right" />
-                <SortableTh label="Manifests" col="manifests" sort={sort} onSort={toggleSort} align="right" />
-                <SortableTh label="Size" col="size" sort={sort} onSort={toggleSort} align="right" />
-                <SortableTh label="Updated" col="updated" sort={sort} onSort={toggleSort} align="right" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400">
-                    No repositories match your filters.
-                  </td>
-                </tr>
-              ) : (
-                rows.map((repo) => {
-                  const href = `/registry/${encodeURIComponent(repo.projectKey)}/${repo.repository}`;
-                  return (
-                    <tr
-                      key={stableKey(repo)}
-                      onClick={() => {
-                        navigate(href);
-                      }}
-                      className="cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50"
-                    >
-                      <Td>
-                        <Link
-                          to={href}
-                          onClick={(e) => e.stopPropagation()}
-                          className="font-mono font-medium text-slate-900 hover:text-teal-700"
-                        >
-                          {repo.repository}
-                        </Link>
-                      </Td>
-                      <Td>
-                        <span
-                          className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600"
-                          title={repo.projectName}
-                        >
-                          {repo.projectKey}
-                        </span>
-                      </Td>
-                      <Td>
-                        <TypeBadge kind={repo.kind} />
-                      </Td>
-                      <Td className="text-right tabular-nums text-slate-600">{repo.tagCount}</Td>
-                      <Td className="text-right tabular-nums text-slate-600">{repo.manifestCount}</Td>
-                      <Td className="text-right tabular-nums text-slate-600">{formatBytes(repo.sizeBytes)}</Td>
-                      <Td className="text-right text-slate-500">
-                        <span title={repo.updatedAt}>{formatRelativeTime(repo.updatedAt)}</span>
-                      </Td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+          {view === 'flat' ? (
+            <FlatTable rows={sorted} sort={sort} onSort={toggleSort} />
+          ) : (
+            <GroupedTable groups={groups} sort={sort} onSort={toggleSort} collapsed={collapsed} onToggle={toggleGroup} />
+          )}
         </div>
       </Card>
     </div>
   );
 }
 
+// --- flat table ---
+
+function FlatTable({ rows, sort, onSort }: { rows: Repository[]; sort: Sort; onSort: (k: SortKey) => void }) {
+  const navigate = useNavigate();
+  return (
+    <table className="w-full text-sm">
+      <thead className="sticky top-0 z-10 bg-white">
+        <tr className="border-b border-slate-200/80 text-left text-xs uppercase tracking-wide text-slate-400">
+          <SortableTh label="Repository" col="repository" sort={sort} onSort={onSort} />
+          <SortableTh label="Project" col="project" sort={sort} onSort={onSort} />
+          <SortableTh label="Type" col="kind" sort={sort} onSort={onSort} />
+          <SortableTh label="Tags" col="tags" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="Manifests" col="manifests" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="Size" col="size" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="Updated" col="updated" sort={sort} onSort={onSort} align="right" />
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length === 0 ? (
+          <EmptyRow colSpan={7} />
+        ) : (
+          rows.map((repo) => <RepoRow key={stableKey(repo)} repo={repo} showProject navigate={navigate} />)
+        )}
+      </tbody>
+    </table>
+  );
+}
+
+// --- grouped table ---
+
+function GroupedTable({
+  groups,
+  sort,
+  onSort,
+  collapsed,
+  onToggle,
+}: {
+  groups: ProjectGroup[];
+  sort: Sort;
+  onSort: (k: SortKey) => void;
+  collapsed: ReadonlySet<string>;
+  onToggle: (key: string) => void;
+}) {
+  const navigate = useNavigate();
+  return (
+    <table className="w-full text-sm">
+      <thead className="sticky top-0 z-10 bg-white">
+        <tr className="border-b border-slate-200/80 text-left text-xs uppercase tracking-wide text-slate-400">
+          <SortableTh label="Repository" col="repository" sort={sort} onSort={onSort} />
+          <SortableTh label="Type" col="kind" sort={sort} onSort={onSort} />
+          <SortableTh label="Tags" col="tags" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="Manifests" col="manifests" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="Size" col="size" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="Updated" col="updated" sort={sort} onSort={onSort} align="right" />
+        </tr>
+      </thead>
+      {groups.length === 0 ? (
+        <tbody>
+          <EmptyRow colSpan={6} />
+        </tbody>
+      ) : (
+        groups.map((g) => {
+          const open = !collapsed.has(g.key);
+          return (
+            <tbody key={g.key}>
+              <tr
+                onClick={() => {
+                  onToggle(g.key);
+                }}
+                className="cursor-pointer border-b border-slate-200/70 bg-slate-50/60 transition-colors hover:bg-slate-100/70"
+              >
+                <td colSpan={6} className="px-4 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400">{open ? '▾' : '▸'}</span>
+                    <span className="font-semibold text-slate-900">{g.name}</span>
+                    <span className="rounded-md bg-slate-200/70 px-1.5 py-0.5 font-mono text-xs text-slate-600">
+                      {g.key}
+                    </span>
+                    <span className="ml-auto font-mono text-xs text-slate-400">
+                      {g.repos.length} {g.repos.length === 1 ? 'repo' : 'repos'} · {formatBytes(g.sizeBytes)}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+              {open
+                ? g.repos.map((repo) => (
+                    <RepoRow key={stableKey(repo)} repo={repo} showProject={false} navigate={navigate} />
+                  ))
+                : null}
+            </tbody>
+          );
+        })
+      )}
+    </table>
+  );
+}
+
+// --- shared row ---
+
+type NavigateFn = ReturnType<typeof useNavigate>;
+
+function RepoRow({
+  repo,
+  showProject,
+  navigate,
+}: {
+  repo: Repository;
+  showProject: boolean;
+  navigate: NavigateFn;
+}) {
+  const href = `/registry/${encodeURIComponent(repo.projectKey)}/${repo.repository}`;
+  return (
+    <tr
+      onClick={() => {
+        navigate(href);
+      }}
+      className="cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50"
+    >
+      <Td>
+        <Link
+          to={href}
+          onClick={(e) => e.stopPropagation()}
+          className="font-mono font-medium text-slate-900 hover:text-teal-700"
+        >
+          {repo.repository}
+        </Link>
+      </Td>
+      {showProject ? (
+        <Td>
+          <span
+            className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600"
+            title={repo.projectName}
+          >
+            {repo.projectKey}
+          </span>
+        </Td>
+      ) : null}
+      <Td>
+        <TypeBadge kind={repo.kind} />
+      </Td>
+      <Td className="text-right tabular-nums text-slate-600">{repo.tagCount}</Td>
+      <Td className="text-right tabular-nums text-slate-600">{repo.manifestCount}</Td>
+      <Td className="text-right tabular-nums text-slate-600">{formatBytes(repo.sizeBytes)}</Td>
+      <Td className="text-right text-slate-500">
+        <span title={repo.updatedAt}>{formatRelativeTime(repo.updatedAt)}</span>
+      </Td>
+    </tr>
+  );
+}
+
+// --- toolbar ---
+
 function Toolbar({
+  view,
+  onView,
   query,
   onQuery,
   project,
@@ -218,7 +374,12 @@ function Toolbar({
   projects,
   shown,
   total,
+  projectCount,
+  allCollapsed,
+  onToggleAll,
 }: {
+  view: View;
+  onView: (v: View) => void;
   query: string;
   onQuery: (v: string) => void;
   project: string;
@@ -226,10 +387,15 @@ function Toolbar({
   projects: { key: string; name: string }[];
   shown: number;
   total: number;
+  projectCount: number;
+  allCollapsed: boolean;
+  onToggleAll: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <div className="relative min-w-0 flex-1">
+      <ViewToggle view={view} onView={onView} />
+
+      <div className="relative min-w-[12rem] flex-1">
         <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <input
           type="search"
@@ -240,6 +406,7 @@ function Toolbar({
           className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
         />
       </div>
+
       <select
         value={project}
         onChange={(e) => onProject(e.target.value)}
@@ -253,12 +420,48 @@ function Toolbar({
           </option>
         ))}
       </select>
+
+      {view === 'grouped' && projectCount > 1 ? (
+        <button
+          type="button"
+          onClick={onToggleAll}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
+        >
+          {allCollapsed ? 'Expand all' : 'Collapse all'}
+        </button>
+      ) : null}
+
       <span className="shrink-0 font-mono text-xs text-slate-400">
-        {shown === total ? `${String(total)} repositories` : `${String(shown)} of ${String(total)}`}
+        {shown === total
+          ? `${String(total)} ${total === 1 ? 'repository' : 'repositories'}`
+          : `${String(shown)} of ${String(total)}`}
+        {view === 'grouped' ? ` · ${String(projectCount)} ${projectCount === 1 ? 'project' : 'projects'}` : ''}
       </span>
     </div>
   );
 }
+
+function ViewToggle({ view, onView }: { view: View; onView: (v: View) => void }) {
+  return (
+    <div className="inline-flex shrink-0 rounded-lg border border-slate-200 bg-white p-0.5">
+      {(['grouped', 'flat'] as const).map((v) => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => onView(v)}
+          className={cx(
+            'rounded-md px-3 py-1.5 text-xs font-medium capitalize transition-colors',
+            view === v ? 'bg-slate-900 text-white' : 'text-slate-500 hover:text-slate-800',
+          )}
+        >
+          {v}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// --- small building blocks ---
 
 function TypeBadge({ kind }: { kind: Repository['kind'] }) {
   const proxy = kind === 'proxy';
@@ -286,7 +489,7 @@ function SortableTh({
 }: {
   label: string;
   col: SortKey;
-  sort: { key: SortKey; dir: SortDir };
+  sort: Sort;
   onSort: (key: SortKey) => void;
   align?: 'left' | 'right';
 }) {
@@ -315,10 +518,21 @@ function Td({ children, className }: { children: ReactNode; className?: string }
   return <td className={cx('px-4 py-2.5', className)}>{children}</td>;
 }
 
+function EmptyRow({ colSpan }: { colSpan: number }) {
+  return (
+    <tr>
+      <td colSpan={colSpan} className="px-4 py-10 text-center text-sm text-slate-400">
+        No repositories match your filters.
+      </td>
+    </tr>
+  );
+}
+
 function TableSkeleton() {
   return (
     <div className="space-y-4">
       <div className="flex gap-3">
+        <div className="h-9 w-36 animate-pulse rounded-lg bg-slate-100" />
         <div className="h-9 flex-1 animate-pulse rounded-lg bg-slate-100" />
         <div className="h-9 w-40 animate-pulse rounded-lg bg-slate-100" />
       </div>

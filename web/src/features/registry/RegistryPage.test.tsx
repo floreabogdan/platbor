@@ -45,7 +45,7 @@ describe('RegistryPage', () => {
     });
   });
 
-  it('lists repositories as rows with project, tags, and size', async () => {
+  it('groups repositories by project (the default view) with tags and size', async () => {
     listRepositories.mockResolvedValue({
       repositories: [
         repo({ projectKey: 'library', projectName: 'Library', repository: 'alpine', tagCount: 3, sizeBytes: 5_242_880 }),
@@ -59,16 +59,35 @@ describe('RegistryPage', () => {
     const alpine = await screen.findByRole('link', { name: 'alpine' });
     expect(alpine).toHaveAttribute('href', '/registry/library/alpine');
 
-    // Its row carries the project key, tag count, and size.
-    const row = alpine.closest('tr');
-    expect(row).not.toBeNull();
-    const cells = within(row as HTMLElement);
-    expect(cells.getByText('library')).toBeInTheDocument();
+    // The project is a group header, not a per-row column (the names in the
+    // filter dropdown live outside the table, so scope the assertion to it).
+    const table = within(screen.getByRole('table'));
+    expect(table.getByText('Library')).toBeInTheDocument();
+    expect(table.getByText('Platform')).toBeInTheDocument();
+
+    // The repository row carries the tag count and size.
+    const cells = within(alpine.closest('tr') as HTMLElement);
     expect(cells.getByText('3')).toBeInTheDocument();
     expect(cells.getByText('5 MB')).toBeInTheDocument();
 
-    // A count reflects how many repositories are shown.
-    expect(screen.getByText('3 repositories')).toBeInTheDocument();
+    // The count reflects repositories and how many projects they span.
+    expect(screen.getByText(/3 repositories · 2 projects/)).toBeInTheDocument();
+  });
+
+  it('switches to a flat table that carries the project on each row', async () => {
+    listRepositories.mockResolvedValue({
+      repositories: [repo({ repository: 'alpine', projectKey: 'library', projectName: 'Library' })],
+    });
+    renderPage();
+
+    await screen.findByRole('link', { name: 'alpine' });
+    fireEvent.click(screen.getByRole('button', { name: 'flat' }));
+
+    // In the flat view the project moves onto the row as a chip.
+    const cells = within(screen.getByRole('link', { name: 'alpine' }).closest('tr') as HTMLElement);
+    expect(cells.getByText('library')).toBeInTheDocument();
+    // The grouped-only project count disappears from the toolbar.
+    expect(screen.getByText('1 repository')).toBeInTheDocument();
   });
 
   it('labels local and proxy repositories', async () => {
@@ -99,7 +118,7 @@ describe('RegistryPage', () => {
 
     expect(screen.queryByRole('link', { name: 'alpine' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'nginx' })).toBeInTheDocument();
-    expect(screen.getByText('1 of 2')).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2/)).toBeInTheDocument();
   });
 
   it('shows an error state when loading fails', async () => {
