@@ -128,6 +128,28 @@ type ProjectMember struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+type PypiFile struct {
+	ID             string `json:"id"`
+	PackageID      string `json:"package_id"`
+	Version        string `json:"version"`
+	Filename       string `json:"filename"`
+	BlobDigest     string `json:"blob_digest"`
+	Size           int64  `json:"size"`
+	Sha256         string `json:"sha256"`
+	RequiresPython string `json:"requires_python"`
+	UpstreamUrl    string `json:"upstream_url"`
+	CreatedAt      string `json:"created_at"`
+}
+
+type PypiPackage struct {
+	ID           string `json:"id"`
+	RepositoryID string `json:"repository_id"`
+	Name         string `json:"name"`
+	NameOriginal string `json:"name_original"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
 type Repository struct {
 	ID               string `json:"id"`
 	ProjectID        string `json:"project_id"`

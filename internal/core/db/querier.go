@@ -27,6 +27,7 @@ type Querier interface {
 	DeleteNpmVersion(ctx context.Context, arg DeleteNpmVersionParams) (int64, error)
 	DeleteNugetVersion(ctx context.Context, arg DeleteNugetVersionParams) (int64, error)
 	DeleteProjectMember(ctx context.Context, arg DeleteProjectMemberParams) (int64, error)
+	DeletePypiFile(ctx context.Context, arg DeletePypiFileParams) (int64, error)
 	DeleteRepository(ctx context.Context, arg DeleteRepositoryParams) (int64, error)
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash string) error
 	DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error)
@@ -44,6 +45,8 @@ type Querier interface {
 	GetProjectByKey(ctx context.Context, key string) (Project, error)
 	// The user's role in a project; no row means no membership (no access).
 	GetProjectMemberRole(ctx context.Context, arg GetProjectMemberRoleParams) (string, error)
+	// Resolve a distribution filename to its content for download.
+	GetPypiFile(ctx context.Context, arg GetPypiFileParams) (GetPypiFileRow, error)
 	GetRepository(ctx context.Context, arg GetRepositoryParams) (Repository, error)
 	GetRepositoryByID(ctx context.Context, id string) (Repository, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (GetSessionByTokenHashRow, error)
@@ -55,6 +58,10 @@ type Querier interface {
 	// the handler) is a no-op rather than a transaction error.
 	InsertNpmVersion(ctx context.Context, arg InsertNpmVersionParams) error
 	InsertNugetVersion(ctx context.Context, arg InsertNugetVersionParams) error
+	// Record a distribution file. On conflict (a proxy re-listing the same file, or a
+	// download filling a cached row) update metadata and the blob only when a real
+	// new digest is supplied, so a fresh simple-index read never clears a cached blob.
+	InsertPypiFile(ctx context.Context, arg InsertPypiFileParams) error
 	ListAPITokensByUser(ctx context.Context, userID string) ([]ApiToken, error)
 	// Every generic file across all repositories, joined to its repository and
 	// project, for the registry browser's generic index. is_proxy is 1 for a proxy
@@ -66,6 +73,9 @@ type Querier interface {
 	// Every NuGet package across all repositories, joined to its repository and
 	// project, with version count, total nupkg size, and a proxy flag.
 	ListAllNugetPackages(ctx context.Context) ([]ListAllNugetPackagesRow, error)
+	// Every PyPI package across all repositories, with file count, total cached size,
+	// and a proxy flag, for the browser's project-grouped index.
+	ListAllPypiPackages(ctx context.Context) ([]ListAllPypiPackagesRow, error)
 	// Every OCI image across all repositories, joined to its typed repository and
 	// project, with tag and manifest counts, for the browser's index. is_proxy is 1
 	// for a proxy repository.
@@ -111,6 +121,16 @@ type Querier interface {
 	// string, which sorts before any valid key, so a single query serves both the
 	// first page and subsequent pages.
 	ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error)
+	// Distinct blob digests every cached/uploaded file references, for garbage
+	// collection to mark them alongside other formats. Empty (uncached) rows are excluded.
+	ListPypiBlobDigests(ctx context.Context) ([]string, error)
+	// Every distribution file of a package (by normalized name), for the simple index.
+	ListPypiFiles(ctx context.Context, arg ListPypiFilesParams) ([]ListPypiFilesRow, error)
+	// Every file in a repository, grouped by package and newest first, for
+	// keep-last-N-versions pruning.
+	ListPypiFilesForRetention(ctx context.Context, repositoryID string) ([]ListPypiFilesForRetentionRow, error)
+	// Normalized names of every package in a repository, for the root simple index.
+	ListPypiPackageNames(ctx context.Context, repositoryID string) ([]string, error)
 	// Instance-wide recent mutations for the dashboard feed, joined to the project
 	// they touched (project_id is nullable for instance-level events).
 	ListRecentActivity(ctx context.Context, limit int64) ([]ListRecentActivityRow, error)
@@ -138,10 +158,15 @@ type Querier interface {
 	// Whether a specific version is already pushed. NuGet forbids overwriting a
 	// published version, so the handler rejects a re-push before inserting.
 	NugetVersionExists(ctx context.Context, arg NugetVersionExistsParams) (int64, error)
+	// Whether a distribution filename already exists in the repository (uploads are
+	// immutable: re-uploading a filename is rejected).
+	PypiFileExists(ctx context.Context, arg PypiFileExistsParams) (int64, error)
 	// Packages in a repository whose id contains the (lowercased) query, newest
 	// first, for the search resource. An empty query matches all.
 	SearchNugetPackages(ctx context.Context, arg SearchNugetPackagesParams) ([]SearchNugetPackagesRow, error)
 	SetProjectAutoCreate(ctx context.Context, arg SetProjectAutoCreateParams) error
+	// Fill a proxied file's cached blob after downloading it from the upstream.
+	SetPypiFileBlob(ctx context.Context, arg SetPypiFileBlobParams) error
 	UpdateRepository(ctx context.Context, arg UpdateRepositoryParams) (Repository, error)
 	// Store a file at a path in a repository, replacing any existing file there
 	// (generic paths are mutable: a re-upload overwrites).
@@ -159,6 +184,9 @@ type Querier interface {
 	UpsertNugetPackage(ctx context.Context, arg UpsertNugetPackageParams) (string, error)
 	// Grant a user a role in a project, or change their existing role.
 	UpsertProjectMember(ctx context.Context, arg UpsertProjectMemberParams) error
+	// Ensure the package row for (repository, normalized name) exists, returning its
+	// id. A new file of an existing package just bumps updated_at.
+	UpsertPypiPackage(ctx context.Context, arg UpsertPypiPackageParams) (string, error)
 	UpsertTag(ctx context.Context, arg UpsertTagParams) error
 }
 

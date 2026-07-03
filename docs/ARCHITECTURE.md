@@ -45,6 +45,7 @@ platbor/
 │   │   ├── npm/            # npm registry protocol
 │   │   ├── nuget/          # NuGet v3 JSON API
 │   │   ├── generic/        # raw versioned files over HTTP
+│   │   ├── pypi/           # Python package index (PEP 503 simple + twine upload)
 │   │   └── proxy/          # pull-through cache decorator for any adapter
 │   ├── catalog/
 │   │   ├── model/          # entities + edges (the graph)
@@ -111,6 +112,7 @@ Artifacts are addressed as `/<format>/<project>/<repo>/<artifact>`:
 /npm/<project>/<repo>/<pkg>           npm (incl. @scope/name)
 /nuget/<project>/<repo>/v3/...        NuGet (the repo is the feed)
 /generic/<project>/<repo>/<path>      generic (a "bucket" of files)
+/pypi/<project>/<repo>/simple/...     PyPI (simple index; twine posts to the repo root)
 /api/v1/...                           UI + automation API
 ```
 

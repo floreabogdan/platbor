@@ -74,7 +74,7 @@ Goal: the Backstage-killer features, informed by real usage.
 - [ ] API catalog: OpenAPI/proto specs as versioned, browsable artifacts
 - [ ] TechDocs-style rendering of docs from synced repos
 - [ ] OIDC login
-- [ ] More formats by demand: Maven, PyPI, Go modules, Cargo, Terraform
+- [~] More formats by demand — **PyPI done** (PEP 503 simple index for `pip`, legacy upload for `twine`, pull-through proxy of pypi.org; verified against real `twine`/`pip` incl. installing `six` through the proxy). Remaining: Maven, Go modules, Cargo, Terraform, RubyGems. (Helm rides OCI — already supported.)
 
 ## Sequencing rationale
 
