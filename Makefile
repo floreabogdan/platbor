@@ -1,9 +1,10 @@
 # Platbor developer tasks. `make build` produces a self-contained binary with
 # the UI embedded; `make dev` runs the API and Vite dev server side by side.
 
-.PHONY: help build ui run dev test test-go test-web lint lint-go lint-web fmt clean
+.PHONY: help build ui run dev test test-go test-web lint lint-go lint-web fmt image clean
 
 BINARY := platbor
+IMAGE := platbor
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -45,6 +46,9 @@ lint-web: ## Lint + typecheck the frontend
 fmt: ## Format Go (gofumpt) and the frontend (prettier)
 	gofumpt -w .
 	npm --prefix web exec prettier -- --write "src/**/*.{ts,tsx,css}"
+
+image: ## Build the Docker image (SPA + static binary, distroless runtime)
+	docker build -t $(IMAGE) .
 
 clean: ## Remove build output and runtime data
 	rm -f $(BINARY) $(BINARY).exe

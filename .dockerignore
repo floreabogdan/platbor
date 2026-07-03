@@ -1,0 +1,30 @@
+# Keep the build context small and reproducible. The image builds the SPA and
+# the binary from source, so host build output and local state never ship.
+
+# Node + frontend build output — rebuilt in the web stage. Excluding web/dist
+# means the committed placeholder never masks the freshly built SPA.
+web/node_modules
+web/dist
+
+# Go / local build output
+platbor
+platbor.exe
+/out
+
+# Local runtime state
+platbor-data
+conformance-data
+*.db
+
+# VCS, editor, and CI cruft the build does not need
+.git
+.github
+.gitignore
+*.log
+.vscode
+.idea
+.DS_Store
+
+# The image has its own definition; don't send it into its own context.
+Dockerfile
+.dockerignore

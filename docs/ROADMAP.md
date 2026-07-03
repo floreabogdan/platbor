@@ -12,7 +12,7 @@ Goal: one binary that boots, authenticates, and serves the UI shell.
 - [~] Auth: local users, sessions, instance admin bootstrap, and API tokens (bearer auth) done; project roles/RBAC pending
 - [x] Audit log: every mutation is recorded transactionally with the authenticated actor — the audit write commits in the *same* transaction as the change it describes (projects, proxies, personal access tokens, OCI manifest/tag deletes, and GC), so the record and the change land together or not at all. This deliberately replaces the originally-planned generic HTTP middleware: a request-level interceptor only sees coarse method+path+status *after* the handler runs and cannot guarantee the record commits atomically with the change, whereas the domain services own both writes. Request-level observability (method, path, status, duration, request id) is separately covered by the slog request logger.
 - [x] React app shell: login, sidebar layout, projects list (per DESIGN-SYSTEM.md) wired to the API, embedded via `go:embed`
-- [ ] `docker run` quickstart works end to end
+- [x] `docker run` quickstart works end to end — a multi-stage `Dockerfile` builds the SPA and a static (CGO-off) binary onto a distroless non-root base; `docker run -p 8080:8080 -v platbor-data:/data platbor` boots a zero-config instance that answers `/healthz` and the `/v2/` registry challenge. See the README quickstart.
 
 **Demo:** log in, create a project, create an API token.
 

@@ -95,6 +95,16 @@ jobs:
         if: failure()
         run: cat platbor.log
 
+  image:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Build the full quickstart image (SPA + static binary + distroless
+      # runtime) so the Dockerfile and .dockerignore stay green. No push.
+      - name: Build image
+        run: docker build -t platbor:ci .
+
   frontend:
     name: Frontend (web)
     runs-on: ubuntu-latest

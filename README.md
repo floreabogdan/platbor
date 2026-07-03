@@ -33,6 +33,40 @@ Platbor's pitch: `docker run platbor` and in five minutes you have a working reg
 - A CI system — we receive artifacts and webhooks from yours
 - A SaaS — self-hosted, open source (Apache 2.0), no phone-home
 
+## Quickstart
+
+One container, no dependencies. Build the image and run it — SQLite and the blob
+store live in a mounted volume:
+
+```sh
+docker build -t platbor .        # or: make image
+docker run --rm -p 8080:8080 -v platbor-data:/data platbor
+```
+
+Then open http://localhost:8080. On first run Platbor creates the instance admin
+and prints a generated password to the logs — grab it, or set your own:
+
+```sh
+docker run --rm -p 8080:8080 -v platbor-data:/data \
+  -e PLATBOR_ADMIN_PASSWORD=change-me platbor
+```
+
+Point Docker at it and push an image:
+
+```sh
+docker login localhost:8080 -u admin          # password from the logs
+docker tag alpine:latest localhost:8080/library/alpine:latest
+docker push localhost:8080/library/alpine:latest
+```
+
+Runtime configuration is via `PLATBOR_*` environment variables (`PLATBOR_ADDR`,
+`PLATBOR_DATA_DIR`, `PLATBOR_ADMIN_PASSWORD`, …) or a mounted YAML config; see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Without Docker, `make build`
+produces the same self-contained binary.
+
+> A published image (`docker run ghcr.io/platbor/platbor`) lands with the first
+> tagged release; until then, build from source as above.
+
 ## Documentation
 
 | Doc | Contents |
