@@ -41,6 +41,7 @@ type descriptor struct {
 	Digest    string    `json:"digest"`
 	Size      int64     `json:"size"`
 	Platform  *platform `json:"platform,omitempty"`
+	URLs      []string  `json:"urls,omitempty"`
 }
 
 // platform is an index entry's target OS/architecture.
@@ -154,6 +155,9 @@ func (h *handler) putManifest(w http.ResponseWriter, r *http.Request, projectID,
 		return
 	}
 
+	// sha256 is the canonical key for a manifest pushed by tag. A push by digest
+	// may instead pin sha512; honor that algorithm so the manifest is stored and
+	// retrievable under exactly the digest the client used.
 	digest := blob.DigestBytes(body)
 
 	// The reference is either a digest (which must match the content) or a tag.
@@ -163,10 +167,11 @@ func (h *handler) putManifest(w http.ResponseWriter, r *http.Request, projectID,
 			writeError(w, h.log, http.StatusBadRequest, codeDigestInvalid, "invalid digest")
 			return
 		}
-		if p.ref != digest {
+		if !blob.MatchesDigest(p.ref, body) {
 			writeError(w, h.log, http.StatusBadRequest, codeDigestInvalid, "manifest content does not match digest")
 			return
 		}
+		digest = p.ref
 	} else {
 		if !validTag(p.ref) {
 			writeError(w, h.log, http.StatusBadRequest, codeManifestInvalid, "invalid tag")
@@ -203,6 +208,12 @@ func (h *handler) putManifest(w http.ResponseWriter, r *http.Request, projectID,
 
 	w.Header().Set("Docker-Content-Digest", digest)
 	w.Header().Set("Location", "/v2/"+p.name+"/manifests/"+digest)
+	// A manifest that declares a subject participates in the referrers API; the
+	// spec requires echoing the subject digest so the client knows the link was
+	// recorded and it need not fall back to the tag scheme.
+	if subject := doc.subjectDigest(); subject != "" {
+		w.Header().Set("OCI-Subject", subject)
+	}
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -301,12 +312,17 @@ func (h *handler) validateReferences(ctx context.Context, projectID, repo, media
 		return nil
 	}
 
-	// Image manifest: config plus each layer must exist in the blob store.
+	// Image manifest: config plus each layer must exist in the blob store. A
+	// non-distributable layer carries external urls and lives outside the
+	// registry (image-spec), so its blob is not required to be present.
 	refs := make([]string, 0, len(doc.Layers)+1)
 	if doc.Config != nil && doc.Config.Digest != "" {
 		refs = append(refs, doc.Config.Digest)
 	}
 	for _, l := range doc.Layers {
+		if len(l.URLs) > 0 {
+			continue
+		}
 		refs = append(refs, l.Digest)
 	}
 	for _, d := range refs {
