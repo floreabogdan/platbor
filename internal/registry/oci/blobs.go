@@ -163,6 +163,16 @@ func (h *handler) finishUpload(w http.ResponseWriter, r *http.Request, p parsedP
 		h.uploadLookupError(w, err)
 		return
 	}
+	// A closing PUT may carry the final chunk with a Content-Range; if that range
+	// does not continue from the current offset the request is out of order and
+	// the spec requires 416, not a later digest mismatch.
+	if cr := r.Header.Get("Content-Range"); cr != "" {
+		if start, ok := parseContentRange(cr); !ok || start != up.Size() {
+			_ = up.Close()
+			writeError(w, h.log, http.StatusRequestedRangeNotSatisfiable, codeBlobUploadInvalid, "content range does not match upload offset")
+			return
+		}
+	}
 	if _, err := io.Copy(up, r.Body); err != nil {
 		_ = up.Close()
 		h.internalError(w, "appending final chunk", err)
