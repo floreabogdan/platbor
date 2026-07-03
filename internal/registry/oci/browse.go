@@ -34,6 +34,7 @@ type RepositorySummary struct {
 	Repository    string
 	TagCount      int
 	ManifestCount int
+	SizeBytes     int64 // logical size: distinct blobs + manifests this repo holds
 	UpdatedAt     time.Time
 }
 
@@ -100,6 +101,10 @@ func (b *Browser) Repositories(ctx context.Context) ([]RepositorySummary, error)
 	if err != nil {
 		return nil, fmt.Errorf("listing repositories: %w", err)
 	}
+	sizes, err := b.repositorySizes(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]RepositorySummary, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, RepositorySummary{
@@ -108,10 +113,67 @@ func (b *Browser) Repositories(ctx context.Context) ([]RepositorySummary, error)
 			Repository:    r.Repository,
 			TagCount:      int(r.TagCount),
 			ManifestCount: int(r.ManifestCount),
+			SizeBytes:     sizes[repoKey(r.ProjectKey, r.Repository)],
 			UpdatedAt:     parseTime(asString(r.UpdatedAt)),
 		})
 	}
 	return out, nil
+}
+
+// repoKey joins a project key and repository into a map key. The NUL separator
+// cannot appear in either, so distinct (project, repo) pairs never collide.
+func repoKey(projectKey, repo string) string { return projectKey + "\x00" + repo }
+
+// repositorySizes computes each repository's logical storage: the summed size of
+// the distinct blobs (config + layers) and manifests it holds. Blobs are a
+// shared CAS, so a layer used by two repositories counts once per repository,
+// not once globally — this is the size attributable to the repository, which is
+// what "how big is this repo" means to a user, and the natural unit for future
+// per-project quotas. Foreign (non-distributable) layers carry external URLs and
+// are not stored, so they are excluded.
+func (b *Browser) repositorySizes(ctx context.Context) (map[string]int64, error) {
+	rows, err := b.q.ListManifestSizing(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("sizing repositories: %w", err)
+	}
+	// Per repository, track each counted digest once (manifests and blobs share
+	// the digest space) so nothing is double-counted within the repository.
+	seen := make(map[string]map[string]struct{})
+	sizes := make(map[string]int64)
+	add := func(key, digest string, size int64) {
+		set, ok := seen[key]
+		if !ok {
+			set = make(map[string]struct{})
+			seen[key] = set
+		}
+		if _, dup := set[digest]; dup {
+			return
+		}
+		set[digest] = struct{}{}
+		sizes[key] += size
+	}
+
+	for _, r := range rows {
+		key := repoKey(r.ProjectKey, r.Repository)
+		add(key, r.Digest, r.Size) // the manifest document's own bytes
+
+		var doc manifestDoc
+		if err := json.Unmarshal(r.Payload, &doc); err != nil {
+			continue // a stored manifest is well-formed; skip if somehow not
+		}
+		if doc.Config != nil && doc.Config.Digest != "" {
+			add(key, doc.Config.Digest, doc.Config.Size)
+		}
+		for _, l := range doc.Layers {
+			if len(l.URLs) > 0 {
+				continue // foreign layer: referenced by URL, not stored here
+			}
+			add(key, l.Digest, l.Size)
+		}
+		// An index's children are themselves manifests in the same repository;
+		// they appear as their own rows and are counted there, so nothing to add.
+	}
+	return sizes, nil
 }
 
 // Tags returns a repository's tags with the media type and size of the manifest

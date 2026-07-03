@@ -67,6 +67,20 @@ ORDER BY p.key ASC, m.repository ASC;
 -- projects.
 SELECT payload FROM oci_manifests;
 
+-- name: ListManifestSizing :many
+-- Every manifest's project, repository, digest, stored size, and payload, so the
+-- browser can compute per-repository storage: the sum of the distinct blobs each
+-- repository references. Blobs are a shared CAS, so a layer used by two
+-- repositories is counted once per repository (logical size), not physically.
+SELECT
+    p.key        AS project_key,
+    m.repository AS repository,
+    m.digest     AS digest,
+    m.size       AS size,
+    m.payload    AS payload
+FROM oci_manifests m
+JOIN projects p ON p.id = m.project_id;
+
 -- name: ListReferrers :many
 -- Manifests whose subject is the given digest (a subject's signatures, SBOMs,
 -- and other attestations) for the referrers API. Newest first.

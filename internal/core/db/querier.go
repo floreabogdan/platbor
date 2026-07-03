@@ -45,6 +45,11 @@ type Querier interface {
 	// layer blobs each one references. Blobs are a global CAS, so this spans all
 	// projects.
 	ListManifestPayloads(ctx context.Context) ([][]byte, error)
+	// Every manifest's project, repository, digest, stored size, and payload, so the
+	// browser can compute per-repository storage: the sum of the distinct blobs each
+	// repository references. Blobs are a shared CAS, so a layer used by two
+	// repositories is counted once per repository (logical size), not physically.
+	ListManifestSizing(ctx context.Context) ([]ListManifestSizingRow, error)
 	// Keyset pagination on the unique `key` column. The first page passes the empty
 	// string, which sorts before any valid key, so a single query serves both the
 	// first page and subsequent pages.

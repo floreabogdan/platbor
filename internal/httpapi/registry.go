@@ -50,6 +50,7 @@ type repositoryResponse struct {
 	Repository    string    `json:"repository"`
 	TagCount      int       `json:"tagCount"`
 	ManifestCount int       `json:"manifestCount"`
+	SizeBytes     int64     `json:"sizeBytes"`
 	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
@@ -124,6 +125,7 @@ func (h registryHandler) listRepositories(w http.ResponseWriter, r *http.Request
 			Repository:    repo.Repository,
 			TagCount:      repo.TagCount,
 			ManifestCount: repo.ManifestCount,
+			SizeBytes:     repo.SizeBytes,
 			UpdatedAt:     repo.UpdatedAt,
 		})
 	}

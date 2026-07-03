@@ -526,6 +526,13 @@ func TestBrowserRepositoriesTagsAndManifest(t *testing.T) {
 		t.Errorf("view digest = %s, want %s", view.Digest, digest)
 	}
 
+	// Repository logical size = the manifest's own bytes plus its distinct blobs
+	// (config + layers). Both tags point at the one manifest, so nothing is
+	// double-counted.
+	if want := int64(len(body)) + view.TotalSize; repo.SizeBytes != want {
+		t.Errorf("repo.SizeBytes = %d, want %d (manifest + config + layers)", repo.SizeBytes, want)
+	}
+
 	// Manifest detail (by digest) resolves to the same view.
 	if byDigest, err := browser.Manifest(ctx, projectID, "alpine", digest); err != nil || byDigest.Digest != digest {
 		t.Fatalf("Manifest by digest: view=%+v err=%v", byDigest, err)

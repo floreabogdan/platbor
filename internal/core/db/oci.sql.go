@@ -226,6 +226,58 @@ func (q *Queries) ListManifestPayloads(ctx context.Context) ([][]byte, error) {
 	return items, nil
 }
 
+const listManifestSizing = `-- name: ListManifestSizing :many
+SELECT
+    p.key        AS project_key,
+    m.repository AS repository,
+    m.digest     AS digest,
+    m.size       AS size,
+    m.payload    AS payload
+FROM oci_manifests m
+JOIN projects p ON p.id = m.project_id
+`
+
+type ListManifestSizingRow struct {
+	ProjectKey string `json:"project_key"`
+	Repository string `json:"repository"`
+	Digest     string `json:"digest"`
+	Size       int64  `json:"size"`
+	Payload    []byte `json:"payload"`
+}
+
+// Every manifest's project, repository, digest, stored size, and payload, so the
+// browser can compute per-repository storage: the sum of the distinct blobs each
+// repository references. Blobs are a shared CAS, so a layer used by two
+// repositories is counted once per repository (logical size), not physically.
+func (q *Queries) ListManifestSizing(ctx context.Context) ([]ListManifestSizingRow, error) {
+	rows, err := q.db.QueryContext(ctx, listManifestSizing)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListManifestSizingRow{}
+	for rows.Next() {
+		var i ListManifestSizingRow
+		if err := rows.Scan(
+			&i.ProjectKey,
+			&i.Repository,
+			&i.Digest,
+			&i.Size,
+			&i.Payload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReferrers = `-- name: ListReferrers :many
 SELECT digest, media_type, size, artifact_type, payload
 FROM oci_manifests
