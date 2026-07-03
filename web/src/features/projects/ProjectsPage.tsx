@@ -53,6 +53,7 @@ export function ProjectsPage() {
 }
 
 function ProjectCard({ project }: { project: Project }) {
+  const isProxy = project.kind === 'proxy';
   return (
     <Card className="p-5">
       <div className="flex items-start justify-between gap-3">
@@ -62,9 +63,19 @@ function ProjectCard({ project }: { project: Project }) {
             {project.key}
           </span>
         </div>
+        {isProxy ? (
+          <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20">
+            Proxy
+          </span>
+        ) : null}
       </div>
       {project.description ? (
         <p className="mt-3 line-clamp-2 text-sm text-slate-500">{project.description}</p>
+      ) : null}
+      {isProxy && project.upstream ? (
+        <p className="mt-3 truncate font-mono text-xs text-slate-500" title={project.upstream.url}>
+          ↳ {project.upstream.url}
+        </p>
       ) : null}
       <p className="mt-4 text-xs text-slate-400">Created {formatDate(project.createdAt)}</p>
     </Card>

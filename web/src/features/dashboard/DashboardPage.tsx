@@ -171,6 +171,8 @@ function describeActivity(e: ActivityEntry): { verb: string; target?: string; to
       return { verb: 'deleted a tag' };
     case 'project.create':
       return { verb: 'created project', target: e.projectName ?? project };
+    case 'project.create.proxy':
+      return { verb: 'created proxy project', target: e.projectName ?? project };
     case 'registry.gc':
       return { verb: 'ran garbage collection' };
     default:

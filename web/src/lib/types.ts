@@ -9,11 +9,18 @@ export interface User {
   createdAt: string;
 }
 
+export interface ProjectUpstream {
+  url: string;
+  username?: string;
+}
+
 export interface Project {
   id: string;
   key: string;
   name: string;
   description: string;
+  kind: 'local' | 'proxy';
+  upstream?: ProjectUpstream;
   createdAt: string;
   updatedAt: string;
 }
@@ -27,6 +34,11 @@ export interface CreateProjectRequest {
   key: string;
   name: string;
   description?: string;
+  upstream?: {
+    url: string;
+    username?: string;
+    password?: string;
+  };
 }
 
 export interface Token {
