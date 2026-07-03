@@ -10,7 +10,9 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/platbor/platbor/internal/core/project"
+	"github.com/platbor/platbor/internal/registry/generic"
 	"github.com/platbor/platbor/internal/registry/npm"
+	"github.com/platbor/platbor/internal/registry/nuget"
 	"github.com/platbor/platbor/internal/registry/oci"
 )
 
@@ -24,6 +26,8 @@ const gcGracePeriod = time.Hour
 type registryHandler struct {
 	browser   *oci.Browser
 	packages  *npm.Browser
+	nugets    *nuget.Browser
+	generics  *generic.Browser
 	manager   *oci.Manager
 	collector *oci.Collector
 	projects  *project.Service
@@ -32,8 +36,10 @@ type registryHandler struct {
 
 func (h registryHandler) mount(r chi.Router) {
 	// Global indexes across every project (grouped by project in the UI).
-	r.Get("/repositories", h.listRepositories) // OCI repositories
-	r.Get("/packages", h.listPackages)         // npm packages
+	r.Get("/repositories", h.listRepositories)  // OCI repositories
+	r.Get("/packages", h.listPackages)          // npm packages
+	r.Get("/nuget-packages", h.listNugets)      // NuGet packages
+	r.Get("/generic-files", h.listGenericFiles) // generic files
 	// Garbage collection is instance-wide and destructive: admins only.
 	r.With(requireAdmin).Post("/gc", h.runGC) // ?dryRun=true|false
 	// Everything below is scoped to one project.
@@ -42,7 +48,8 @@ func (h registryHandler) mount(r chi.Router) {
 		r.Get("/manifests", h.getManifest)       // ?repository=<repo>&reference=<tag|digest>
 		r.Delete("/manifests", h.deleteManifest) // ?repository=<repo>&reference=<tag|digest>
 		r.Get("/referrers", h.listReferrers)     // ?repository=<repo>&subject=<digest>
-		r.Get("/package", h.getPackage)          // ?repository=<repo>&name=<pkg> (npm detail)
+		r.Get("/package", h.getPackage)          // ?name=<pkg> (npm detail)
+		r.Get("/nuget-package", h.getNuget)      // ?id=<id> (NuGet detail)
 	})
 }
 
@@ -234,6 +241,118 @@ func (h registryHandler) getPackage(w http.ResponseWriter, r *http.Request) {
 		DistTags: detail.DistTags,
 		Versions: versions,
 	})
+}
+
+// --- NuGet ---
+
+type nugetResponse struct {
+	ProjectKey   string    `json:"projectKey"`
+	ProjectName  string    `json:"projectName"`
+	ID           string    `json:"id"`
+	Kind         string    `json:"kind"`
+	VersionCount int       `json:"versionCount"`
+	SizeBytes    int64     `json:"sizeBytes"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type listNugetsResponse struct {
+	Packages []nugetResponse `json:"packages"`
+}
+
+// listNugets returns every NuGet package across all projects.
+func (h registryHandler) listNugets(w http.ResponseWriter, r *http.Request) {
+	pkgs, err := h.nugets.Packages(r.Context())
+	if err != nil {
+		h.log.Error("listing nuget packages", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	items := make([]nugetResponse, 0, len(pkgs))
+	for _, p := range pkgs {
+		items = append(items, nugetResponse{
+			ProjectKey:   p.ProjectKey,
+			ProjectName:  p.ProjectName,
+			ID:           p.ID,
+			Kind:         repoKind(p.IsProxy),
+			VersionCount: p.VersionCount,
+			SizeBytes:    p.SizeBytes,
+			UpdatedAt:    p.UpdatedAt,
+		})
+	}
+	writeJSON(w, h.log, http.StatusOK, listNugetsResponse{Packages: items})
+}
+
+type nugetVersionResponse struct {
+	Version     string    `json:"version"`
+	SizeBytes   int64     `json:"sizeBytes"`
+	PublishedAt time.Time `json:"publishedAt"`
+}
+
+type nugetDetailResponse struct {
+	ID       string                 `json:"id"`
+	Versions []nugetVersionResponse `json:"versions"`
+}
+
+// getNuget returns one NuGet package's versions for the detail page.
+func (h registryHandler) getNuget(w http.ResponseWriter, r *http.Request) {
+	projectKey := chi.URLParam(r, "project")
+	pkgID := r.URL.Query().Get("id")
+	if pkgID == "" {
+		writeProblem(w, http.StatusBadRequest, "Missing parameter", "id is required")
+		return
+	}
+	detail, err := h.nugets.Package(r.Context(), projectKey, pkgID)
+	if err != nil {
+		if errors.Is(err, nuget.ErrPackageNotFound) {
+			writeProblem(w, http.StatusNotFound, "Package not found", "no such package in that project")
+			return
+		}
+		h.log.Error("getting nuget package", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	versions := make([]nugetVersionResponse, 0, len(detail.Versions))
+	for _, v := range detail.Versions {
+		versions = append(versions, nugetVersionResponse{Version: v.Version, SizeBytes: v.SizeBytes, PublishedAt: v.PublishedAt})
+	}
+	writeJSON(w, h.log, http.StatusOK, nugetDetailResponse{ID: detail.ID, Versions: versions})
+}
+
+// --- generic ---
+
+type genericFileResponse struct {
+	ProjectKey  string    `json:"projectKey"`
+	ProjectName string    `json:"projectName"`
+	Path        string    `json:"path"`
+	Kind        string    `json:"kind"`
+	SizeBytes   int64     `json:"sizeBytes"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+type listGenericFilesResponse struct {
+	Files []genericFileResponse `json:"files"`
+}
+
+// listGenericFiles returns every generic file across all projects.
+func (h registryHandler) listGenericFiles(w http.ResponseWriter, r *http.Request) {
+	files, err := h.generics.Files(r.Context())
+	if err != nil {
+		h.log.Error("listing generic files", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	items := make([]genericFileResponse, 0, len(files))
+	for _, f := range files {
+		items = append(items, genericFileResponse{
+			ProjectKey:  f.ProjectKey,
+			ProjectName: f.ProjectName,
+			Path:        f.Path,
+			Kind:        repoKind(f.IsProxy),
+			SizeBytes:   f.SizeBytes,
+			UpdatedAt:   f.UpdatedAt,
+		})
+	}
+	writeJSON(w, h.log, http.StatusOK, listGenericFilesResponse{Files: items})
 }
 
 func (h registryHandler) listTags(w http.ResponseWriter, r *http.Request) {
