@@ -46,6 +46,18 @@ export function RegistryIcon(props: IconProps) {
   );
 }
 
+export function PackageIcon(props: IconProps) {
+  // A flat parcel (box + lid seam + tape) — deliberately distinct from the 3D
+  // cube RegistryIcon, so npm packages read differently from container images.
+  return (
+    <Icon {...props}>
+      <rect x="3.5" y="5" width="17" height="15" rx="1.5" />
+      <path d="M3.5 10h17" />
+      <path d="M12 5v5" />
+    </Icon>
+  );
+}
+
 export function SearchIcon(props: IconProps) {
   return (
     <Icon {...props}>

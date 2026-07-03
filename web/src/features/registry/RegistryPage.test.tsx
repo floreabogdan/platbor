@@ -52,82 +52,91 @@ const pkg = (over: Partial<NpmPackage>): NpmPackage => ({
 describe('RegistryPage', () => {
   it('shows the empty state when nothing has been pushed', async () => {
     listRepositories.mockResolvedValue({ repositories: [] });
+    listPackages.mockResolvedValue({ packages: [] });
     renderPage();
     await waitFor(() => {
       expect(screen.getByText(/No artifacts yet/i)).toBeInTheDocument();
     });
   });
 
-  it('groups repositories by project (the default view) with tags and size', async () => {
+  it('lists container images and npm packages together, grouped by project', async () => {
     listRepositories.mockResolvedValue({
-      repositories: [
-        repo({ projectKey: 'library', projectName: 'Library', repository: 'alpine', tagCount: 3, sizeBytes: 5_242_880 }),
-        repo({ projectKey: 'library', projectName: 'Library', repository: 'nginx', tagCount: 5 }),
-        repo({ projectKey: 'platform', projectName: 'Platform', repository: 'api-gw', tagCount: 2 }),
+      repositories: [repo({ repository: 'alpine', tagCount: 3, sizeBytes: 5_242_880 })],
+    });
+    listPackages.mockResolvedValue({
+      packages: [
+        pkg({ name: 'left-pad', repository: 'lib', versionCount: 2 }),
+        pkg({ name: 'is-odd', projectKey: 'platform', projectName: 'Platform', repository: 'cache', kind: 'proxy' }),
       ],
     });
     renderPage();
 
-    // The repository name links into its detail route.
+    // Each format links into its own detail route.
     const alpine = await screen.findByRole('link', { name: 'alpine' });
     expect(alpine).toHaveAttribute('href', '/registry/library/alpine');
+    const leftPad = screen.getByRole('link', { name: 'left-pad' });
+    expect(leftPad).toHaveAttribute('href', '/registry/library/-/lib/left-pad');
 
-    // The project is a group header, not a per-row column (the names in the
-    // filter dropdown live outside the table, so scope the assertion to it).
+    // A per-row format icon distinguishes the two formats.
+    expect(screen.getByLabelText('Container image')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('npm package').length).toBe(2);
+
+    // Grouped by project (project is a group header, not a per-row column).
     const table = within(screen.getByRole('table'));
     expect(table.getByText('Library')).toBeInTheDocument();
     expect(table.getByText('Platform')).toBeInTheDocument();
 
-    // The repository row carries the tag count and size.
-    const cells = within(alpine.closest('tr') as HTMLElement);
-    expect(cells.getByText('3')).toBeInTheDocument();
-    expect(cells.getByText('5 MB')).toBeInTheDocument();
+    // Rows carry format-appropriate "contents" and a size.
+    expect(within(alpine.closest('tr') as HTMLElement).getByText('3 tags')).toBeInTheDocument();
+    expect(within(alpine.closest('tr') as HTMLElement).getByText('5 MB')).toBeInTheDocument();
+    expect(within(leftPad.closest('tr') as HTMLElement).getByText('2 versions')).toBeInTheDocument();
 
-    // The count reflects repositories and how many projects they span.
-    expect(screen.getByText(/3 repositories · 2 projects/)).toBeInTheDocument();
+    // Local and proxy are labelled, and the count spans both formats.
+    expect(screen.getAllByText('Local').length).toBeGreaterThan(0);
+    expect(screen.getByText('Proxy')).toBeInTheDocument();
+    expect(screen.getByText(/3 artifacts · 2 projects/)).toBeInTheDocument();
+  });
+
+  it('narrows to one format via the format dropdown', async () => {
+    listRepositories.mockResolvedValue({ repositories: [repo({ repository: 'alpine' })] });
+    listPackages.mockResolvedValue({ packages: [pkg({ name: 'left-pad', repository: 'lib' })] });
+    renderPage();
+
+    await screen.findByRole('link', { name: 'alpine' });
+    expect(screen.getByRole('link', { name: 'left-pad' })).toBeInTheDocument();
+
+    // Filter to container images only: the npm package drops out.
+    fireEvent.change(screen.getByLabelText('Filter by format'), { target: { value: 'oci' } });
+    expect(screen.getByRole('link', { name: 'alpine' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'left-pad' })).not.toBeInTheDocument();
+    expect(screen.getByText(/1 of 2/)).toBeInTheDocument();
+
+    // Filter to npm only: the image drops out.
+    fireEvent.change(screen.getByLabelText('Filter by format'), { target: { value: 'npm' } });
+    expect(screen.queryByRole('link', { name: 'alpine' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'left-pad' })).toBeInTheDocument();
   });
 
   it('switches to a flat table that carries the project on each row', async () => {
-    listRepositories.mockResolvedValue({
-      repositories: [repo({ repository: 'alpine', projectKey: 'library', projectName: 'Library' })],
-    });
+    listRepositories.mockResolvedValue({ repositories: [repo({ repository: 'alpine' })] });
+    listPackages.mockResolvedValue({ packages: [] });
     renderPage();
 
     await screen.findByRole('link', { name: 'alpine' });
     fireEvent.click(screen.getByRole('button', { name: 'flat' }));
 
-    // In the flat view the project moves onto the row as a chip.
     const cells = within(screen.getByRole('link', { name: 'alpine' }).closest('tr') as HTMLElement);
     expect(cells.getByText('library')).toBeInTheDocument();
-    // The grouped-only project count disappears from the toolbar.
-    expect(screen.getByText('1 repository')).toBeInTheDocument();
+    expect(screen.getByText('1 artifact')).toBeInTheDocument();
   });
 
-  it('labels local and proxy repositories', async () => {
-    listRepositories.mockResolvedValue({
-      repositories: [
-        repo({ repository: 'alpine', kind: 'local' }),
-        repo({ projectKey: 'dockerhub', projectName: 'Docker Hub', repository: 'library/nginx', kind: 'proxy' }),
-      ],
-    });
+  it('filters by the search box', async () => {
+    listRepositories.mockResolvedValue({ repositories: [repo({ repository: 'alpine' }), repo({ repository: 'nginx' })] });
+    listPackages.mockResolvedValue({ packages: [] });
     renderPage();
 
     await screen.findByRole('link', { name: 'alpine' });
-    expect(screen.getByText('Local')).toBeInTheDocument();
-    expect(screen.getByText('Proxy')).toBeInTheDocument();
-  });
-
-  it('filters the table by the search box', async () => {
-    listRepositories.mockResolvedValue({
-      repositories: [
-        repo({ repository: 'alpine' }),
-        repo({ repository: 'nginx' }),
-      ],
-    });
-    renderPage();
-
-    await screen.findByRole('link', { name: 'alpine' });
-    fireEvent.change(screen.getByLabelText('Filter repositories'), { target: { value: 'nginx' } });
+    fireEvent.change(screen.getByLabelText('Filter artifacts'), { target: { value: 'nginx' } });
 
     expect(screen.queryByRole('link', { name: 'alpine' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'nginx' })).toBeInTheDocument();
@@ -136,61 +145,11 @@ describe('RegistryPage', () => {
 
   it('shows an error state when loading fails', async () => {
     listRepositories.mockRejectedValue(new Error('network down'));
+    listPackages.mockResolvedValue({ packages: [] });
     renderPage();
     await waitFor(() => {
       expect(screen.getByText('network down')).toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
-  });
-
-  it('switches to the npm packages browser', async () => {
-    listRepositories.mockResolvedValue({ repositories: [] });
-    listPackages.mockResolvedValue({
-      packages: [
-        pkg({ name: 'left-pad', repository: 'lib', versionCount: 3, sizeBytes: 5_242_880 }),
-        pkg({
-          name: 'is-odd',
-          projectKey: 'platform',
-          projectName: 'Platform',
-          repository: 'cache',
-          kind: 'proxy',
-        }),
-      ],
-    });
-    renderPage();
-
-    fireEvent.click(screen.getByRole('button', { name: 'npm packages' }));
-
-    // The package name links into its detail route (reserved "-" segment).
-    const leftPad = await screen.findByRole('link', { name: 'left-pad' });
-    expect(leftPad).toHaveAttribute('href', '/registry/library/-/lib/left-pad');
-
-    // Packages are grouped by project, like repositories.
-    const table = within(screen.getByRole('table'));
-    expect(table.getByText('Library')).toBeInTheDocument();
-    expect(table.getByText('Platform')).toBeInTheDocument();
-
-    // The row carries the version count and size.
-    const cells = within(leftPad.closest('tr') as HTMLElement);
-    expect(cells.getByText('3')).toBeInTheDocument();
-    expect(cells.getByText('5 MB')).toBeInTheDocument();
-
-    // Local and proxy packages are labelled.
-    expect(screen.getByText('Local')).toBeInTheDocument();
-    expect(screen.getByText('Proxy')).toBeInTheDocument();
-
-    // The toolbar count uses the package noun.
-    expect(screen.getByText(/2 packages · 2 projects/)).toBeInTheDocument();
-  });
-
-  it('shows the npm empty state when no packages exist', async () => {
-    listRepositories.mockResolvedValue({ repositories: [] });
-    listPackages.mockResolvedValue({ packages: [] });
-    renderPage();
-
-    fireEvent.click(screen.getByRole('button', { name: 'npm packages' }));
-    await waitFor(() => {
-      expect(screen.getByText(/No npm packages yet/i)).toBeInTheDocument();
-    });
   });
 });
