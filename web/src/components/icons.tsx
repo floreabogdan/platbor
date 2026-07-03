@@ -82,6 +82,18 @@ export function GoIcon(props: IconProps) {
   );
 }
 
+export function RubyGemsIcon(props: IconProps) {
+  // A faceted gem — RubyGems' identity, a simple mark distinct from the other
+  // format glyphs.
+  return (
+    <Icon {...props}>
+      <path d="M6 3h12l3 6-9 12L3 9z" />
+      <path d="M3 9h18" />
+      <path d="M9 3l-3 6 6 12 6-12-3-6" />
+    </Icon>
+  );
+}
+
 export function CargoIcon(props: IconProps) {
   // Stacked crates — Cargo's shipping-crate identity, a simple mark distinct
   // from the other format glyphs.

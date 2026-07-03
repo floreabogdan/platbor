@@ -20,6 +20,7 @@ import (
 	"github.com/platbor/platbor/internal/registry/nuget"
 	"github.com/platbor/platbor/internal/registry/oci"
 	"github.com/platbor/platbor/internal/registry/pypi"
+	"github.com/platbor/platbor/internal/registry/rubygems"
 )
 
 // newRouter assembles the top-level request tree. Ordering matters: operational
@@ -76,16 +77,18 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 				mavens:    maven.NewBrowser(api.DB),
 				gomods:    goproxy.NewBrowser(api.DB),
 				crates:    cargo.NewBrowser(api.DB),
+				gems:      rubygems.NewBrowser(api.DB),
 				manager:   oci.NewManager(api.DB),
-				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB), generic.NewReferencer(api.DB), nuget.NewReferencer(api.DB), pypi.NewReferencer(api.DB), maven.NewReferencer(api.DB), goproxy.NewReferencer(api.DB), cargo.NewReferencer(api.DB)),
+				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB), generic.NewReferencer(api.DB), nuget.NewReferencer(api.DB), pypi.NewReferencer(api.DB), maven.NewReferencer(api.DB), goproxy.NewReferencer(api.DB), cargo.NewReferencer(api.DB), rubygems.NewReferencer(api.DB)),
 				retention: NewRetentionService(api.DB, map[repository.Format]registry.Pruner{
-					repository.FormatOCI:   oci.NewPruner(api.DB),
-					repository.FormatNPM:   npm.NewPruner(api.DB),
-					repository.FormatNuGet: nuget.NewPruner(api.DB),
-					repository.FormatPyPI:  pypi.NewPruner(api.DB),
-					repository.FormatMaven: maven.NewPruner(api.DB),
-					repository.FormatGo:    goproxy.NewPruner(api.DB),
-					repository.FormatCargo: cargo.NewPruner(api.DB),
+					repository.FormatOCI:      oci.NewPruner(api.DB),
+					repository.FormatNPM:      npm.NewPruner(api.DB),
+					repository.FormatNuGet:    nuget.NewPruner(api.DB),
+					repository.FormatPyPI:     pypi.NewPruner(api.DB),
+					repository.FormatMaven:    maven.NewPruner(api.DB),
+					repository.FormatGo:       goproxy.NewPruner(api.DB),
+					repository.FormatCargo:    cargo.NewPruner(api.DB),
+					repository.FormatRubyGems: rubygems.NewPruner(api.DB),
 				}),
 				repos:    repository.NewService(api.DB),
 				projects: api.Projects,
@@ -126,6 +129,9 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 	})
 	r.Route("/cargo", func(sub chi.Router) {
 		cargo.New().Mount(sub, deps)
+	})
+	r.Route("/rubygems", func(sub chi.Router) {
+		rubygems.New().Mount(sub, deps)
 	})
 
 	// Everything else falls through to the embedded SPA.

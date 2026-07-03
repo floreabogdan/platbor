@@ -35,7 +35,7 @@ export interface CreateProjectRequest {
 
 // --- Repositories (the typed, configured containers inside a project) ---
 
-export type RepoFormat = 'oci' | 'npm' | 'nuget' | 'generic' | 'pypi' | 'maven' | 'go' | 'cargo';
+export type RepoFormat = 'oci' | 'npm' | 'nuget' | 'generic' | 'pypi' | 'maven' | 'go' | 'cargo' | 'rubygems';
 export type RepoMode = 'local' | 'proxy';
 
 export interface RepoUpstream {
@@ -344,6 +344,40 @@ export interface CargoVersion {
 export interface CargoCrateDetail {
   name: string;
   versions: CargoVersion[];
+}
+
+// --- RubyGems ---
+
+/** RubyGem — one gem in a repository (the project is the gem source). */
+export interface RubyGem {
+  projectKey: string;
+  projectName: string;
+  repoKey: string;
+  name: string;
+  kind: 'local' | 'proxy';
+  versionCount: number;
+  sizeBytes: number;
+  updatedAt: string;
+}
+
+export interface ListRubyGemsResponse {
+  gems: RubyGem[];
+}
+
+/** RubyGemVersion — one pushed version of a gem. */
+export interface RubyGemVersion {
+  number: string; // version, or version-platform for non-ruby platforms
+  version: string;
+  platform: string;
+  sizeBytes: number;
+  yanked: boolean;
+  sha256?: string;
+}
+
+/** RubyGemDetail — a gem with its versions (newest first). */
+export interface RubyGemDetail {
+  name: string;
+  versions: RubyGemVersion[];
 }
 
 // --- Generic files ---

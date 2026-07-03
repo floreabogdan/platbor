@@ -9,6 +9,7 @@ import type {
   ListGenericFilesResponse,
   ListGoModulesResponse,
   ListMavensResponse,
+  ListRubyGemsResponse,
   ListMembersResponse,
   ListNugetsResponse,
   ListPackagesResponse,
@@ -25,6 +26,7 @@ import type {
   GoModuleDetail,
   MavenArtifactDetail,
   NpmPackageDetail,
+  RubyGemDetail,
   NugetPackageDetail,
   Problem,
   Project,
@@ -223,6 +225,14 @@ export const api = {
   getCargoCrate: (project: string, repo: string, name: string): Promise<CargoCrateDetail> =>
     request<CargoCrateDetail>(
       `/registry/${encodeURIComponent(project)}/cargo-crate${query({ repo, name })}`,
+    ),
+
+  // RubyGems gem browser
+  listRubyGems: (): Promise<ListRubyGemsResponse> => request<ListRubyGemsResponse>(`/registry/rubygems`),
+
+  getRubyGem: (project: string, repo: string, name: string): Promise<RubyGemDetail> =>
+    request<RubyGemDetail>(
+      `/registry/${encodeURIComponent(project)}/rubygem${query({ repo, name })}`,
     ),
 
   // Generic file browser

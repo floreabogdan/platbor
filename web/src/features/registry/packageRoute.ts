@@ -65,6 +65,16 @@ export function cargoHref(projectKey: string, repoKey: string, name: string): st
   return `/registry/${encodeURIComponent(projectKey)}/-cargo-/${encodeURIComponent(repoKey)}/${encodeURIComponent(name)}`;
 }
 
+// The RubyGems gem detail route uses a distinct "-gem-" sentinel segment. The
+// splat carries <repo>/<gem>; a gem name has no slashes.
+//
+//   /registry/<project>/-gem-/<repo>/<gem>
+
+/** rubygemsHref builds the link to a RubyGems gem's detail page. */
+export function rubygemsHref(projectKey: string, repoKey: string, name: string): string {
+  return `/registry/${encodeURIComponent(projectKey)}/-gem-/${encodeURIComponent(repoKey)}/${encodeURIComponent(name)}`;
+}
+
 /** ociHref builds the link to an OCI image's detail page: the bare splat carries
  *  <repo>/<image>. */
 export function ociHref(projectKey: string, repoKey: string, image: string): string {

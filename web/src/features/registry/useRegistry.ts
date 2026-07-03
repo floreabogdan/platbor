@@ -17,6 +17,8 @@ import type {
   PyPIPackageDetail,
   Referrer,
   Repository,
+  RubyGem,
+  RubyGemDetail,
   TagSummary,
 } from '../../lib/types';
 
@@ -313,6 +315,56 @@ export function useCargoDetail(project: string, repo: string, name: string) {
       setState('ready');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load crate');
+      setState('error');
+    }
+  }, [project, repo, name]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { detail, state, error, reload };
+}
+
+/** useRubyGems loads the global, project-grouped RubyGems gem index. */
+export function useRubyGems() {
+  const [gems, setGems] = useState<RubyGem[]>([]);
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.listRubyGems();
+      setGems(res.gems);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load gems');
+      setState('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { gems, state, error, reload };
+}
+
+/** useRubyGemDetail loads one gem's versions. */
+export function useRubyGemDetail(project: string, repo: string, name: string) {
+  const [detail, setDetail] = useState<RubyGemDetail>();
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.getRubyGem(project, repo, name);
+      setDetail(res);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load gem');
       setState('error');
     }
   }, [project, repo, name]);

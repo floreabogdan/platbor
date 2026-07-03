@@ -51,6 +51,31 @@ type CargoVersion struct {
 	CreatedAt   string `json:"created_at"`
 }
 
+type GemGem struct {
+	ID           string `json:"id"`
+	RepositoryID string `json:"repository_id"`
+	Name         string `json:"name"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
+type GemVersion struct {
+	ID          string `json:"id"`
+	GemID       string `json:"gem_id"`
+	Version     string `json:"version"`
+	Platform    string `json:"platform"`
+	Number      string `json:"number"`
+	FullName    string `json:"full_name"`
+	InfoDeps    string `json:"info_deps"`
+	InfoReqs    string `json:"info_reqs"`
+	Sha256      string `json:"sha256"`
+	BlobDigest  string `json:"blob_digest"`
+	Size        int64  `json:"size"`
+	Yanked      int64  `json:"yanked"`
+	UpstreamUrl string `json:"upstream_url"`
+	CreatedAt   string `json:"created_at"`
+}
+
 type GenericFile struct {
 	ID           string `json:"id"`
 	RepositoryID string `json:"repository_id"`

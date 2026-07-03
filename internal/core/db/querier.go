@@ -23,6 +23,7 @@ type Querier interface {
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error)
 	DeleteCargoVersion(ctx context.Context, arg DeleteCargoVersionParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, expiresAt string) error
+	DeleteGemVersion(ctx context.Context, arg DeleteGemVersionParams) (int64, error)
 	DeleteGenericFile(ctx context.Context, arg DeleteGenericFileParams) (int64, error)
 	DeleteGoFile(ctx context.Context, arg DeleteGoFileParams) (int64, error)
 	DeleteManifest(ctx context.Context, arg DeleteManifestParams) (int64, error)
@@ -36,9 +37,12 @@ type Querier interface {
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash string) error
 	DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error)
 	DeleteTagsForDigest(ctx context.Context, arg DeleteTagsForDigestParams) error
+	GemVersionExists(ctx context.Context, arg GemVersionExistsParams) (int64, error)
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (GetAPITokenByHashRow, error)
 	// Resolve a crate version to its content for download (by lowercased name).
 	GetCargoVersion(ctx context.Context, arg GetCargoVersionParams) (GetCargoVersionRow, error)
+	// Resolve a .gem by its full name (name-number) for download.
+	GetGemFile(ctx context.Context, arg GetGemFileParams) (GetGemFileRow, error)
 	GetGenericFile(ctx context.Context, arg GetGenericFileParams) (GenericFile, error)
 	GetGoFile(ctx context.Context, arg GetGoFileParams) (GoFile, error)
 	GetManifest(ctx context.Context, arg GetManifestParams) (OciManifest, error)
@@ -66,6 +70,10 @@ type Querier interface {
 	// a cached row) update metadata and only overwrite the blob when a real digest is
 	// supplied, so a fresh index read never clears a cached blob.
 	InsertCargoVersion(ctx context.Context, arg InsertCargoVersionParams) error
+	// Record a gem version. On conflict (a proxy re-listing, or a download filling a
+	// cached row) update metadata and only overwrite the blob when a real digest is
+	// supplied, so a fresh index read never clears a cached blob.
+	InsertGemVersion(ctx context.Context, arg InsertGemVersionParams) error
 	// Store a published version. First-writer-wins: a duplicate (already rejected at
 	// the handler) is a no-op rather than a transaction error.
 	InsertNpmVersion(ctx context.Context, arg InsertNpmVersionParams) error
@@ -78,6 +86,9 @@ type Querier interface {
 	// Every Cargo crate across all repositories, with version count, total cached
 	// size, and a proxy flag, for the browser's project-grouped index.
 	ListAllCargoCrates(ctx context.Context) ([]ListAllCargoCratesRow, error)
+	// Every gem across all repositories, with version count, total cached size, and a
+	// proxy flag, for the browser's project-grouped index.
+	ListAllGems(ctx context.Context) ([]ListAllGemsRow, error)
 	// Every generic file across all repositories, joined to its repository and
 	// project, for the registry browser's generic index. is_proxy is 1 for a proxy
 	// repository.
@@ -116,6 +127,16 @@ type Querier interface {
 	ListCargoVersionsForCrate(ctx context.Context, arg ListCargoVersionsForCrateParams) ([]ListCargoVersionsForCrateRow, error)
 	// Every version in a repository, grouped by crate and newest first, for pruning.
 	ListCargoVersionsForRetention(ctx context.Context, repositoryID string) ([]ListCargoVersionsForRetentionRow, error)
+	ListGemBlobDigests(ctx context.Context) ([]string, error)
+	// Every version of a gem (by name) for the /info/<gem> file, oldest first.
+	ListGemInfoVersions(ctx context.Context, arg ListGemInfoVersionsParams) ([]ListGemInfoVersionsRow, error)
+	ListGemNames(ctx context.Context, repositoryID string) ([]string, error)
+	// Every version of a gem for its detail page.
+	ListGemVersionsForGem(ctx context.Context, arg ListGemVersionsForGemParams) ([]ListGemVersionsForGemRow, error)
+	// Every non-yanked version across all gems in a repository, for the /versions
+	// compact-index file. Grouped by gem name.
+	ListGemVersionsForIndex(ctx context.Context, repositoryID string) ([]ListGemVersionsForIndexRow, error)
+	ListGemVersionsForRetention(ctx context.Context, repositoryID string) ([]ListGemVersionsForRetentionRow, error)
 	// Distinct blob digests every generic file references, for garbage collection to
 	// mark them alongside OCI manifests and npm tarballs (shared CAS across formats).
 	ListGenericBlobDigests(ctx context.Context) ([]string, error)
@@ -214,12 +235,19 @@ type Querier interface {
 	// Fill a proxied version's cached blob after downloading the .crate.
 	SetCargoVersionBlob(ctx context.Context, arg SetCargoVersionBlobParams) error
 	SetCargoYanked(ctx context.Context, arg SetCargoYankedParams) (int64, error)
+	// Fill a proxied version's cached blob after download. full_name is unique within
+	// a repository (name is unique per repo, and full_name is name-number), so the
+	// repository plus full_name identify the row without the gem name.
+	SetGemVersionBlob(ctx context.Context, arg SetGemVersionBlobParams) error
+	SetGemYanked(ctx context.Context, arg SetGemYankedParams) (int64, error)
 	SetProjectAutoCreate(ctx context.Context, arg SetProjectAutoCreateParams) error
 	// Fill a proxied file's cached blob after downloading it from the upstream.
 	SetPypiFileBlob(ctx context.Context, arg SetPypiFileBlobParams) error
 	UpdateRepository(ctx context.Context, arg UpdateRepositoryParams) (Repository, error)
 	// Ensure the crate row for (repository, lowercased name) exists, returning its id.
 	UpsertCargoCrate(ctx context.Context, arg UpsertCargoCrateParams) (string, error)
+	// Ensure the gem row for (repository, name) exists, returning its id.
+	UpsertGem(ctx context.Context, arg UpsertGemParams) (string, error)
 	// Store a file at a path in a repository, replacing any existing file there
 	// (generic paths are mutable: a re-upload overwrites).
 	UpsertGenericFile(ctx context.Context, arg UpsertGenericFileParams) error

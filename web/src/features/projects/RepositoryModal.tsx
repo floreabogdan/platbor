@@ -12,6 +12,7 @@ const FORMATS: { value: RepoFormat; label: string }[] = [
   { value: 'maven', label: 'Maven' },
   { value: 'go', label: 'Go modules' },
   { value: 'cargo', label: 'Cargo' },
+  { value: 'rubygems', label: 'RubyGems' },
   { value: 'generic', label: 'Generic files' },
 ];
 

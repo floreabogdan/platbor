@@ -49,6 +49,7 @@ platbor/
 │   │   ├── maven/          # Maven repository (plain-HTTP layout; mvn deploy/resolve)
 │   │   ├── goproxy/        # Go module proxy (GOPROXY protocol; proxy-only)
 │   │   ├── cargo/          # Cargo sparse registry (publish + index + proxy)
+│   │   ├── rubygems/       # RubyGems compact index (gem push + bundler + proxy)
 │   │   └── proxy/          # pull-through cache decorator for any adapter
 │   ├── catalog/
 │   │   ├── model/          # entities + edges (the graph)
@@ -119,6 +120,7 @@ Artifacts are addressed as `/<format>/<project>/<repo>/<artifact>`:
 /maven/<project>/<repo>/<path>        Maven (plain-HTTP layout; PUT to deploy, GET to resolve)
 /go/<project>/<repo>/<module>/@v/...  Go module proxy (GOPROXY protocol; proxy-only)
 /cargo/<project>/<repo>/...           Cargo sparse registry (config.json, index, publish, download)
+/rubygems/<project>/<repo>/...        RubyGems compact index (versions, info, names, push, download)
 /api/v1/...                           UI + automation API
 ```
 

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, ApiError } from '../../lib/api';
 import { Breadcrumb, Button, Card, EmptyState, Modal, PageHeader } from '../../components/ui';
-import { CargoIcon, FileIcon, GoIcon, MavenIcon, NugetIcon, PackageIcon, ProjectsIcon, PypiIcon, RegistryIcon, TrashIcon } from '../../components/icons';
+import { CargoIcon, FileIcon, GoIcon, MavenIcon, NugetIcon, PackageIcon, ProjectsIcon, PypiIcon, RegistryIcon, RubyGemsIcon, TrashIcon } from '../../components/icons';
 import { useAuth } from '../../lib/auth';
 import { cx } from '../../lib/cx';
 import { formatDate } from '../../lib/format';
@@ -21,6 +21,7 @@ const FORMAT_GLYPH: Record<RepoFormat, { label: string; icon: ReactNode }> = {
   maven: { label: 'Maven', icon: <MavenIcon className="h-4 w-4" /> },
   go: { label: 'Go', icon: <GoIcon className="h-4 w-4" /> },
   cargo: { label: 'Cargo', icon: <CargoIcon className="h-4 w-4" /> },
+  rubygems: { label: 'RubyGems', icon: <RubyGemsIcon className="h-4 w-4" /> },
   generic: { label: 'Generic files', icon: <FileIcon className="h-4 w-4" /> },
 };
 

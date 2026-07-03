@@ -19,6 +19,7 @@ import (
 	"github.com/platbor/platbor/internal/registry/nuget"
 	"github.com/platbor/platbor/internal/registry/oci"
 	"github.com/platbor/platbor/internal/registry/pypi"
+	"github.com/platbor/platbor/internal/registry/rubygems"
 )
 
 // gcGracePeriod spares blobs written within this window of a sweep: they may be
@@ -37,6 +38,7 @@ type registryHandler struct {
 	mavens    *maven.Browser
 	gomods    *goproxy.Browser
 	crates    *cargo.Browser
+	gems      *rubygems.Browser
 	manager   *oci.Manager
 	collector *oci.Collector
 	retention *RetentionService
@@ -54,6 +56,7 @@ func (h registryHandler) mount(r chi.Router) {
 	r.Get("/maven-artifacts", h.listMavens)     // Maven artifacts
 	r.Get("/go-modules", h.listGoModules)       // Go modules
 	r.Get("/cargo-crates", h.listCrates)        // Cargo crates
+	r.Get("/rubygems", h.listGems)              // RubyGems gems
 	r.Get("/generic-files", h.listGenericFiles) // generic files
 	// Garbage collection is instance-wide and destructive: admins only.
 	r.With(requireAdmin).Post("/gc", h.runGC) // ?dryRun=true|false
@@ -72,6 +75,7 @@ func (h registryHandler) mount(r chi.Router) {
 		r.Get("/maven-artifact", h.getMaven)     // ?repo=<repo>&group=<g>&artifact=<a> (Maven detail)
 		r.Get("/go-module", h.getGoModule)       // ?repo=<repo>&module=<m> (Go detail)
 		r.Get("/cargo-crate", h.getCrate)        // ?repo=<repo>&name=<crate> (Cargo detail)
+		r.Get("/rubygem", h.getGem)              // ?repo=<repo>&name=<gem> (RubyGems detail)
 	})
 }
 
@@ -677,6 +681,89 @@ func (h registryHandler) getCrate(w http.ResponseWriter, r *http.Request) {
 		versions = append(versions, cargoVersionResponse{Version: v.Version, SizeBytes: v.SizeBytes, Yanked: v.Yanked, Cksum: v.Cksum})
 	}
 	writeJSON(w, h.log, http.StatusOK, cargoCrateDetailResponse{Name: detail.Name, Versions: versions})
+}
+
+// --- RubyGems ---
+
+type gemResponse struct {
+	ProjectKey   string    `json:"projectKey"`
+	ProjectName  string    `json:"projectName"`
+	RepoKey      string    `json:"repoKey"`
+	Name         string    `json:"name"`
+	Kind         string    `json:"kind"`
+	VersionCount int       `json:"versionCount"`
+	SizeBytes    int64     `json:"sizeBytes"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type listGemsResponse struct {
+	Gems []gemResponse `json:"gems"`
+}
+
+// listGems returns every RubyGems gem across all projects.
+func (h registryHandler) listGems(w http.ResponseWriter, r *http.Request) {
+	gems, err := h.gems.Gems(r.Context())
+	if err != nil {
+		h.log.Error("listing gems", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	items := make([]gemResponse, 0, len(gems))
+	for _, g := range gems {
+		items = append(items, gemResponse{
+			ProjectKey:   g.ProjectKey,
+			ProjectName:  g.ProjectName,
+			RepoKey:      g.RepoKey,
+			Name:         g.Name,
+			Kind:         repoKind(g.IsProxy),
+			VersionCount: g.VersionCount,
+			SizeBytes:    g.SizeBytes,
+			UpdatedAt:    g.UpdatedAt,
+		})
+	}
+	writeJSON(w, h.log, http.StatusOK, listGemsResponse{Gems: items})
+}
+
+type gemVersionResponse struct {
+	Number    string `json:"number"`
+	Version   string `json:"version"`
+	Platform  string `json:"platform"`
+	SizeBytes int64  `json:"sizeBytes"`
+	Yanked    bool   `json:"yanked"`
+	SHA256    string `json:"sha256,omitempty"`
+}
+
+type gemDetailResponse struct {
+	Name     string               `json:"name"`
+	Versions []gemVersionResponse `json:"versions"`
+}
+
+// getGem returns one gem's versions for the detail page.
+func (h registryHandler) getGem(w http.ResponseWriter, r *http.Request) {
+	projectKey := chi.URLParam(r, "project")
+	repoKey := r.URL.Query().Get("repo")
+	name := r.URL.Query().Get("name")
+	if repoKey == "" || name == "" {
+		writeProblem(w, http.StatusBadRequest, "Missing parameter", "repo and name are required")
+		return
+	}
+	detail, err := h.gems.Gem(r.Context(), projectKey, repoKey, name)
+	if err != nil {
+		if errors.Is(err, rubygems.ErrGemNotFoundBrowse) {
+			writeProblem(w, http.StatusNotFound, "Gem not found", "no such gem in that project")
+			return
+		}
+		h.log.Error("getting gem", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	versions := make([]gemVersionResponse, 0, len(detail.Versions))
+	for _, v := range detail.Versions {
+		versions = append(versions, gemVersionResponse{
+			Number: v.Number, Version: v.Version, Platform: v.Platform, SizeBytes: v.SizeBytes, Yanked: v.Yanked, SHA256: v.SHA256,
+		})
+	}
+	writeJSON(w, h.log, http.StatusOK, gemDetailResponse{Name: detail.Name, Versions: versions})
 }
 
 // --- generic ---
