@@ -38,7 +38,7 @@ Goal: npm, NuGet, generic — each with local + proxy repos.
 - [ ] NuGet: v3 service index, push, search, package metadata; proxy of api.nuget.org
 - [ ] Generic: PUT/GET versioned files, checksums
 - [ ] Retention policies: keep-last-N, untagged cleanup (shared policy engine, per-repo config)
-- [ ] UI: package browser per format — versions, READMEs, install snippets
+- [~] UI: package browser per format — the Registry browser has a format switcher (Container images / npm packages); npm packages get a project-grouped index (versions, size, local/proxy) and a detail page with dist-tags, a versions table, and copy-paste install snippets (registry config + `npm install`, scope-aware). README rendering is the remaining piece.
 
 **Demo:** `npm install` and `dotnet add package` against Platbor as the only configured registry.
 

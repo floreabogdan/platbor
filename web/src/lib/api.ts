@@ -4,11 +4,13 @@ import type {
   CreateTokenResponse,
   DashboardResponse,
   GCResult,
+  ListPackagesResponse,
   ListProjectsResponse,
   ListReferrersResponse,
   ListRepositoriesResponse,
   ListTagsResponse,
   ManifestDetail,
+  NpmPackageDetail,
   Problem,
   Project,
   Token,
@@ -112,6 +114,15 @@ export const api = {
   listReferrers: (project: string, repository: string, subject: string): Promise<ListReferrersResponse> =>
     request<ListReferrersResponse>(
       `/registry/${encodeURIComponent(project)}/referrers${query({ repository, subject })}`,
+    ),
+
+  // npm package browser
+  listPackages: (): Promise<ListPackagesResponse> =>
+    request<ListPackagesResponse>(`/registry/packages`),
+
+  getPackage: (project: string, repository: string, name: string): Promise<NpmPackageDetail> =>
+    request<NpmPackageDetail>(
+      `/registry/${encodeURIComponent(project)}/package${query({ repository, name })}`,
     ),
 
   // Dashboard

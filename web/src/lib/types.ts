@@ -88,6 +88,41 @@ export interface ListRepositoriesResponse {
   repositories: Repository[];
 }
 
+// --- npm packages ---
+
+/** NpmPackage — one npm package in a project's repository (package index). */
+export interface NpmPackage {
+  projectKey: string;
+  projectName: string;
+  repository: string; // the <repo> segment of /npm/<project>/<repo>
+  name: string; // package name, incl. @scope/ prefix
+  kind: 'local' | 'proxy';
+  versionCount: number;
+  sizeBytes: number;
+  updatedAt: string;
+}
+
+export interface ListPackagesResponse {
+  packages: NpmPackage[];
+}
+
+/** NpmPackageVersion — one published version of a package. */
+export interface NpmPackageVersion {
+  version: string;
+  sizeBytes: number;
+  shasum: string;
+  integrity: string;
+  publishedAt: string;
+}
+
+/** NpmPackageDetail — a package with its versions (newest first) and dist-tags. */
+export interface NpmPackageDetail {
+  name: string;
+  repository: string;
+  distTags: Record<string, string>;
+  versions: NpmPackageVersion[];
+}
+
 /** TagSummary — a tag with the media type and size of the manifest it points at.
  *  `count` is the layer count for an image, or the platform count for an index. */
 export interface TagSummary {

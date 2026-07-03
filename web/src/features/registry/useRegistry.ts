@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
-import type { ManifestDetail, Referrer, Repository, TagSummary } from '../../lib/types';
+import type {
+  ManifestDetail,
+  NpmPackage,
+  NpmPackageDetail,
+  Referrer,
+  Repository,
+  TagSummary,
+} from '../../lib/types';
 
 // Server state lives in these hooks, one per browse level (KISS —
 // docs/CODING-STANDARDS.md): repositories → tags → manifest.
@@ -29,6 +36,56 @@ export function useRepositories() {
   }, [reload]);
 
   return { repositories, state, error, reload };
+}
+
+/** usePackages loads the global, project-grouped npm package index. */
+export function usePackages() {
+  const [packages, setPackages] = useState<NpmPackage[]>([]);
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.listPackages();
+      setPackages(res.packages);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load packages');
+      setState('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { packages, state, error, reload };
+}
+
+/** usePackageDetail loads one npm package's versions and dist-tags. */
+export function usePackageDetail(project: string, repository: string, name: string) {
+  const [detail, setDetail] = useState<NpmPackageDetail>();
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.getPackage(project, repository, name);
+      setDetail(res);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load package');
+      setState('error');
+    }
+  }, [project, repository, name]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { detail, state, error, reload };
 }
 
 /** useRepoTags loads one repository's tags (with per-tag manifest summary). */

@@ -7,6 +7,7 @@ import { ProjectsPage } from '../features/projects/ProjectsPage';
 import { ProfilePage } from '../features/profile/ProfilePage';
 import { RegistryPage } from '../features/registry/RegistryPage';
 import { RepositoryPage } from '../features/registry/RepositoryPage';
+import { PackagePage } from '../features/registry/PackagePage';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import { PlaceholderPage } from '../features/placeholder/PlaceholderPage';
 
@@ -42,6 +43,9 @@ function Gate() {
         <Route index element={<DashboardPage />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="registry" element={<RegistryPage />} />
+        {/* npm package detail — the reserved "-" segment (which an OCI repo name
+            can never start with) keeps this distinct from the OCI repo route. */}
+        <Route path="registry/:project/-/:repository/*" element={<PackagePage />} />
         <Route path="registry/:project/*" element={<RepositoryPage />} />
         <Route
           path="catalog"

@@ -3,14 +3,15 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RegistryPage } from './RegistryPage';
 import { api } from '../../lib/api';
-import type { Repository } from '../../lib/types';
+import type { NpmPackage, Repository } from '../../lib/types';
 
 vi.mock('../../lib/api', () => ({
   ApiError: class ApiError extends Error {},
-  api: { listRepositories: vi.fn() },
+  api: { listRepositories: vi.fn(), listPackages: vi.fn() },
 }));
 
 const listRepositories = vi.mocked(api.listRepositories);
+const listPackages = vi.mocked(api.listPackages);
 
 function renderPage() {
   return render(
@@ -31,6 +32,18 @@ const repo = (over: Partial<Repository>): Repository => ({
   kind: 'local',
   tagCount: 1,
   manifestCount: 1,
+  sizeBytes: 0,
+  updatedAt: '2026-07-02T10:00:00Z',
+  ...over,
+});
+
+const pkg = (over: Partial<NpmPackage>): NpmPackage => ({
+  projectKey: 'library',
+  projectName: 'Library',
+  repository: 'lib',
+  name: 'left-pad',
+  kind: 'local',
+  versionCount: 1,
   sizeBytes: 0,
   updatedAt: '2026-07-02T10:00:00Z',
   ...over,
@@ -128,5 +141,56 @@ describe('RegistryPage', () => {
       expect(screen.getByText('network down')).toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it('switches to the npm packages browser', async () => {
+    listRepositories.mockResolvedValue({ repositories: [] });
+    listPackages.mockResolvedValue({
+      packages: [
+        pkg({ name: 'left-pad', repository: 'lib', versionCount: 3, sizeBytes: 5_242_880 }),
+        pkg({
+          name: 'is-odd',
+          projectKey: 'platform',
+          projectName: 'Platform',
+          repository: 'cache',
+          kind: 'proxy',
+        }),
+      ],
+    });
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'npm packages' }));
+
+    // The package name links into its detail route (reserved "-" segment).
+    const leftPad = await screen.findByRole('link', { name: 'left-pad' });
+    expect(leftPad).toHaveAttribute('href', '/registry/library/-/lib/left-pad');
+
+    // Packages are grouped by project, like repositories.
+    const table = within(screen.getByRole('table'));
+    expect(table.getByText('Library')).toBeInTheDocument();
+    expect(table.getByText('Platform')).toBeInTheDocument();
+
+    // The row carries the version count and size.
+    const cells = within(leftPad.closest('tr') as HTMLElement);
+    expect(cells.getByText('3')).toBeInTheDocument();
+    expect(cells.getByText('5 MB')).toBeInTheDocument();
+
+    // Local and proxy packages are labelled.
+    expect(screen.getByText('Local')).toBeInTheDocument();
+    expect(screen.getByText('Proxy')).toBeInTheDocument();
+
+    // The toolbar count uses the package noun.
+    expect(screen.getByText(/2 packages · 2 projects/)).toBeInTheDocument();
+  });
+
+  it('shows the npm empty state when no packages exist', async () => {
+    listRepositories.mockResolvedValue({ repositories: [] });
+    listPackages.mockResolvedValue({ packages: [] });
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'npm packages' }));
+    await waitFor(() => {
+      expect(screen.getByText(/No npm packages yet/i)).toBeInTheDocument();
+    });
   });
 });
