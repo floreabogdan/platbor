@@ -59,6 +59,15 @@ type Project struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
+type RegistryProxy struct {
+	ProjectID   string `json:"project_id"`
+	UpstreamUrl string `json:"upstream_url"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
 type Session struct {
 	ID        string `json:"id"`
 	TokenHash string `json:"token_hash"`

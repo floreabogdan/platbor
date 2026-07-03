@@ -16,6 +16,7 @@ type Querier interface {
 	CountUsers(ctx context.Context) (int64, error)
 	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (ApiToken, error)
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
+	CreateProxy(ctx context.Context, arg CreateProxyParams) error
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error)
@@ -28,6 +29,7 @@ type Querier interface {
 	GetManifest(ctx context.Context, arg GetManifestParams) (OciManifest, error)
 	GetProjectByID(ctx context.Context, id string) (Project, error)
 	GetProjectByKey(ctx context.Context, key string) (Project, error)
+	GetProxyByProjectID(ctx context.Context, projectID string) (RegistryProxy, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (GetSessionByTokenHashRow, error)
 	GetTag(ctx context.Context, arg GetTagParams) (OciTag, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
@@ -47,6 +49,7 @@ type Querier interface {
 	// string, which sorts before any valid key, so a single query serves both the
 	// first page and subsequent pages.
 	ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error)
+	ListProxies(ctx context.Context) ([]RegistryProxy, error)
 	// Instance-wide recent mutations for the dashboard feed, joined to the project
 	// they touched (project_id is nullable for instance-level events).
 	ListRecentActivity(ctx context.Context, limit int64) ([]ListRecentActivityRow, error)
