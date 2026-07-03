@@ -42,6 +42,20 @@ type GenericFile struct {
 	UpdatedAt    string `json:"updated_at"`
 }
 
+type GoFile struct {
+	ID           string `json:"id"`
+	RepositoryID string `json:"repository_id"`
+	Module       string `json:"module"`
+	Version      string `json:"version"`
+	Kind         string `json:"kind"`
+	Path         string `json:"path"`
+	BlobDigest   string `json:"blob_digest"`
+	Size         int64  `json:"size"`
+	UpstreamUrl  string `json:"upstream_url"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
 type MavenFile struct {
 	ID           string `json:"id"`
 	RepositoryID string `json:"repository_id"`

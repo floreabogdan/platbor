@@ -44,6 +44,17 @@ export function mavenHref(projectKey: string, repoKey: string, groupId: string, 
   return `/registry/${encodeURIComponent(projectKey)}/-maven-/${encodeURIComponent(repoKey)}/${encodeURIComponent(coord)}`;
 }
 
+// The Go module detail route uses a distinct "-go-" sentinel segment. The splat
+// carries <repo>/<module>; a module path contains slashes (github.com/user/repo),
+// which survive as the rest of the splat.
+//
+//   /registry/<project>/-go-/<repo>/<module...>
+
+/** goHref builds the link to a Go module's detail page. */
+export function goHref(projectKey: string, repoKey: string, module: string): string {
+  return `/registry/${encodeURIComponent(projectKey)}/-go-/${encodeURIComponent(repoKey)}/${module}`;
+}
+
 /** ociHref builds the link to an OCI image's detail page: the bare splat carries
  *  <repo>/<image>. */
 export function ociHref(projectKey: string, repoKey: string, image: string): string {

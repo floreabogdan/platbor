@@ -10,6 +10,7 @@ const FORMATS: { value: RepoFormat; label: string }[] = [
   { value: 'nuget', label: 'NuGet' },
   { value: 'pypi', label: 'PyPI' },
   { value: 'maven', label: 'Maven' },
+  { value: 'go', label: 'Go modules' },
   { value: 'generic', label: 'Generic files' },
 ];
 

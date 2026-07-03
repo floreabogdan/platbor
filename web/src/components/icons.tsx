@@ -68,6 +68,20 @@ export function NugetIcon(props: IconProps) {
   );
 }
 
+export function GoIcon(props: IconProps) {
+  // A speed-line gopher-esque mark: two motion lines and a rounded module box,
+  // evoking Go's "fetch fast" module proxy identity.
+  return (
+    <Icon {...props}>
+      <path d="M2 9h5" />
+      <path d="M2 13h4" />
+      <rect x="9" y="6" width="12" height="12" rx="3" />
+      <circle cx="13" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="17" cy="12" r="1" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
 export function MavenIcon(props: IconProps) {
   // A feather over a stack — Maven's build-and-package identity, rendered as a
   // simple mark distinct from the other format glyphs.

@@ -2,12 +2,12 @@ import { Fragment, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button, Card, EmptyState, PageHeader } from '../../components/ui';
-import { FileIcon, MavenIcon, NugetIcon, PackageIcon, PypiIcon, RegistryIcon, SearchIcon } from '../../components/icons';
+import { FileIcon, GoIcon, MavenIcon, NugetIcon, PackageIcon, PypiIcon, RegistryIcon, SearchIcon } from '../../components/icons';
 import { cx } from '../../lib/cx';
 import { formatBytes, formatRelativeTime } from '../../lib/format';
-import type { GenericFile, MavenArtifact, NpmPackage, NugetPackage, PyPIPackage, Repository } from '../../lib/types';
-import { mavenHref, nugetHref, ociHref, packageHref, pypiHref } from './packageRoute';
-import { useGenericFiles, useMavens, useNugets, usePackages, usePypis, useRepositories } from './useRegistry';
+import type { GenericFile, GoModule, MavenArtifact, NpmPackage, NugetPackage, PyPIPackage, Repository } from '../../lib/types';
+import { goHref, mavenHref, nugetHref, ociHref, packageHref, pypiHref } from './packageRoute';
+import { useGenericFiles, useGoModules, useMavens, useNugets, usePackages, usePypis, useRepositories } from './useRegistry';
 
 // The registry index. It lists every artifact — OCI container images, npm and
 // NuGet packages, and generic files — in one browser rather than separate tabs:
@@ -26,6 +26,7 @@ export function RegistryPage() {
   const nugets = useNugets();
   const pypis = usePypis();
   const mavens = useMavens();
+  const gomods = useGoModules();
   const generics = useGenericFiles();
 
   // One combined list once every source is in. Each artifact carries a format
@@ -37,6 +38,7 @@ export function RegistryPage() {
       nugets.state !== 'ready' ||
       pypis.state !== 'ready' ||
       mavens.state !== 'ready' ||
+      gomods.state !== 'ready' ||
       generics.state !== 'ready'
     ) {
       return [];
@@ -47,6 +49,7 @@ export function RegistryPage() {
       ...nugets.packages.map(fromNuget),
       ...pypis.packages.map(fromPypi),
       ...mavens.artifacts.map(fromMaven),
+      ...gomods.modules.map(fromGoModule),
       ...generics.files.map(fromGeneric),
     ];
   }, [
@@ -60,6 +63,8 @@ export function RegistryPage() {
     pypis.packages,
     mavens.state,
     mavens.artifacts,
+    gomods.state,
+    gomods.modules,
     generics.state,
     generics.files,
   ]);
@@ -70,6 +75,7 @@ export function RegistryPage() {
     nugets.state === 'loading' ||
     pypis.state === 'loading' ||
     mavens.state === 'loading' ||
+    gomods.state === 'loading' ||
     generics.state === 'loading';
   const failed =
     repos.state === 'error' ||
@@ -77,8 +83,10 @@ export function RegistryPage() {
     nugets.state === 'error' ||
     pypis.state === 'error' ||
     mavens.state === 'error' ||
+    gomods.state === 'error' ||
     generics.state === 'error';
-  const errorMessage = repos.error ?? pkgs.error ?? nugets.error ?? pypis.error ?? mavens.error ?? generics.error;
+  const errorMessage =
+    repos.error ?? pkgs.error ?? nugets.error ?? pypis.error ?? mavens.error ?? gomods.error ?? generics.error;
 
   function reloadAll() {
     void repos.reload();
@@ -86,6 +94,7 @@ export function RegistryPage() {
     void nugets.reload();
     void pypis.reload();
     void mavens.reload();
+    void gomods.reload();
     void generics.reload();
   }
 
@@ -121,7 +130,7 @@ export function RegistryPage() {
 
 // --- unified artifact model ---
 
-type Format = 'oci' | 'npm' | 'nuget' | 'pypi' | 'maven' | 'generic';
+type Format = 'oci' | 'npm' | 'nuget' | 'pypi' | 'maven' | 'go' | 'generic';
 
 // Artifact is the row model both formats normalize to. `contents` is the
 // format-specific rollup phrase ("3 tags" / "2 versions"); it is display-only
@@ -217,6 +226,22 @@ function fromMaven(a: MavenArtifact): Artifact {
     updatedAt: a.updatedAt,
     href: mavenHref(a.projectKey, a.repoKey, a.groupId, a.artifactId),
     key: `maven:${a.projectKey}/${a.repoKey}/${a.groupId}:${a.artifactId}`,
+  };
+}
+
+function fromGoModule(m: GoModule): Artifact {
+  return {
+    format: 'go',
+    projectKey: m.projectKey,
+    projectName: m.projectName,
+    repoKey: m.repoKey,
+    name: m.module,
+    kind: m.kind,
+    contents: `${String(m.versionCount)} ${m.versionCount === 1 ? 'version' : 'versions'}`,
+    sizeBytes: m.sizeBytes,
+    updatedAt: m.updatedAt,
+    href: goHref(m.projectKey, m.repoKey, m.module),
+    key: `go:${m.projectKey}/${m.repoKey}/${m.module}`,
   };
 }
 
@@ -627,6 +652,7 @@ const FORMAT_META: Record<Format, { label: string; icon: ReactNode }> = {
   nuget: { label: 'NuGet package', icon: <NugetIcon className="h-4 w-4" /> },
   pypi: { label: 'PyPI package', icon: <PypiIcon className="h-4 w-4" /> },
   maven: { label: 'Maven artifact', icon: <MavenIcon className="h-4 w-4" /> },
+  go: { label: 'Go module', icon: <GoIcon className="h-4 w-4" /> },
   generic: { label: 'Generic file', icon: <FileIcon className="h-4 w-4" /> },
 };
 
@@ -700,6 +726,7 @@ function Toolbar({
         <option value="nuget">NuGet packages</option>
         <option value="pypi">PyPI packages</option>
         <option value="maven">Maven artifacts</option>
+        <option value="go">Go modules</option>
         <option value="generic">Generic files</option>
       </select>
 

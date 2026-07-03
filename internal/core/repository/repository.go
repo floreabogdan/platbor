@@ -26,6 +26,7 @@ const (
 	FormatGeneric Format = "generic"
 	FormatPyPI    Format = "pypi"
 	FormatMaven   Format = "maven"
+	FormatGo      Format = "go"
 )
 
 // Mode is whether a repository stores its own content or proxies an upstream.
@@ -324,9 +325,9 @@ func validate(key, name string, format Format, mode Mode, up *Upstream) error {
 		return &ValidationError{"name is required"}
 	}
 	switch format {
-	case FormatOCI, FormatNPM, FormatNuGet, FormatGeneric, FormatPyPI, FormatMaven:
+	case FormatOCI, FormatNPM, FormatNuGet, FormatGeneric, FormatPyPI, FormatMaven, FormatGo:
 	default:
-		return &ValidationError{"format must be one of oci, npm, nuget, generic, pypi, maven"}
+		return &ValidationError{"format must be one of oci, npm, nuget, generic, pypi, maven, go"}
 	}
 	switch mode {
 	case ModeLocal:

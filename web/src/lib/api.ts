@@ -6,6 +6,7 @@ import type {
   DashboardResponse,
   GCResult,
   ListGenericFilesResponse,
+  ListGoModulesResponse,
   ListMavensResponse,
   ListMembersResponse,
   ListNugetsResponse,
@@ -19,6 +20,7 @@ import type {
   ManifestDetail,
   Member,
   MemberRole,
+  GoModuleDetail,
   MavenArtifactDetail,
   NpmPackageDetail,
   NugetPackageDetail,
@@ -203,6 +205,14 @@ export const api = {
   getMavenArtifact: (project: string, repo: string, group: string, artifact: string): Promise<MavenArtifactDetail> =>
     request<MavenArtifactDetail>(
       `/registry/${encodeURIComponent(project)}/maven-artifact${query({ repo, group, artifact })}`,
+    ),
+
+  // Go module browser
+  listGoModules: (): Promise<ListGoModulesResponse> => request<ListGoModulesResponse>(`/registry/go-modules`),
+
+  getGoModule: (project: string, repo: string, module: string): Promise<GoModuleDetail> =>
+    request<GoModuleDetail>(
+      `/registry/${encodeURIComponent(project)}/go-module${query({ repo, module })}`,
     ),
 
   // Generic file browser

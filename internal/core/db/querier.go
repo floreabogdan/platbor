@@ -22,6 +22,7 @@ type Querier interface {
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, expiresAt string) error
 	DeleteGenericFile(ctx context.Context, arg DeleteGenericFileParams) (int64, error)
+	DeleteGoFile(ctx context.Context, arg DeleteGoFileParams) (int64, error)
 	DeleteManifest(ctx context.Context, arg DeleteManifestParams) (int64, error)
 	DeleteMavenFile(ctx context.Context, arg DeleteMavenFileParams) (int64, error)
 	DeleteNpmDistTag(ctx context.Context, arg DeleteNpmDistTagParams) (int64, error)
@@ -35,6 +36,7 @@ type Querier interface {
 	DeleteTagsForDigest(ctx context.Context, arg DeleteTagsForDigestParams) error
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (GetAPITokenByHashRow, error)
 	GetGenericFile(ctx context.Context, arg GetGenericFileParams) (GenericFile, error)
+	GetGoFile(ctx context.Context, arg GetGoFileParams) (GoFile, error)
 	GetManifest(ctx context.Context, arg GetManifestParams) (OciManifest, error)
 	GetMavenFile(ctx context.Context, arg GetMavenFileParams) (MavenFile, error)
 	GetNpmPackage(ctx context.Context, arg GetNpmPackageParams) (NpmPackage, error)
@@ -69,6 +71,9 @@ type Querier interface {
 	// project, for the registry browser's generic index. is_proxy is 1 for a proxy
 	// repository.
 	ListAllGenericFiles(ctx context.Context) ([]ListAllGenericFilesRow, error)
+	// Every cached Go module across all repositories, with version count, total
+	// cached size, and a proxy flag, for the browser's project-grouped index.
+	ListAllGoModules(ctx context.Context) ([]ListAllGoModulesRow, error)
 	// Every Maven artifact (group:artifact) across all repositories, with its version
 	// count, total cached size, and a proxy flag, for the browser's project-grouped
 	// index. Metadata files count toward size but not toward the version count.
@@ -93,6 +98,13 @@ type Querier interface {
 	// Distinct blob digests every generic file references, for garbage collection to
 	// mark them alongside OCI manifests and npm tarballs (shared CAS across formats).
 	ListGenericBlobDigests(ctx context.Context) ([]string, error)
+	// Distinct blob digests every cached Go file references, for garbage collection.
+	ListGoBlobDigests(ctx context.Context) ([]string, error)
+	// Every cached file of one module, for its detail page.
+	ListGoFilesForModule(ctx context.Context, arg ListGoFilesForModuleParams) ([]ListGoFilesForModuleRow, error)
+	// Every cached file in a repository, grouped by module and newest first, for
+	// keep-last-N-versions pruning.
+	ListGoFilesForRetention(ctx context.Context, repositoryID string) ([]ListGoFilesForRetentionRow, error)
 	// Every manifest's raw bytes, for garbage collection to mark the config and
 	// layer blobs each one references. Blobs are a global CAS, so this spans all
 	// repositories.
@@ -185,6 +197,9 @@ type Querier interface {
 	// Store a file at a path in a repository, replacing any existing file there
 	// (generic paths are mutable: a re-upload overwrites).
 	UpsertGenericFile(ctx context.Context, arg UpsertGenericFileParams) error
+	// Record a cached, immutable Go module file (info, mod, or zip) at its escaped
+	// request path, filling the blob on first fetch.
+	UpsertGoFile(ctx context.Context, arg UpsertGoFileParams) error
 	// Store a manifest by digest. Re-pushing identical content is a no-op, so an
 	// image can be tagged repeatedly without duplicating the payload. subject and
 	// artifact_type are denormalized from the payload for the referrers API.

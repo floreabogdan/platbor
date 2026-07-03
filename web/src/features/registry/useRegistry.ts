@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import type {
   GenericFile,
+  GoModule,
+  GoModuleDetail,
   ManifestDetail,
   MavenArtifact,
   MavenArtifactDetail,
@@ -212,6 +214,56 @@ export function useMavenDetail(project: string, repo: string, group: string, art
       setState('error');
     }
   }, [project, repo, group, artifact]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { detail, state, error, reload };
+}
+
+/** useGoModules loads the global, project-grouped Go module index. */
+export function useGoModules() {
+  const [modules, setModules] = useState<GoModule[]>([]);
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.listGoModules();
+      setModules(res.modules);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load Go modules');
+      setState('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { modules, state, error, reload };
+}
+
+/** useGoDetail loads one Go module's cached versions. */
+export function useGoDetail(project: string, repo: string, module: string) {
+  const [detail, setDetail] = useState<GoModuleDetail>();
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.getGoModule(project, repo, module);
+      setDetail(res);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load module');
+      setState('error');
+    }
+  }, [project, repo, module]);
 
   useEffect(() => {
     void reload();

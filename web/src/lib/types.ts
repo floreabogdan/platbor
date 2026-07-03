@@ -35,7 +35,7 @@ export interface CreateProjectRequest {
 
 // --- Repositories (the typed, configured containers inside a project) ---
 
-export type RepoFormat = 'oci' | 'npm' | 'nuget' | 'generic' | 'pypi' | 'maven';
+export type RepoFormat = 'oci' | 'npm' | 'nuget' | 'generic' | 'pypi' | 'maven' | 'go';
 export type RepoMode = 'local' | 'proxy';
 
 export interface RepoUpstream {
@@ -281,6 +281,37 @@ export interface MavenArtifactDetail {
   groupId: string;
   artifactId: string;
   files: MavenFile[];
+}
+
+// --- Go modules ---
+
+/** GoModule — one Go module cached in a repository (the project proxies a GOPROXY). */
+export interface GoModule {
+  projectKey: string;
+  projectName: string;
+  repoKey: string;
+  module: string;
+  kind: 'local' | 'proxy';
+  versionCount: number;
+  sizeBytes: number;
+  updatedAt: string;
+}
+
+export interface ListGoModulesResponse {
+  modules: GoModule[];
+}
+
+/** GoVersion — one cached version of a module (info + mod + optional zip). */
+export interface GoVersion {
+  version: string;
+  sizeBytes: number;
+  hasZip: boolean;
+}
+
+/** GoModuleDetail — a module with its cached versions. */
+export interface GoModuleDetail {
+  module: string;
+  versions: GoVersion[];
 }
 
 // --- Generic files ---

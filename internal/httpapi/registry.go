@@ -12,6 +12,7 @@ import (
 	"github.com/platbor/platbor/internal/core/project"
 	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry/generic"
+	"github.com/platbor/platbor/internal/registry/goproxy"
 	"github.com/platbor/platbor/internal/registry/maven"
 	"github.com/platbor/platbor/internal/registry/npm"
 	"github.com/platbor/platbor/internal/registry/nuget"
@@ -33,6 +34,7 @@ type registryHandler struct {
 	generics  *generic.Browser
 	pypis     *pypi.Browser
 	mavens    *maven.Browser
+	gomods    *goproxy.Browser
 	manager   *oci.Manager
 	collector *oci.Collector
 	retention *RetentionService
@@ -48,6 +50,7 @@ func (h registryHandler) mount(r chi.Router) {
 	r.Get("/nuget-packages", h.listNugets)      // NuGet packages
 	r.Get("/pypi-packages", h.listPypis)        // PyPI packages
 	r.Get("/maven-artifacts", h.listMavens)     // Maven artifacts
+	r.Get("/go-modules", h.listGoModules)       // Go modules
 	r.Get("/generic-files", h.listGenericFiles) // generic files
 	// Garbage collection is instance-wide and destructive: admins only.
 	r.With(requireAdmin).Post("/gc", h.runGC) // ?dryRun=true|false
@@ -64,6 +67,7 @@ func (h registryHandler) mount(r chi.Router) {
 		r.Get("/nuget-package", h.getNuget)      // ?repo=<repo>&id=<id> (NuGet detail)
 		r.Get("/pypi-package", h.getPypi)        // ?repo=<repo>&name=<pkg> (PyPI detail)
 		r.Get("/maven-artifact", h.getMaven)     // ?repo=<repo>&group=<g>&artifact=<a> (Maven detail)
+		r.Get("/go-module", h.getGoModule)       // ?repo=<repo>&module=<m> (Go detail)
 	})
 }
 
@@ -512,6 +516,84 @@ func (h registryHandler) getMaven(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, h.log, http.StatusOK, mavenDetailResponse{GroupID: detail.GroupID, ArtifactID: detail.ArtifactID, Files: files})
+}
+
+// --- Go modules ---
+
+type goModuleResponse struct {
+	ProjectKey   string    `json:"projectKey"`
+	ProjectName  string    `json:"projectName"`
+	RepoKey      string    `json:"repoKey"`
+	Module       string    `json:"module"`
+	Kind         string    `json:"kind"`
+	VersionCount int       `json:"versionCount"`
+	SizeBytes    int64     `json:"sizeBytes"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type listGoModulesResponse struct {
+	Modules []goModuleResponse `json:"modules"`
+}
+
+// listGoModules returns every cached Go module across all projects.
+func (h registryHandler) listGoModules(w http.ResponseWriter, r *http.Request) {
+	mods, err := h.gomods.Modules(r.Context())
+	if err != nil {
+		h.log.Error("listing go modules", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	items := make([]goModuleResponse, 0, len(mods))
+	for _, m := range mods {
+		items = append(items, goModuleResponse{
+			ProjectKey:   m.ProjectKey,
+			ProjectName:  m.ProjectName,
+			RepoKey:      m.RepoKey,
+			Module:       m.Module,
+			Kind:         repoKind(m.IsProxy),
+			VersionCount: m.VersionCount,
+			SizeBytes:    m.SizeBytes,
+			UpdatedAt:    m.UpdatedAt,
+		})
+	}
+	writeJSON(w, h.log, http.StatusOK, listGoModulesResponse{Modules: items})
+}
+
+type goVersionResponse struct {
+	Version   string `json:"version"`
+	SizeBytes int64  `json:"sizeBytes"`
+	HasZip    bool   `json:"hasZip"`
+}
+
+type goModuleDetailResponse struct {
+	Module   string              `json:"module"`
+	Versions []goVersionResponse `json:"versions"`
+}
+
+// getGoModule returns one Go module's cached versions for the detail page.
+func (h registryHandler) getGoModule(w http.ResponseWriter, r *http.Request) {
+	projectKey := chi.URLParam(r, "project")
+	repoKey := r.URL.Query().Get("repo")
+	module := r.URL.Query().Get("module")
+	if repoKey == "" || module == "" {
+		writeProblem(w, http.StatusBadRequest, "Missing parameter", "repo and module are required")
+		return
+	}
+	detail, err := h.gomods.Module(r.Context(), projectKey, repoKey, module)
+	if err != nil {
+		if errors.Is(err, goproxy.ErrModuleNotFound) {
+			writeProblem(w, http.StatusNotFound, "Module not found", "no such module in that project")
+			return
+		}
+		h.log.Error("getting go module", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	versions := make([]goVersionResponse, 0, len(detail.Versions))
+	for _, v := range detail.Versions {
+		versions = append(versions, goVersionResponse{Version: v.Version, SizeBytes: v.SizeBytes, HasZip: v.HasZip})
+	}
+	writeJSON(w, h.log, http.StatusOK, goModuleDetailResponse{Module: detail.Module, Versions: versions})
 }
 
 // --- generic ---
