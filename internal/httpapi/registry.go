@@ -20,6 +20,7 @@ import (
 	"github.com/platbor/platbor/internal/registry/oci"
 	"github.com/platbor/platbor/internal/registry/pypi"
 	"github.com/platbor/platbor/internal/registry/rubygems"
+	"github.com/platbor/platbor/internal/registry/terraform"
 )
 
 // gcGracePeriod spares blobs written within this window of a sweep: they may be
@@ -39,6 +40,7 @@ type registryHandler struct {
 	gomods    *goproxy.Browser
 	crates    *cargo.Browser
 	gems      *rubygems.Browser
+	modules   *terraform.Browser
 	manager   *oci.Manager
 	collector *oci.Collector
 	retention *RetentionService
@@ -57,6 +59,7 @@ func (h registryHandler) mount(r chi.Router) {
 	r.Get("/go-modules", h.listGoModules)       // Go modules
 	r.Get("/cargo-crates", h.listCrates)        // Cargo crates
 	r.Get("/rubygems", h.listGems)              // RubyGems gems
+	r.Get("/terraform-modules", h.listModules)  // Terraform modules
 	r.Get("/generic-files", h.listGenericFiles) // generic files
 	// Garbage collection is instance-wide and destructive: admins only.
 	r.With(requireAdmin).Post("/gc", h.runGC) // ?dryRun=true|false
@@ -76,6 +79,7 @@ func (h registryHandler) mount(r chi.Router) {
 		r.Get("/go-module", h.getGoModule)       // ?repo=<repo>&module=<m> (Go detail)
 		r.Get("/cargo-crate", h.getCrate)        // ?repo=<repo>&name=<crate> (Cargo detail)
 		r.Get("/rubygem", h.getGem)              // ?repo=<repo>&name=<gem> (RubyGems detail)
+		r.Get("/terraform-module", h.getModule)  // ?repo=<repo>&name=<n>&provider=<p> (Terraform detail)
 	})
 }
 
@@ -764,6 +768,87 @@ func (h registryHandler) getGem(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, h.log, http.StatusOK, gemDetailResponse{Name: detail.Name, Versions: versions})
+}
+
+// --- Terraform modules ---
+
+type terraformModuleResponse struct {
+	ProjectKey   string    `json:"projectKey"`
+	ProjectName  string    `json:"projectName"`
+	RepoKey      string    `json:"repoKey"`
+	Name         string    `json:"name"`
+	Provider     string    `json:"provider"`
+	Kind         string    `json:"kind"`
+	VersionCount int       `json:"versionCount"`
+	SizeBytes    int64     `json:"sizeBytes"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type listModulesResponse struct {
+	Modules []terraformModuleResponse `json:"modules"`
+}
+
+// listModules returns every Terraform module across all projects.
+func (h registryHandler) listModules(w http.ResponseWriter, r *http.Request) {
+	mods, err := h.modules.Modules(r.Context())
+	if err != nil {
+		h.log.Error("listing terraform modules", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	items := make([]terraformModuleResponse, 0, len(mods))
+	for _, m := range mods {
+		items = append(items, terraformModuleResponse{
+			ProjectKey:   m.ProjectKey,
+			ProjectName:  m.ProjectName,
+			RepoKey:      m.RepoKey,
+			Name:         m.Name,
+			Provider:     m.Provider,
+			Kind:         repoKind(m.IsProxy),
+			VersionCount: m.VersionCount,
+			SizeBytes:    m.SizeBytes,
+			UpdatedAt:    m.UpdatedAt,
+		})
+	}
+	writeJSON(w, h.log, http.StatusOK, listModulesResponse{Modules: items})
+}
+
+type terraformVersionResponse struct {
+	Version   string `json:"version"`
+	SizeBytes int64  `json:"sizeBytes"`
+}
+
+type terraformModuleDetailResponse struct {
+	Name     string                     `json:"name"`
+	Provider string                     `json:"provider"`
+	Versions []terraformVersionResponse `json:"versions"`
+}
+
+// getModule returns one Terraform module's versions for the detail page.
+func (h registryHandler) getModule(w http.ResponseWriter, r *http.Request) {
+	projectKey := chi.URLParam(r, "project")
+	repoKey := r.URL.Query().Get("repo")
+	name := r.URL.Query().Get("name")
+	provider := r.URL.Query().Get("provider")
+	if repoKey == "" || name == "" || provider == "" {
+		writeProblem(w, http.StatusBadRequest, "Missing parameter", "repo, name and provider are required")
+		return
+	}
+	detail, err := h.modules.Module(r.Context(), projectKey, repoKey, name, provider)
+	if err != nil {
+		if errors.Is(err, terraform.ErrModuleNotFoundBrowse) {
+			writeProblem(w, http.StatusNotFound, "Module not found", "no such module in that project")
+			return
+		}
+		h.log.Error("getting terraform module", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	versions := make([]terraformVersionResponse, 0, len(detail.Versions))
+	for _, v := range detail.Versions {
+		versions = append(versions, terraformVersionResponse{Version: v.Version, SizeBytes: v.SizeBytes})
+	}
+	writeJSON(w, h.log, http.StatusOK, terraformModuleDetailResponse{Name: detail.Name, Provider: detail.Provider, Versions: versions})
 }
 
 // --- generic ---

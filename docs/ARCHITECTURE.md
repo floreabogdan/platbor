@@ -50,6 +50,7 @@ platbor/
 │   │   ├── goproxy/        # Go module proxy (GOPROXY protocol; proxy-only)
 │   │   ├── cargo/          # Cargo sparse registry (publish + index + proxy)
 │   │   ├── rubygems/       # RubyGems compact index (gem push + bundler + proxy)
+│   │   ├── terraform/      # Terraform module registry (modules only; upload + protocol)
 │   │   └── proxy/          # pull-through cache decorator for any adapter
 │   ├── catalog/
 │   │   ├── model/          # entities + edges (the graph)
@@ -121,6 +122,8 @@ Artifacts are addressed as `/<format>/<project>/<repo>/<artifact>`:
 /go/<project>/<repo>/<module>/@v/...  Go module proxy (GOPROXY protocol; proxy-only)
 /cargo/<project>/<repo>/...           Cargo sparse registry (config.json, index, publish, download)
 /rubygems/<project>/<repo>/...        RubyGems compact index (versions, info, names, push, download)
+/.well-known/terraform.json           Terraform service discovery (instance-global)
+/terraform/v1/modules/<ns>/...        Terraform module registry (namespace = project; upload + protocol)
 /api/v1/...                           UI + automation API
 ```
 

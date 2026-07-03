@@ -13,6 +13,7 @@ const FORMATS: { value: RepoFormat; label: string }[] = [
   { value: 'go', label: 'Go modules' },
   { value: 'cargo', label: 'Cargo' },
   { value: 'rubygems', label: 'RubyGems' },
+  { value: 'terraform', label: 'Terraform modules' },
   { value: 'generic', label: 'Generic files' },
 ];
 

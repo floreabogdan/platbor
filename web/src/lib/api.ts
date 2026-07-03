@@ -10,6 +10,7 @@ import type {
   ListGoModulesResponse,
   ListMavensResponse,
   ListRubyGemsResponse,
+  ListTerraformModulesResponse,
   ListMembersResponse,
   ListNugetsResponse,
   ListPackagesResponse,
@@ -27,6 +28,7 @@ import type {
   MavenArtifactDetail,
   NpmPackageDetail,
   RubyGemDetail,
+  TerraformModuleDetail,
   NugetPackageDetail,
   Problem,
   Project,
@@ -233,6 +235,15 @@ export const api = {
   getRubyGem: (project: string, repo: string, name: string): Promise<RubyGemDetail> =>
     request<RubyGemDetail>(
       `/registry/${encodeURIComponent(project)}/rubygem${query({ repo, name })}`,
+    ),
+
+  // Terraform module browser
+  listTerraformModules: (): Promise<ListTerraformModulesResponse> =>
+    request<ListTerraformModulesResponse>(`/registry/terraform-modules`),
+
+  getTerraformModule: (project: string, repo: string, name: string, provider: string): Promise<TerraformModuleDetail> =>
+    request<TerraformModuleDetail>(
+      `/registry/${encodeURIComponent(project)}/terraform-module${query({ repo, name, provider })}`,
     ),
 
   // Generic file browser

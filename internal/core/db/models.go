@@ -253,6 +253,24 @@ type Session struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
+type TerraformModule struct {
+	ID           string `json:"id"`
+	RepositoryID string `json:"repository_id"`
+	Name         string `json:"name"`
+	Provider     string `json:"provider"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
+type TerraformVersion struct {
+	ID         string `json:"id"`
+	ModuleID   string `json:"module_id"`
+	Version    string `json:"version"`
+	BlobDigest string `json:"blob_digest"`
+	Size       int64  `json:"size"`
+	CreatedAt  string `json:"created_at"`
+}
+
 type User struct {
 	ID           string `json:"id"`
 	Username     string `json:"username"`

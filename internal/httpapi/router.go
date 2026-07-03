@@ -21,6 +21,7 @@ import (
 	"github.com/platbor/platbor/internal/registry/oci"
 	"github.com/platbor/platbor/internal/registry/pypi"
 	"github.com/platbor/platbor/internal/registry/rubygems"
+	"github.com/platbor/platbor/internal/registry/terraform"
 )
 
 // newRouter assembles the top-level request tree. Ordering matters: operational
@@ -36,6 +37,10 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 	// Operational endpoints — unauthenticated, never cached.
 	r.Get("/healthz", health)
 	r.Get("/readyz", health)
+
+	// Terraform service discovery is instance-global (per hostname) and
+	// unauthenticated; it must live at the host root, not under a format prefix.
+	r.Get("/.well-known/terraform.json", terraform.Discovery())
 
 	// Application/automation API.
 	r.Route("/api/v1", func(r chi.Router) {
@@ -78,17 +83,19 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 				gomods:    goproxy.NewBrowser(api.DB),
 				crates:    cargo.NewBrowser(api.DB),
 				gems:      rubygems.NewBrowser(api.DB),
+				modules:   terraform.NewBrowser(api.DB),
 				manager:   oci.NewManager(api.DB),
-				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB), generic.NewReferencer(api.DB), nuget.NewReferencer(api.DB), pypi.NewReferencer(api.DB), maven.NewReferencer(api.DB), goproxy.NewReferencer(api.DB), cargo.NewReferencer(api.DB), rubygems.NewReferencer(api.DB)),
+				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB), generic.NewReferencer(api.DB), nuget.NewReferencer(api.DB), pypi.NewReferencer(api.DB), maven.NewReferencer(api.DB), goproxy.NewReferencer(api.DB), cargo.NewReferencer(api.DB), rubygems.NewReferencer(api.DB), terraform.NewReferencer(api.DB)),
 				retention: NewRetentionService(api.DB, map[repository.Format]registry.Pruner{
-					repository.FormatOCI:      oci.NewPruner(api.DB),
-					repository.FormatNPM:      npm.NewPruner(api.DB),
-					repository.FormatNuGet:    nuget.NewPruner(api.DB),
-					repository.FormatPyPI:     pypi.NewPruner(api.DB),
-					repository.FormatMaven:    maven.NewPruner(api.DB),
-					repository.FormatGo:       goproxy.NewPruner(api.DB),
-					repository.FormatCargo:    cargo.NewPruner(api.DB),
-					repository.FormatRubyGems: rubygems.NewPruner(api.DB),
+					repository.FormatOCI:       oci.NewPruner(api.DB),
+					repository.FormatNPM:       npm.NewPruner(api.DB),
+					repository.FormatNuGet:     nuget.NewPruner(api.DB),
+					repository.FormatPyPI:      pypi.NewPruner(api.DB),
+					repository.FormatMaven:     maven.NewPruner(api.DB),
+					repository.FormatGo:        goproxy.NewPruner(api.DB),
+					repository.FormatCargo:     cargo.NewPruner(api.DB),
+					repository.FormatRubyGems:  rubygems.NewPruner(api.DB),
+					repository.FormatTerraform: terraform.NewPruner(api.DB),
 				}),
 				repos:    repository.NewService(api.DB),
 				projects: api.Projects,
@@ -132,6 +139,9 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 	})
 	r.Route("/rubygems", func(sub chi.Router) {
 		rubygems.New().Mount(sub, deps)
+	})
+	r.Route("/terraform", func(sub chi.Router) {
+		terraform.New().Mount(sub, deps)
 	})
 
 	// Everything else falls through to the embedded SPA.

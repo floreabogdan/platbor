@@ -20,6 +20,8 @@ import type {
   RubyGem,
   RubyGemDetail,
   TagSummary,
+  TerraformModule,
+  TerraformModuleDetail,
 } from '../../lib/types';
 
 // Server state lives in these hooks, one per browse level (KISS —
@@ -368,6 +370,56 @@ export function useRubyGemDetail(project: string, repo: string, name: string) {
       setState('error');
     }
   }, [project, repo, name]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { detail, state, error, reload };
+}
+
+/** useTerraformModules loads the global, project-grouped Terraform module index. */
+export function useTerraformModules() {
+  const [modules, setModules] = useState<TerraformModule[]>([]);
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.listTerraformModules();
+      setModules(res.modules);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load Terraform modules');
+      setState('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { modules, state, error, reload };
+}
+
+/** useTerraformModuleDetail loads one module's versions. */
+export function useTerraformModuleDetail(project: string, repo: string, name: string, provider: string) {
+  const [detail, setDetail] = useState<TerraformModuleDetail>();
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.getTerraformModule(project, repo, name, provider);
+      setDetail(res);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load module');
+      setState('error');
+    }
+  }, [project, repo, name, provider]);
 
   useEffect(() => {
     void reload();

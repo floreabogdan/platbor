@@ -82,6 +82,17 @@ export function GoIcon(props: IconProps) {
   );
 }
 
+export function TerraformIcon(props: IconProps) {
+  // Terraform's stacked-parallelograms mark, simplified to three tiles.
+  return (
+    <Icon {...props}>
+      <path d="M4 6l6 3v7l-6-3z" />
+      <path d="M11 9l6-3v7l-6 3z" />
+      <path d="M11 17l6-3v4l-6 3z" />
+    </Icon>
+  );
+}
+
 export function RubyGemsIcon(props: IconProps) {
   // A faceted gem — RubyGems' identity, a simple mark distinct from the other
   // format glyphs.

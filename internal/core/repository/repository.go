@@ -20,15 +20,16 @@ import (
 type Format string
 
 const (
-	FormatOCI      Format = "oci"
-	FormatNPM      Format = "npm"
-	FormatNuGet    Format = "nuget"
-	FormatGeneric  Format = "generic"
-	FormatPyPI     Format = "pypi"
-	FormatMaven    Format = "maven"
-	FormatGo       Format = "go"
-	FormatCargo    Format = "cargo"
-	FormatRubyGems Format = "rubygems"
+	FormatOCI       Format = "oci"
+	FormatNPM       Format = "npm"
+	FormatNuGet     Format = "nuget"
+	FormatGeneric   Format = "generic"
+	FormatPyPI      Format = "pypi"
+	FormatMaven     Format = "maven"
+	FormatGo        Format = "go"
+	FormatCargo     Format = "cargo"
+	FormatRubyGems  Format = "rubygems"
+	FormatTerraform Format = "terraform"
 )
 
 // Mode is whether a repository stores its own content or proxies an upstream.
@@ -327,9 +328,9 @@ func validate(key, name string, format Format, mode Mode, up *Upstream) error {
 		return &ValidationError{"name is required"}
 	}
 	switch format {
-	case FormatOCI, FormatNPM, FormatNuGet, FormatGeneric, FormatPyPI, FormatMaven, FormatGo, FormatCargo, FormatRubyGems:
+	case FormatOCI, FormatNPM, FormatNuGet, FormatGeneric, FormatPyPI, FormatMaven, FormatGo, FormatCargo, FormatRubyGems, FormatTerraform:
 	default:
-		return &ValidationError{"format must be one of oci, npm, nuget, generic, pypi, maven, go, cargo, rubygems"}
+		return &ValidationError{"format must be one of oci, npm, nuget, generic, pypi, maven, go, cargo, rubygems, terraform"}
 	}
 	switch mode {
 	case ModeLocal:

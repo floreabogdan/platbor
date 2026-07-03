@@ -35,7 +35,17 @@ export interface CreateProjectRequest {
 
 // --- Repositories (the typed, configured containers inside a project) ---
 
-export type RepoFormat = 'oci' | 'npm' | 'nuget' | 'generic' | 'pypi' | 'maven' | 'go' | 'cargo' | 'rubygems';
+export type RepoFormat =
+  | 'oci'
+  | 'npm'
+  | 'nuget'
+  | 'generic'
+  | 'pypi'
+  | 'maven'
+  | 'go'
+  | 'cargo'
+  | 'rubygems'
+  | 'terraform';
 export type RepoMode = 'local' | 'proxy';
 
 export interface RepoUpstream {
@@ -378,6 +388,39 @@ export interface RubyGemVersion {
 export interface RubyGemDetail {
   name: string;
   versions: RubyGemVersion[];
+}
+
+// --- Terraform modules ---
+
+/** TerraformModule — one module (name + provider) in a repository. The namespace
+ *  terraform addresses it by is the project key. */
+export interface TerraformModule {
+  projectKey: string;
+  projectName: string;
+  repoKey: string;
+  name: string;
+  provider: string;
+  kind: 'local' | 'proxy';
+  versionCount: number;
+  sizeBytes: number;
+  updatedAt: string;
+}
+
+export interface ListTerraformModulesResponse {
+  modules: TerraformModule[];
+}
+
+/** TerraformVersion — one uploaded version of a module. */
+export interface TerraformVersion {
+  version: string;
+  sizeBytes: number;
+}
+
+/** TerraformModuleDetail — a module with its versions (newest first). */
+export interface TerraformModuleDetail {
+  name: string;
+  provider: string;
+  versions: TerraformVersion[];
 }
 
 // --- Generic files ---

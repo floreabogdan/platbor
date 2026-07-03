@@ -2,12 +2,12 @@ import { Fragment, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button, Card, EmptyState, PageHeader } from '../../components/ui';
-import { CargoIcon, FileIcon, GoIcon, MavenIcon, NugetIcon, PackageIcon, PypiIcon, RegistryIcon, RubyGemsIcon, SearchIcon } from '../../components/icons';
+import { CargoIcon, FileIcon, GoIcon, MavenIcon, NugetIcon, PackageIcon, PypiIcon, RegistryIcon, RubyGemsIcon, SearchIcon, TerraformIcon } from '../../components/icons';
 import { cx } from '../../lib/cx';
 import { formatBytes, formatRelativeTime } from '../../lib/format';
-import type { CargoCrate, GenericFile, GoModule, MavenArtifact, NpmPackage, NugetPackage, PyPIPackage, Repository, RubyGem } from '../../lib/types';
-import { cargoHref, goHref, mavenHref, nugetHref, ociHref, packageHref, pypiHref, rubygemsHref } from './packageRoute';
-import { useCargoCrates, useGenericFiles, useGoModules, useMavens, useNugets, usePackages, usePypis, useRepositories, useRubyGems } from './useRegistry';
+import type { CargoCrate, GenericFile, GoModule, MavenArtifact, NpmPackage, NugetPackage, PyPIPackage, Repository, RubyGem, TerraformModule } from '../../lib/types';
+import { cargoHref, goHref, mavenHref, nugetHref, ociHref, packageHref, pypiHref, rubygemsHref, terraformHref } from './packageRoute';
+import { useCargoCrates, useGenericFiles, useGoModules, useMavens, useNugets, usePackages, usePypis, useRepositories, useRubyGems, useTerraformModules } from './useRegistry';
 
 // The registry index. It lists every artifact — OCI container images, npm and
 // NuGet packages, and generic files — in one browser rather than separate tabs:
@@ -29,6 +29,7 @@ export function RegistryPage() {
   const gomods = useGoModules();
   const crates = useCargoCrates();
   const gems = useRubyGems();
+  const modules = useTerraformModules();
   const generics = useGenericFiles();
 
   // One combined list once every source is in. Each artifact carries a format
@@ -43,6 +44,7 @@ export function RegistryPage() {
       gomods.state !== 'ready' ||
       crates.state !== 'ready' ||
       gems.state !== 'ready' ||
+      modules.state !== 'ready' ||
       generics.state !== 'ready'
     ) {
       return [];
@@ -56,6 +58,7 @@ export function RegistryPage() {
       ...gomods.modules.map(fromGoModule),
       ...crates.crates.map(fromCargo),
       ...gems.gems.map(fromRubyGem),
+      ...modules.modules.map(fromTerraform),
       ...generics.files.map(fromGeneric),
     ];
   }, [
@@ -75,6 +78,8 @@ export function RegistryPage() {
     crates.crates,
     gems.state,
     gems.gems,
+    modules.state,
+    modules.modules,
     generics.state,
     generics.files,
   ]);
@@ -88,6 +93,7 @@ export function RegistryPage() {
     gomods.state === 'loading' ||
     crates.state === 'loading' ||
     gems.state === 'loading' ||
+    modules.state === 'loading' ||
     generics.state === 'loading';
   const failed =
     repos.state === 'error' ||
@@ -98,6 +104,7 @@ export function RegistryPage() {
     gomods.state === 'error' ||
     crates.state === 'error' ||
     gems.state === 'error' ||
+    modules.state === 'error' ||
     generics.state === 'error';
   const errorMessage =
     repos.error ??
@@ -108,6 +115,7 @@ export function RegistryPage() {
     gomods.error ??
     crates.error ??
     gems.error ??
+    modules.error ??
     generics.error;
 
   function reloadAll() {
@@ -119,6 +127,7 @@ export function RegistryPage() {
     void gomods.reload();
     void crates.reload();
     void gems.reload();
+    void modules.reload();
     void generics.reload();
   }
 
@@ -154,7 +163,7 @@ export function RegistryPage() {
 
 // --- unified artifact model ---
 
-type Format = 'oci' | 'npm' | 'nuget' | 'pypi' | 'maven' | 'go' | 'cargo' | 'rubygems' | 'generic';
+type Format = 'oci' | 'npm' | 'nuget' | 'pypi' | 'maven' | 'go' | 'cargo' | 'rubygems' | 'terraform' | 'generic';
 
 // Artifact is the row model both formats normalize to. `contents` is the
 // format-specific rollup phrase ("3 tags" / "2 versions"); it is display-only
@@ -298,6 +307,22 @@ function fromRubyGem(g: RubyGem): Artifact {
     updatedAt: g.updatedAt,
     href: rubygemsHref(g.projectKey, g.repoKey, g.name),
     key: `rubygems:${g.projectKey}/${g.repoKey}/${g.name}`,
+  };
+}
+
+function fromTerraform(m: TerraformModule): Artifact {
+  return {
+    format: 'terraform',
+    projectKey: m.projectKey,
+    projectName: m.projectName,
+    repoKey: m.repoKey,
+    name: `${m.name}/${m.provider}`,
+    kind: m.kind,
+    contents: `${String(m.versionCount)} ${m.versionCount === 1 ? 'version' : 'versions'}`,
+    sizeBytes: m.sizeBytes,
+    updatedAt: m.updatedAt,
+    href: terraformHref(m.projectKey, m.repoKey, m.name, m.provider),
+    key: `terraform:${m.projectKey}/${m.repoKey}/${m.name}/${m.provider}`,
   };
 }
 
@@ -711,6 +736,7 @@ const FORMAT_META: Record<Format, { label: string; icon: ReactNode }> = {
   go: { label: 'Go module', icon: <GoIcon className="h-4 w-4" /> },
   cargo: { label: 'Cargo crate', icon: <CargoIcon className="h-4 w-4" /> },
   rubygems: { label: 'Ruby gem', icon: <RubyGemsIcon className="h-4 w-4" /> },
+  terraform: { label: 'Terraform module', icon: <TerraformIcon className="h-4 w-4" /> },
   generic: { label: 'Generic file', icon: <FileIcon className="h-4 w-4" /> },
 };
 
@@ -787,6 +813,7 @@ function Toolbar({
         <option value="go">Go modules</option>
         <option value="cargo">Cargo crates</option>
         <option value="rubygems">Ruby gems</option>
+        <option value="terraform">Terraform modules</option>
         <option value="generic">Generic files</option>
       </select>
 

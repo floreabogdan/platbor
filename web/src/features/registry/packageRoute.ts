@@ -75,6 +75,17 @@ export function rubygemsHref(projectKey: string, repoKey: string, name: string):
   return `/registry/${encodeURIComponent(projectKey)}/-gem-/${encodeURIComponent(repoKey)}/${encodeURIComponent(name)}`;
 }
 
+// The Terraform module detail route uses a distinct "-tf-" sentinel segment. A
+// module is identified by (name, provider); the splat carries <repo>/<name>/
+// <provider> (neither coordinate contains a slash).
+//
+//   /registry/<project>/-tf-/<repo>/<name>/<provider>
+
+/** terraformHref builds the link to a Terraform module's detail page. */
+export function terraformHref(projectKey: string, repoKey: string, name: string, provider: string): string {
+  return `/registry/${encodeURIComponent(projectKey)}/-tf-/${encodeURIComponent(repoKey)}/${encodeURIComponent(name)}/${encodeURIComponent(provider)}`;
+}
+
 /** ociHref builds the link to an OCI image's detail page: the bare splat carries
  *  <repo>/<image>. */
 export function ociHref(projectKey: string, repoKey: string, image: string): string {

@@ -37,6 +37,7 @@ type Querier interface {
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash string) error
 	DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error)
 	DeleteTagsForDigest(ctx context.Context, arg DeleteTagsForDigestParams) error
+	DeleteTerraformVersion(ctx context.Context, arg DeleteTerraformVersionParams) (int64, error)
 	GemVersionExists(ctx context.Context, arg GemVersionExistsParams) (int64, error)
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (GetAPITokenByHashRow, error)
 	// Resolve a crate version to its content for download (by lowercased name).
@@ -63,6 +64,8 @@ type Querier interface {
 	GetRepositoryByID(ctx context.Context, id string) (Repository, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (GetSessionByTokenHashRow, error)
 	GetTag(ctx context.Context, arg GetTagParams) (OciTag, error)
+	// Resolve a module version to its archive blob for download.
+	GetTerraformVersion(ctx context.Context, arg GetTerraformVersionParams) (GetTerraformVersionRow, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
 	InsertAuditEntry(ctx context.Context, arg InsertAuditEntryParams) (AuditLog, error)
@@ -82,6 +85,7 @@ type Querier interface {
 	// download filling a cached row) update metadata and the blob only when a real
 	// new digest is supplied, so a fresh simple-index read never clears a cached blob.
 	InsertPypiFile(ctx context.Context, arg InsertPypiFileParams) error
+	InsertTerraformVersion(ctx context.Context, arg InsertTerraformVersionParams) error
 	ListAPITokensByUser(ctx context.Context, userID string) ([]ApiToken, error)
 	// Every Cargo crate across all repositories, with version count, total cached
 	// size, and a proxy flag, for the browser's project-grouped index.
@@ -116,6 +120,9 @@ type Querier interface {
 	// Every repository across all projects, with its project key, for the browser
 	// and instance-wide operations (retention, listing).
 	ListAllRepositoryRows(ctx context.Context) ([]ListAllRepositoryRowsRow, error)
+	// Every Terraform module across all repositories, with version count, total size,
+	// and a proxy flag (always local), for the browser's project-grouped index.
+	ListAllTerraformModules(ctx context.Context) ([]ListAllTerraformModulesRow, error)
 	ListAuditByProject(ctx context.Context, arg ListAuditByProjectParams) ([]AuditLog, error)
 	// Distinct blob digests every cached/published .crate references, for GC.
 	ListCargoBlobDigests(ctx context.Context) ([]string, error)
@@ -217,6 +224,12 @@ type Querier interface {
 	// Tags in an image joined to the manifest each points at, so the browser can
 	// show media type and size without a second round-trip. Newest push first.
 	ListTagsWithManifest(ctx context.Context, arg ListTagsWithManifestParams) ([]ListTagsWithManifestRow, error)
+	ListTerraformBlobDigests(ctx context.Context) ([]string, error)
+	// Every version of a module, newest first, for the /versions endpoint.
+	ListTerraformVersions(ctx context.Context, moduleID string) ([]string, error)
+	// Every version of a module for its detail page.
+	ListTerraformVersionsForModule(ctx context.Context, arg ListTerraformVersionsForModuleParams) ([]ListTerraformVersionsForModuleRow, error)
+	ListTerraformVersionsForRetention(ctx context.Context, repositoryID string) ([]ListTerraformVersionsForRetentionRow, error)
 	// Manifests in a repository that no tag points at, for the delete-untagged policy.
 	ListUntaggedManifests(ctx context.Context, repositoryID string) ([]ListUntaggedManifestsRow, error)
 	ManifestExists(ctx context.Context, arg ManifestExistsParams) (int64, error)
@@ -229,6 +242,9 @@ type Querier interface {
 	// Whether a distribution filename already exists in the repository (uploads are
 	// immutable: re-uploading a filename is rejected).
 	PypiFileExists(ctx context.Context, arg PypiFileExistsParams) (int64, error)
+	// Resolve (project, name, provider) to a module and its repository, for the
+	// registry read protocol (the namespace in a module address is the project key).
+	ResolveTerraformModule(ctx context.Context, arg ResolveTerraformModuleParams) (ResolveTerraformModuleRow, error)
 	// Packages in a repository whose id contains the (lowercased) query, newest
 	// first, for the search resource. An empty query matches all.
 	SearchNugetPackages(ctx context.Context, arg SearchNugetPackagesParams) ([]SearchNugetPackagesRow, error)
@@ -243,6 +259,7 @@ type Querier interface {
 	SetProjectAutoCreate(ctx context.Context, arg SetProjectAutoCreateParams) error
 	// Fill a proxied file's cached blob after downloading it from the upstream.
 	SetPypiFileBlob(ctx context.Context, arg SetPypiFileBlobParams) error
+	TerraformVersionExists(ctx context.Context, arg TerraformVersionExistsParams) (int64, error)
 	UpdateRepository(ctx context.Context, arg UpdateRepositoryParams) (Repository, error)
 	// Ensure the crate row for (repository, lowercased name) exists, returning its id.
 	UpsertCargoCrate(ctx context.Context, arg UpsertCargoCrateParams) (string, error)
@@ -274,6 +291,8 @@ type Querier interface {
 	// id. A new file of an existing package just bumps updated_at.
 	UpsertPypiPackage(ctx context.Context, arg UpsertPypiPackageParams) (string, error)
 	UpsertTag(ctx context.Context, arg UpsertTagParams) error
+	// Ensure the module row for (repository, name, provider) exists, returning its id.
+	UpsertTerraformModule(ctx context.Context, arg UpsertTerraformModuleParams) (string, error)
 }
 
 var _ Querier = (*Queries)(nil)
