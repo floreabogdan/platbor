@@ -128,6 +128,22 @@ type RegistryProxy struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
+type Repository struct {
+	ID               string `json:"id"`
+	ProjectID        string `json:"project_id"`
+	Key              string `json:"key"`
+	Name             string `json:"name"`
+	Format           string `json:"format"`
+	Mode             string `json:"mode"`
+	UpstreamUrl      string `json:"upstream_url"`
+	UpstreamUsername string `json:"upstream_username"`
+	UpstreamPassword string `json:"upstream_password"`
+	KeepLast         int64  `json:"keep_last"`
+	DeleteUntagged   int64  `json:"delete_untagged"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
+}
+
 type RetentionPolicy struct {
 	ProjectID      string `json:"project_id"`
 	KeepLast       int64  `json:"keep_last"`

@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/platbor/platbor/internal/core/audit"
+	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry"
 	"github.com/platbor/platbor/internal/registry/generic"
 	"github.com/platbor/platbor/internal/registry/npm"
@@ -51,6 +52,11 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 			r.Use(requireUser)
 			r.Route("/tokens", tokensHandler{svc: api.Auth, log: log}.mount)
 			r.Route("/projects", projectsHandler{svc: api.Projects, log: log}.mount)
+			r.Route("/projects/{project}/repositories", repositoriesHandler{
+				repos:    repository.NewService(api.DB),
+				projects: api.Projects,
+				log:      log,
+			}.mount)
 			r.Route("/registry", registryHandler{
 				browser:   oci.NewBrowser(api.DB),
 				packages:  npm.NewBrowser(api.DB),

@@ -1,0 +1,38 @@
+-- name: CreateRepository :one
+INSERT INTO repositories (
+    id, project_id, key, name, format, mode,
+    upstream_url, upstream_username, upstream_password,
+    keep_last, delete_untagged, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING *;
+
+-- name: GetRepository :one
+SELECT * FROM repositories
+WHERE project_id = ? AND key = ?;
+
+-- name: GetRepositoryByID :one
+SELECT * FROM repositories WHERE id = ?;
+
+-- name: ListRepositoriesByProject :many
+SELECT * FROM repositories
+WHERE project_id = ?
+ORDER BY key ASC;
+
+-- name: ListAllRepositoryRows :many
+-- Every repository across all projects, with its project key, for the browser
+-- and instance-wide operations (retention, listing).
+SELECT r.*, p.key AS project_key, p.name AS project_name
+FROM repositories r
+JOIN projects p ON p.id = r.project_id
+ORDER BY p.key ASC, r.key ASC;
+
+-- name: UpdateRepository :one
+UPDATE repositories
+SET name = ?, upstream_url = ?, upstream_username = ?, upstream_password = ?,
+    keep_last = ?, delete_untagged = ?, updated_at = ?
+WHERE id = ?
+RETURNING *;
+
+-- name: DeleteRepository :execrows
+DELETE FROM repositories
+WHERE project_id = ? AND key = ?;

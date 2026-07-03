@@ -17,6 +17,7 @@ type Querier interface {
 	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (ApiToken, error)
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
 	CreateProxy(ctx context.Context, arg CreateProxyParams) error
+	CreateRepository(ctx context.Context, arg CreateRepositoryParams) (Repository, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error)
@@ -26,6 +27,7 @@ type Querier interface {
 	DeleteNpmDistTag(ctx context.Context, arg DeleteNpmDistTagParams) (int64, error)
 	DeleteNpmVersion(ctx context.Context, arg DeleteNpmVersionParams) (int64, error)
 	DeleteNugetVersion(ctx context.Context, arg DeleteNugetVersionParams) (int64, error)
+	DeleteRepository(ctx context.Context, arg DeleteRepositoryParams) (int64, error)
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash string) error
 	DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error)
 	DeleteTagsForDigest(ctx context.Context, arg DeleteTagsForDigestParams) error
@@ -41,6 +43,8 @@ type Querier interface {
 	GetProjectByID(ctx context.Context, id string) (Project, error)
 	GetProjectByKey(ctx context.Context, key string) (Project, error)
 	GetProxyByProjectID(ctx context.Context, projectID string) (RegistryProxy, error)
+	GetRepository(ctx context.Context, arg GetRepositoryParams) (Repository, error)
+	GetRepositoryByID(ctx context.Context, id string) (Repository, error)
 	GetRetentionPolicy(ctx context.Context, projectID string) (RetentionPolicy, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (GetSessionByTokenHashRow, error)
 	GetTag(ctx context.Context, arg GetTagParams) (OciTag, error)
@@ -68,6 +72,9 @@ type Querier interface {
 	// pull-through mirror (a registry_proxies row exists), so the browser can label
 	// it Local vs Proxy without a second query.
 	ListAllRepositories(ctx context.Context) ([]ListAllRepositoriesRow, error)
+	// Every repository across all projects, with its project key, for the browser
+	// and instance-wide operations (retention, listing).
+	ListAllRepositoryRows(ctx context.Context) ([]ListAllRepositoryRowsRow, error)
 	ListAuditByProject(ctx context.Context, arg ListAuditByProjectParams) ([]AuditLog, error)
 	// Distinct blob digests every generic file references, for garbage collection to
 	// mark them alongside OCI manifests and npm tarballs (shared CAS across formats).
@@ -111,6 +118,7 @@ type Querier interface {
 	// Manifests whose subject is the given digest (a subject's signatures, SBOMs,
 	// and other attestations) for the referrers API. Newest first.
 	ListReferrers(ctx context.Context, arg ListReferrersParams) ([]ListReferrersRow, error)
+	ListRepositoriesByProject(ctx context.Context, projectID string) ([]Repository, error)
 	// Every project with an effective policy (keeps some, or sweeps untagged), with
 	// its key, for a retention run.
 	ListRetentionPolicies(ctx context.Context) ([]ListRetentionPoliciesRow, error)
@@ -135,6 +143,7 @@ type Querier interface {
 	// Packages in a project whose id contains the (lowercased) query, newest first,
 	// for the search resource. An empty query matches all.
 	SearchNugetPackages(ctx context.Context, arg SearchNugetPackagesParams) ([]SearchNugetPackagesRow, error)
+	UpdateRepository(ctx context.Context, arg UpdateRepositoryParams) (Repository, error)
 	// Store a file at a path, replacing any existing file there (generic paths are
 	// mutable: a re-upload overwrites).
 	UpsertGenericFile(ctx context.Context, arg UpsertGenericFileParams) error
