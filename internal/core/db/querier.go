@@ -38,7 +38,9 @@ type Querier interface {
 	ListAPITokensByUser(ctx context.Context, userID string) ([]ApiToken, error)
 	// Every repository across all projects, with tag and manifest counts, for the
 	// registry browser's project-grouped index. A repository exists once it has at
-	// least one manifest.
+	// least one manifest. is_proxy is 1 when the repository's project is a
+	// pull-through mirror (a registry_proxies row exists), so the browser can label
+	// it Local vs Proxy without a second query.
 	ListAllRepositories(ctx context.Context) ([]ListAllRepositoriesRow, error)
 	ListAuditByProject(ctx context.Context, arg ListAuditByProjectParams) ([]AuditLog, error)
 	// Every manifest's raw bytes, for garbage collection to mark the config and

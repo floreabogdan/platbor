@@ -47,7 +47,9 @@ WHERE project_id = ? AND repository = ? AND digest = ?;
 -- name: ListAllRepositories :many
 -- Every repository across all projects, with tag and manifest counts, for the
 -- registry browser's project-grouped index. A repository exists once it has at
--- least one manifest.
+-- least one manifest. is_proxy is 1 when the repository's project is a
+-- pull-through mirror (a registry_proxies row exists), so the browser can label
+-- it Local vs Proxy without a second query.
 SELECT
     p.key                    AS project_key,
     p.name                   AS project_name,
@@ -55,9 +57,11 @@ SELECT
     COUNT(DISTINCT m.digest) AS manifest_count,
     (SELECT COUNT(*) FROM oci_tags t
        WHERE t.project_id = m.project_id AND t.repository = m.repository) AS tag_count,
+    CAST(rp.project_id IS NOT NULL AS INTEGER) AS is_proxy,
     MAX(m.created_at)        AS updated_at
 FROM oci_manifests m
 JOIN projects p ON p.id = m.project_id
+LEFT JOIN registry_proxies rp ON rp.project_id = m.project_id
 GROUP BY m.project_id, m.repository
 ORDER BY p.key ASC, m.repository ASC;
 

@@ -147,9 +147,11 @@ SELECT
     COUNT(DISTINCT m.digest) AS manifest_count,
     (SELECT COUNT(*) FROM oci_tags t
        WHERE t.project_id = m.project_id AND t.repository = m.repository) AS tag_count,
+    CAST(rp.project_id IS NOT NULL AS INTEGER) AS is_proxy,
     MAX(m.created_at)        AS updated_at
 FROM oci_manifests m
 JOIN projects p ON p.id = m.project_id
+LEFT JOIN registry_proxies rp ON rp.project_id = m.project_id
 GROUP BY m.project_id, m.repository
 ORDER BY p.key ASC, m.repository ASC
 `
@@ -160,12 +162,15 @@ type ListAllRepositoriesRow struct {
 	Repository    string      `json:"repository"`
 	ManifestCount int64       `json:"manifest_count"`
 	TagCount      int64       `json:"tag_count"`
+	IsProxy       int64       `json:"is_proxy"`
 	UpdatedAt     interface{} `json:"updated_at"`
 }
 
 // Every repository across all projects, with tag and manifest counts, for the
 // registry browser's project-grouped index. A repository exists once it has at
-// least one manifest.
+// least one manifest. is_proxy is 1 when the repository's project is a
+// pull-through mirror (a registry_proxies row exists), so the browser can label
+// it Local vs Proxy without a second query.
 func (q *Queries) ListAllRepositories(ctx context.Context) ([]ListAllRepositoriesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAllRepositories)
 	if err != nil {
@@ -181,6 +186,7 @@ func (q *Queries) ListAllRepositories(ctx context.Context) ([]ListAllRepositorie
 			&i.Repository,
 			&i.ManifestCount,
 			&i.TagCount,
+			&i.IsProxy,
 			&i.UpdatedAt,
 		); err != nil {
 			return nil, err

@@ -35,6 +35,7 @@ type RepositorySummary struct {
 	TagCount      int
 	ManifestCount int
 	SizeBytes     int64 // logical size: distinct blobs + manifests this repo holds
+	IsProxy       bool  // the repository's project is a pull-through mirror
 	UpdatedAt     time.Time
 }
 
@@ -114,6 +115,7 @@ func (b *Browser) Repositories(ctx context.Context) ([]RepositorySummary, error)
 			TagCount:      int(r.TagCount),
 			ManifestCount: int(r.ManifestCount),
 			SizeBytes:     sizes[repoKey(r.ProjectKey, r.Repository)],
+			IsProxy:       r.IsProxy != 0,
 			UpdatedAt:     parseTime(asString(r.UpdatedAt)),
 		})
 	}

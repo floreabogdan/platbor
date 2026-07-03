@@ -48,6 +48,7 @@ type repositoryResponse struct {
 	ProjectKey    string    `json:"projectKey"`
 	ProjectName   string    `json:"projectName"`
 	Repository    string    `json:"repository"`
+	Kind          string    `json:"kind"` // "local" or "proxy"
 	TagCount      int       `json:"tagCount"`
 	ManifestCount int       `json:"manifestCount"`
 	SizeBytes     int64     `json:"sizeBytes"`
@@ -123,6 +124,7 @@ func (h registryHandler) listRepositories(w http.ResponseWriter, r *http.Request
 			ProjectKey:    repo.ProjectKey,
 			ProjectName:   repo.ProjectName,
 			Repository:    repo.Repository,
+			Kind:          repoKind(repo.IsProxy),
 			TagCount:      repo.TagCount,
 			ManifestCount: repo.ManifestCount,
 			SizeBytes:     repo.SizeBytes,
@@ -130,6 +132,14 @@ func (h registryHandler) listRepositories(w http.ResponseWriter, r *http.Request
 		})
 	}
 	writeJSON(w, h.log, http.StatusOK, listRepositoriesResponse{Repositories: items})
+}
+
+// repoKind maps the proxy flag to the wire kind the projects API also uses.
+func repoKind(isProxy bool) string {
+	if isProxy {
+		return "proxy"
+	}
+	return "local"
 }
 
 func (h registryHandler) listTags(w http.ResponseWriter, r *http.Request) {
