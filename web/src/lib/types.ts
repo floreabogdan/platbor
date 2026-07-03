@@ -77,6 +77,7 @@ export interface Repository {
   projectKey: string;
   projectName: string;
   repository: string;
+  kind: 'local' | 'proxy'; // proxy = the project mirrors an upstream registry
   tagCount: number;
   manifestCount: number;
   sizeBytes: number;

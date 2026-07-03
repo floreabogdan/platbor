@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RegistryPage } from './RegistryPage';
@@ -28,6 +28,7 @@ const repo = (over: Partial<Repository>): Repository => ({
   projectKey: 'library',
   projectName: 'Library',
   repository: 'alpine',
+  kind: 'local',
   tagCount: 1,
   manifestCount: 1,
   sizeBytes: 0,
@@ -44,7 +45,7 @@ describe('RegistryPage', () => {
     });
   });
 
-  it('groups repositories under their project', async () => {
+  it('lists repositories as rows with project, tags, and size', async () => {
     listRepositories.mockResolvedValue({
       repositories: [
         repo({ projectKey: 'library', projectName: 'Library', repository: 'alpine', tagCount: 3, sizeBytes: 5_242_880 }),
@@ -54,17 +55,51 @@ describe('RegistryPage', () => {
     });
     renderPage();
 
-    // Two project group headers.
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Library' })).toBeInTheDocument();
-    });
-    expect(screen.getByRole('heading', { name: 'Platform' })).toBeInTheDocument();
-
-    // Repositories link into their detail route.
-    const alpine = screen.getByRole('link', { name: /alpine/i });
+    // The repository name links into its detail route.
+    const alpine = await screen.findByRole('link', { name: 'alpine' });
     expect(alpine).toHaveAttribute('href', '/registry/library/alpine');
-    expect(within(alpine).getByText(/3 tags/i)).toBeInTheDocument();
-    expect(within(alpine).getByText('5 MB')).toBeInTheDocument();
+
+    // Its row carries the project key, tag count, and size.
+    const row = alpine.closest('tr');
+    expect(row).not.toBeNull();
+    const cells = within(row as HTMLElement);
+    expect(cells.getByText('library')).toBeInTheDocument();
+    expect(cells.getByText('3')).toBeInTheDocument();
+    expect(cells.getByText('5 MB')).toBeInTheDocument();
+
+    // A count reflects how many repositories are shown.
+    expect(screen.getByText('3 repositories')).toBeInTheDocument();
+  });
+
+  it('labels local and proxy repositories', async () => {
+    listRepositories.mockResolvedValue({
+      repositories: [
+        repo({ repository: 'alpine', kind: 'local' }),
+        repo({ projectKey: 'dockerhub', projectName: 'Docker Hub', repository: 'library/nginx', kind: 'proxy' }),
+      ],
+    });
+    renderPage();
+
+    await screen.findByRole('link', { name: 'alpine' });
+    expect(screen.getByText('Local')).toBeInTheDocument();
+    expect(screen.getByText('Proxy')).toBeInTheDocument();
+  });
+
+  it('filters the table by the search box', async () => {
+    listRepositories.mockResolvedValue({
+      repositories: [
+        repo({ repository: 'alpine' }),
+        repo({ repository: 'nginx' }),
+      ],
+    });
+    renderPage();
+
+    await screen.findByRole('link', { name: 'alpine' });
+    fireEvent.change(screen.getByLabelText('Filter repositories'), { target: { value: 'nginx' } });
+
+    expect(screen.queryByRole('link', { name: 'alpine' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'nginx' })).toBeInTheDocument();
+    expect(screen.getByText('1 of 2')).toBeInTheDocument();
   });
 
   it('shows an error state when loading fails', async () => {
