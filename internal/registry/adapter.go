@@ -29,6 +29,10 @@ type Deps struct {
 	DB           *sql.DB
 	Repositories *repository.Service
 	Log          *slog.Logger
+	// EnableOCIBearer switches the OCI adapter to the bearer-token auth flow
+	// (a /v2/token endpoint and a Bearer challenge) instead of HTTP Basic. Only
+	// the OCI adapter reads it; HTTP Basic keeps working regardless.
+	EnableOCIBearer bool
 }
 
 // Adapter is one registry format. Mount registers the format's protocol routes

@@ -57,6 +57,11 @@ type AuthConfig struct {
 	// CookieSecure sets the Secure flag on the session cookie. Enable when
 	// serving over HTTPS (directly or behind a TLS-terminating proxy).
 	CookieSecure bool `yaml:"cookieSecure"`
+	// OCIBearer enables the OCI bearer-token flow: /v2 challenges clients with a
+	// token endpoint (/v2/token) that issues short-lived scoped tokens, instead
+	// of HTTP Basic. Off by default; HTTP Basic (password or PAT) keeps working
+	// either way.
+	OCIBearer bool `yaml:"ociBearer"`
 }
 
 // LogConfig configures the slog handler.
@@ -157,6 +162,13 @@ func applyEnv(cfg *Config) error {
 			return fmt.Errorf("parsing %sCOOKIE_SECURE %q: %w", envPrefix, v, err)
 		}
 		cfg.Auth.CookieSecure = b
+	}
+	if v, ok := lookup("OCI_BEARER"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("parsing %sOCI_BEARER %q: %w", envPrefix, v, err)
+		}
+		cfg.Auth.OCIBearer = b
 	}
 	if v, ok := lookup("LOG_LEVEL"); ok {
 		cfg.Log.Level = v

@@ -31,6 +31,8 @@ type API struct {
 	DB *sql.DB
 	// CookieSecure sets the Secure flag on the session cookie.
 	CookieSecure bool
+	// EnableOCIBearer turns on the OCI bearer-token auth flow (see config.OCIBearer).
+	EnableOCIBearer bool
 }
 
 // Server owns the HTTP listener and its graceful-shutdown lifecycle.

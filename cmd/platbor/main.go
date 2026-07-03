@@ -74,11 +74,12 @@ func run() error {
 	}
 
 	api := httpapi.API{
-		Auth:         authSvc,
-		Projects:     project.NewService(sqlDB),
-		Blobs:        blobStore,
-		DB:           sqlDB,
-		CookieSecure: cfg.Auth.CookieSecure,
+		Auth:            authSvc,
+		Projects:        project.NewService(sqlDB),
+		Blobs:           blobStore,
+		DB:              sqlDB,
+		CookieSecure:    cfg.Auth.CookieSecure,
+		EnableOCIBearer: cfg.Auth.OCIBearer,
 	}
 
 	log.Info("starting platbor", slog.String("addr", cfg.Addr), slog.String("dataDir", cfg.DataDir))

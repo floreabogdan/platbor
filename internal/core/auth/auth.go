@@ -46,18 +46,30 @@ type User struct {
 
 // Service provides authentication operations backed by the metadata store.
 type Service struct {
-	db  *sql.DB
-	q   *db.Queries
-	now func() time.Time
+	db        *sql.DB
+	q         *db.Queries
+	now       func() time.Time
+	regSecret []byte // process-lifetime HMAC key for short-lived registry tokens
 }
 
 // NewService wires the service to an open database.
 func NewService(sqlDB *sql.DB) *Service {
 	return &Service{
-		db:  sqlDB,
-		q:   db.New(sqlDB),
-		now: func() time.Time { return time.Now().UTC() },
+		db:        sqlDB,
+		q:         db.New(sqlDB),
+		now:       func() time.Time { return time.Now().UTC() },
+		regSecret: mustRandom(32),
 	}
+}
+
+// mustRandom returns n cryptographically-random bytes, panicking on failure —
+// the process cannot function without a working RNG at startup.
+func mustRandom(n int) []byte {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		panic(fmt.Sprintf("auth: reading random bytes: %v", err))
+	}
+	return buf
 }
 
 // Authenticate verifies a username/password pair and returns the user. It runs
