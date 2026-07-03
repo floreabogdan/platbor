@@ -285,14 +285,14 @@ function GroupedTable({
               >
                 {/* Name + count on the left; the group's total size aligns under
                     the Size column, directly above the per-repo sizes. */}
-                <td colSpan={4} className="px-4 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-400">{open ? '▾' : '▸'}</span>
-                    <span className="font-semibold text-slate-900">{g.name}</span>
+                <td colSpan={4} className="py-2.5 pl-4 pr-3">
+                  <div className="flex items-center">
+                    <span className="w-5 shrink-0 text-slate-400">{open ? '▾' : '▸'}</span>
+                    <span className="mr-2 font-semibold text-slate-900">{g.name}</span>
                     <span className="rounded-md bg-slate-200/70 px-1.5 py-0.5 font-mono text-xs text-slate-600">
                       {g.key}
                     </span>
-                    <span className="font-mono text-xs text-slate-400">
+                    <span className="ml-2 font-mono text-xs text-slate-400">
                       {g.repos.length} {g.repos.length === 1 ? 'repo' : 'repos'}
                     </span>
                   </div>
@@ -304,7 +304,7 @@ function GroupedTable({
               </tr>
               {open
                 ? g.repos.map((repo) => (
-                    <RepoRow key={stableKey(repo)} repo={repo} showProject={false} navigate={navigate} />
+                    <RepoRow key={stableKey(repo)} repo={repo} showProject={false} indent navigate={navigate} />
                   ))
                 : null}
             </tbody>
@@ -322,10 +322,12 @@ type NavigateFn = ReturnType<typeof useNavigate>;
 function RepoRow({
   repo,
   showProject,
+  indent = false,
   navigate,
 }: {
   repo: Repository;
   showProject: boolean;
+  indent?: boolean;
   navigate: NavigateFn;
 }) {
   const href = `/registry/${encodeURIComponent(repo.projectKey)}/${repo.repository}`;
@@ -336,7 +338,9 @@ function RepoRow({
       }}
       className="cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50"
     >
-      <Td>
+      {/* In grouped mode the row is indented so it nests visually under its
+          project header; in flat mode it sits at the normal column edge. */}
+      <td className={cx('py-2.5 pr-3', indent ? 'pl-9' : 'pl-4')}>
         <Link
           to={href}
           onClick={(e) => e.stopPropagation()}
@@ -344,7 +348,7 @@ function RepoRow({
         >
           {repo.repository}
         </Link>
-      </Td>
+      </td>
       {showProject ? (
         <Td>
           <span
