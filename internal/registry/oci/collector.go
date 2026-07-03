@@ -11,19 +11,25 @@ import (
 	"github.com/platbor/platbor/internal/core/blob"
 	"github.com/platbor/platbor/internal/core/db"
 	"github.com/platbor/platbor/internal/core/id"
+	"github.com/platbor/platbor/internal/registry"
 )
 
 // Collector runs mark-and-sweep garbage collection over the blob store: it marks
-// the blobs every stored manifest references, then sweeps the rest (subject to a
-// grace window). It is instance-wide, since blobs are a shared CAS.
+// the blobs every format still references, then sweeps the rest (subject to a
+// grace window). It is instance-wide, since blobs are a shared CAS: the mark set
+// is the union of OCI manifest blobs and every extra referencer (npm tarballs,
+// future formats), so no live content is swept.
 type Collector struct {
 	blobs blob.Store
 	store *manifestStore
+	extra []registry.BlobReferencer
 }
 
-// NewCollector wires a collector to the blob store and metadata database.
-func NewCollector(blobs blob.Store, sqlDB *sql.DB) *Collector {
-	return &Collector{blobs: blobs, store: newManifestStore(sqlDB)}
+// NewCollector wires a collector to the blob store and metadata database. extra
+// referencers contribute the blobs other formats need; they are unioned with the
+// OCI manifest blobs before the sweep.
+func NewCollector(blobs blob.Store, sqlDB *sql.DB, extra ...registry.BlobReferencer) *Collector {
+	return &Collector{blobs: blobs, store: newManifestStore(sqlDB), extra: extra}
 }
 
 // Collect marks referenced blobs and sweeps unreferenced ones whose last write
@@ -33,6 +39,15 @@ func (c *Collector) Collect(ctx context.Context, actor string, grace time.Durati
 	referenced, err := c.store.referencedBlobs(ctx)
 	if err != nil {
 		return blob.Report{}, err
+	}
+	for _, ref := range c.extra {
+		more, err := ref.ReferencedBlobs(ctx)
+		if err != nil {
+			return blob.Report{}, err
+		}
+		for digest := range more {
+			referenced[digest] = struct{}{}
+		}
 	}
 	report, err := blob.Sweep(ctx, c.blobs, referenced, now.Add(-grace), dryRun)
 	if err != nil {

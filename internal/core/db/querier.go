@@ -22,11 +22,15 @@ type Querier interface {
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, expiresAt string) error
 	DeleteManifest(ctx context.Context, arg DeleteManifestParams) (int64, error)
+	DeleteNpmDistTag(ctx context.Context, arg DeleteNpmDistTagParams) (int64, error)
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash string) error
 	DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error)
 	DeleteTagsForDigest(ctx context.Context, arg DeleteTagsForDigestParams) error
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (GetAPITokenByHashRow, error)
 	GetManifest(ctx context.Context, arg GetManifestParams) (OciManifest, error)
+	GetNpmPackage(ctx context.Context, arg GetNpmPackageParams) (NpmPackage, error)
+	// The blob digest and size for one package version's tarball, to serve it.
+	GetNpmTarball(ctx context.Context, arg GetNpmTarballParams) (GetNpmTarballRow, error)
 	GetProjectByID(ctx context.Context, id string) (Project, error)
 	GetProjectByKey(ctx context.Context, key string) (Project, error)
 	GetProxyByProjectID(ctx context.Context, projectID string) (RegistryProxy, error)
@@ -35,7 +39,14 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id string) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
 	InsertAuditEntry(ctx context.Context, arg InsertAuditEntryParams) (AuditLog, error)
+	// Store a published version. First-writer-wins: a duplicate (already rejected at
+	// the handler) is a no-op rather than a transaction error.
+	InsertNpmVersion(ctx context.Context, arg InsertNpmVersionParams) error
 	ListAPITokensByUser(ctx context.Context, userID string) ([]ApiToken, error)
+	// Every npm package across all projects, with version count, total tarball size,
+	// and a proxy flag, for the registry browser's package index. is_proxy is 1 when
+	// the package's project is a pull-through mirror.
+	ListAllNpmPackages(ctx context.Context) ([]ListAllNpmPackagesRow, error)
 	// Every repository across all projects, with tag and manifest counts, for the
 	// registry browser's project-grouped index. A repository exists once it has at
 	// least one manifest. is_proxy is 1 when the repository's project is a
@@ -52,6 +63,13 @@ type Querier interface {
 	// repository references. Blobs are a shared CAS, so a layer used by two
 	// repositories is counted once per repository (logical size), not physically.
 	ListManifestSizing(ctx context.Context) ([]ListManifestSizingRow, error)
+	ListNpmDistTags(ctx context.Context, arg ListNpmDistTagsParams) ([]ListNpmDistTagsRow, error)
+	// Distinct tarball digests every npm version references, for garbage collection
+	// to mark them alongside OCI blobs. Blobs are a shared CAS spanning all formats.
+	ListNpmTarballDigests(ctx context.Context) ([]string, error)
+	// Every published version of a package, oldest first, with the verbatim version
+	// metadata and its tarball's digests, so the packument can be rebuilt.
+	ListNpmVersions(ctx context.Context, arg ListNpmVersionsParams) ([]ListNpmVersionsRow, error)
 	// Keyset pagination on the unique `key` column. The first page passes the empty
 	// string, which sorts before any valid key, so a single query serves both the
 	// first page and subsequent pages.
@@ -70,10 +88,17 @@ type Querier interface {
 	// show media type and size without a second round-trip. Newest push first.
 	ListTagsWithManifest(ctx context.Context, arg ListTagsWithManifestParams) ([]ListTagsWithManifestRow, error)
 	ManifestExists(ctx context.Context, arg ManifestExistsParams) (int64, error)
+	// Whether a specific version is already published. npm forbids overwriting a
+	// published version, so the handler rejects a re-publish before inserting.
+	NpmVersionExists(ctx context.Context, arg NpmVersionExistsParams) (int64, error)
 	// Store a manifest by digest. Re-pushing identical content is a no-op, so an
 	// image can be tagged repeatedly without duplicating the payload. subject and
 	// artifact_type are denormalized from the payload for the referrers API.
 	UpsertManifest(ctx context.Context, arg UpsertManifestParams) error
+	UpsertNpmDistTag(ctx context.Context, arg UpsertNpmDistTagParams) error
+	// Ensure the package row for (project, repository, name) exists, returning its
+	// id. Publishing a new version of an existing package just bumps updated_at.
+	UpsertNpmPackage(ctx context.Context, arg UpsertNpmPackageParams) (string, error)
 	UpsertTag(ctx context.Context, arg UpsertTagParams) error
 }
 

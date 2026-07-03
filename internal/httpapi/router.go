@@ -11,6 +11,7 @@ import (
 
 	"github.com/platbor/platbor/internal/core/audit"
 	"github.com/platbor/platbor/internal/registry"
+	"github.com/platbor/platbor/internal/registry/npm"
 	"github.com/platbor/platbor/internal/registry/oci"
 )
 
@@ -51,7 +52,7 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 			r.Route("/registry", registryHandler{
 				browser:   oci.NewBrowser(api.DB),
 				manager:   oci.NewManager(api.DB),
-				collector: oci.NewCollector(api.Blobs, api.DB),
+				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB)),
 				projects:  api.Projects,
 				log:       log,
 			}.mount)
@@ -66,8 +67,12 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 
 	// Format-protocol routes. Each adapter owns its URL prefix and its own
 	// protocol-native auth and errors.
+	deps := registry.Deps{Blobs: api.Blobs, Auth: api.Auth, DB: api.DB, Log: log}
 	r.Route("/v2", func(sub chi.Router) {
-		oci.New().Mount(sub, registry.Deps{Blobs: api.Blobs, Auth: api.Auth, DB: api.DB, Log: log})
+		oci.New().Mount(sub, deps)
+	})
+	r.Route("/npm", func(sub chi.Router) {
+		npm.New().Mount(sub, deps)
 	})
 
 	// Everything else falls through to the embedded SPA.

@@ -1,0 +1,369 @@
+package npm_test
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha1"
+	"crypto/sha512"
+	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/platbor/platbor/internal/core/auth"
+	"github.com/platbor/platbor/internal/core/blob"
+	"github.com/platbor/platbor/internal/core/config"
+	"github.com/platbor/platbor/internal/core/db"
+	"github.com/platbor/platbor/internal/core/project"
+	"github.com/platbor/platbor/internal/registry"
+	"github.com/platbor/platbor/internal/registry/npm"
+	"github.com/platbor/platbor/internal/registry/oci"
+)
+
+type harness struct {
+	router http.Handler
+	auth   *auth.Service
+	db     *sql.DB
+	blobs  blob.Store
+}
+
+func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	ctx := context.Background()
+
+	sqlDB, err := db.Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := db.Migrate(ctx, sqlDB, discardLogger()); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	authSvc := auth.NewService(sqlDB)
+	if _, err := authSvc.Bootstrap(ctx, "admin", "password"); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	projects := project.NewService(sqlDB)
+	if _, err := projects.Create(ctx, project.CreateInput{Key: "npm-local", Name: "Local", Actor: "admin"}); err != nil {
+		t.Fatalf("create local project: %v", err)
+	}
+	if _, err := projects.Create(ctx, project.CreateInput{
+		Key: "npm-proxy", Name: "Proxy", Actor: "admin",
+		Upstream: &project.Upstream{URL: "https://registry.npmjs.org"},
+	}); err != nil {
+		t.Fatalf("create proxy project: %v", err)
+	}
+	store, err := blob.NewFS(cfg.DataDir)
+	if err != nil {
+		t.Fatalf("NewFS: %v", err)
+	}
+
+	r := chi.NewRouter()
+	r.Route("/npm", func(sub chi.Router) {
+		npm.New().Mount(sub, registry.Deps{Blobs: store, Auth: authSvc, DB: sqlDB, Log: discardLogger()})
+	})
+	return &harness{router: r, auth: authSvc, db: sqlDB, blobs: store}
+}
+
+// token issues a personal access token for the admin, as npm login would.
+func (h *harness) token(t *testing.T) string {
+	t.Helper()
+	raw, _, err := h.auth.CreateToken(context.Background(), adminID(t, h), "admin", "npm-test", 0)
+	if err != nil {
+		t.Fatalf("CreateToken: %v", err)
+	}
+	return raw
+}
+
+func adminID(t *testing.T, h *harness) string {
+	t.Helper()
+	u, err := h.auth.Authenticate(context.Background(), "admin", "password")
+	if err != nil {
+		t.Fatalf("Authenticate: %v", err)
+	}
+	return u.ID
+}
+
+// do issues a request with an optional bearer token.
+func (h *harness) do(t *testing.T, method, path string, body []byte, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	var r io.Reader
+	if body != nil {
+		r = bytes.NewReader(body)
+	}
+	req := httptest.NewRequest(method, path, r)
+	req.Host = "localhost:8099"
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rr := httptest.NewRecorder()
+	h.router.ServeHTTP(rr, req)
+	return rr
+}
+
+// publishBody builds the document `npm publish` PUTs, with the tarball inlined
+// as a base64 attachment and authoritative dist digests.
+func publishBody(name, version string, tarball []byte) []byte {
+	sha1sum := sha1.Sum(tarball)
+	sha512sum := sha512.Sum512(tarball)
+	integrity := "sha512-" + base64.StdEncoding.EncodeToString(sha512sum[:])
+	ver := map[string]any{
+		"name":    name,
+		"version": version,
+		"dist": map[string]any{
+			"shasum":    hex.EncodeToString(sha1sum[:]),
+			"integrity": integrity,
+		},
+	}
+	doc := map[string]any{
+		"name":      name,
+		"dist-tags": map[string]string{"latest": version},
+		"versions":  map[string]any{version: ver},
+		"_attachments": map[string]any{
+			name + "-" + version + ".tgz": map[string]any{
+				"content_type": "application/octet-stream",
+				"data":         base64.StdEncoding.EncodeToString(tarball),
+				"length":       len(tarball),
+			},
+		},
+	}
+	b, _ := json.Marshal(doc)
+	return b
+}
+
+const base = "/npm/npm-local/lib"
+
+func TestLoginIssuesTokenAndWhoami(t *testing.T) {
+	h := newHarness(t)
+
+	body := []byte(`{"name":"admin","password":"password"}`)
+	rr := h.do(t, http.MethodPut, base+"/-/user/org.couchdb.user:admin", body, "")
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("login: status = %d, want 201 (%s)", rr.Code, rr.Body.String())
+	}
+	var login struct{ Token string }
+	if err := json.Unmarshal(rr.Body.Bytes(), &login); err != nil || login.Token == "" {
+		t.Fatalf("login response missing token: %s", rr.Body.String())
+	}
+
+	// The issued token authenticates whoami.
+	who := h.do(t, http.MethodGet, base+"/-/whoami", nil, login.Token)
+	if who.Code != http.StatusOK {
+		t.Fatalf("whoami: status = %d, want 200", who.Code)
+	}
+	if got := who.Body.String(); !bytes.Contains([]byte(got), []byte(`"admin"`)) {
+		t.Errorf("whoami = %s, want username admin", got)
+	}
+
+	// Wrong password is rejected.
+	bad := h.do(t, http.MethodPut, base+"/-/user/org.couchdb.user:admin", []byte(`{"name":"admin","password":"nope"}`), "")
+	if bad.Code != http.StatusUnauthorized {
+		t.Errorf("bad login: status = %d, want 401", bad.Code)
+	}
+}
+
+func TestRequiresAuth(t *testing.T) {
+	h := newHarness(t)
+	rr := h.do(t, http.MethodGet, base+"/anything", nil, "")
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous read: status = %d, want 401", rr.Code)
+	}
+}
+
+func TestPublishInstallRoundTrip(t *testing.T) {
+	h := newHarness(t)
+	tok := h.token(t)
+	tarball := []byte("fake-tarball-bytes-v1")
+
+	rr := h.do(t, http.MethodPut, base+"/platbor-demo", publishBody("platbor-demo", "1.0.0", tarball), tok)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("publish: status = %d, want 201 (%s)", rr.Code, rr.Body.String())
+	}
+
+	// Packument reports the version with a tarball URL pointing back at us.
+	pk := h.do(t, http.MethodGet, base+"/platbor-demo", nil, tok)
+	if pk.Code != http.StatusOK {
+		t.Fatalf("packument: status = %d, want 200", pk.Code)
+	}
+	var doc struct {
+		DistTags map[string]string          `json:"dist-tags"`
+		Versions map[string]json.RawMessage `json:"versions"`
+	}
+	if err := json.Unmarshal(pk.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("packument decode: %v", err)
+	}
+	if doc.DistTags["latest"] != "1.0.0" {
+		t.Errorf("latest dist-tag = %q, want 1.0.0", doc.DistTags["latest"])
+	}
+	var v struct {
+		Dist struct {
+			Tarball   string `json:"tarball"`
+			Shasum    string `json:"shasum"`
+			Integrity string `json:"integrity"`
+		} `json:"dist"`
+	}
+	if err := json.Unmarshal(doc.Versions["1.0.0"], &v); err != nil {
+		t.Fatalf("version decode: %v", err)
+	}
+	wantURL := "http://localhost:8099/npm/npm-local/lib/platbor-demo/-/platbor-demo-1.0.0.tgz"
+	if v.Dist.Tarball != wantURL {
+		t.Errorf("tarball URL = %q, want %q", v.Dist.Tarball, wantURL)
+	}
+	wantSha := sha1.Sum(tarball)
+	if v.Dist.Shasum != hex.EncodeToString(wantSha[:]) {
+		t.Errorf("shasum = %q, want authoritative sha1", v.Dist.Shasum)
+	}
+
+	// The tarball downloads byte-for-byte.
+	dl := h.do(t, http.MethodGet, base+"/platbor-demo/-/platbor-demo-1.0.0.tgz", nil, tok)
+	if dl.Code != http.StatusOK {
+		t.Fatalf("tarball download: status = %d, want 200", dl.Code)
+	}
+	if !bytes.Equal(dl.Body.Bytes(), tarball) {
+		t.Errorf("downloaded tarball does not match published bytes")
+	}
+
+	// Re-publishing the same version is rejected.
+	dup := h.do(t, http.MethodPut, base+"/platbor-demo", publishBody("platbor-demo", "1.0.0", tarball), tok)
+	if dup.Code != http.StatusConflict {
+		t.Errorf("re-publish: status = %d, want 409", dup.Code)
+	}
+}
+
+func TestScopedPackage(t *testing.T) {
+	h := newHarness(t)
+	tok := h.token(t)
+	tarball := []byte("scoped-tarball")
+
+	// npm sends scoped names percent-encoded (@scope%2fname).
+	rr := h.do(t, http.MethodPut, base+"/@acme%2fwidgets", publishBody("@acme/widgets", "2.0.0", tarball), tok)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("scoped publish: status = %d, want 201 (%s)", rr.Code, rr.Body.String())
+	}
+
+	pk := h.do(t, http.MethodGet, base+"/@acme%2fwidgets", nil, tok)
+	if pk.Code != http.StatusOK {
+		t.Fatalf("scoped packument: status = %d, want 200", pk.Code)
+	}
+	var doc struct {
+		Versions map[string]struct {
+			Dist struct {
+				Tarball string `json:"tarball"`
+			} `json:"dist"`
+		} `json:"versions"`
+	}
+	if err := json.Unmarshal(pk.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The download URL uses the unscoped basename in the filename.
+	wantURL := "http://localhost:8099/npm/npm-local/lib/@acme/widgets/-/widgets-2.0.0.tgz"
+	if got := doc.Versions["2.0.0"].Dist.Tarball; got != wantURL {
+		t.Errorf("scoped tarball URL = %q, want %q", got, wantURL)
+	}
+
+	dl := h.do(t, http.MethodGet, base+"/@acme/widgets/-/widgets-2.0.0.tgz", nil, tok)
+	if dl.Code != http.StatusOK || !bytes.Equal(dl.Body.Bytes(), tarball) {
+		t.Errorf("scoped tarball download: status=%d match=%v", dl.Code, bytes.Equal(dl.Body.Bytes(), tarball))
+	}
+}
+
+func TestDistTags(t *testing.T) {
+	h := newHarness(t)
+	tok := h.token(t)
+	h.do(t, http.MethodPut, base+"/pkg", publishBody("pkg", "1.0.0", []byte("a")), tok)
+	h.do(t, http.MethodPut, base+"/pkg", publishBody("pkg", "1.0.0", []byte("a")), tok) // idempotent no-op path exercised elsewhere
+
+	// Set a new tag.
+	set := h.do(t, http.MethodPut, base+"/-/package/pkg/dist-tags/beta", []byte(`"1.0.0"`), tok)
+	if set.Code != http.StatusCreated {
+		t.Fatalf("set dist-tag: status = %d, want 201 (%s)", set.Code, set.Body.String())
+	}
+
+	ls := h.do(t, http.MethodGet, base+"/-/package/pkg/dist-tags", nil, tok)
+	var tags map[string]string
+	if err := json.Unmarshal(ls.Body.Bytes(), &tags); err != nil {
+		t.Fatalf("dist-tags decode: %v", err)
+	}
+	if tags["beta"] != "1.0.0" || tags["latest"] != "1.0.0" {
+		t.Errorf("dist-tags = %v, want beta and latest at 1.0.0", tags)
+	}
+
+	// latest cannot be removed.
+	if rr := h.do(t, http.MethodDelete, base+"/-/package/pkg/dist-tags/latest", nil, tok); rr.Code != http.StatusBadRequest {
+		t.Errorf("delete latest: status = %d, want 400", rr.Code)
+	}
+	// beta can.
+	if rr := h.do(t, http.MethodDelete, base+"/-/package/pkg/dist-tags/beta", nil, tok); rr.Code != http.StatusOK {
+		t.Errorf("delete beta: status = %d, want 200", rr.Code)
+	}
+}
+
+func TestPublishToProxyRejected(t *testing.T) {
+	h := newHarness(t)
+	tok := h.token(t)
+	rr := h.do(t, http.MethodPut, "/npm/npm-proxy/lib/pkg", publishBody("pkg", "1.0.0", []byte("x")), tok)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("publish to proxy: status = %d, want 403", rr.Code)
+	}
+}
+
+func TestIntegrityMismatchRejected(t *testing.T) {
+	h := newHarness(t)
+	tok := h.token(t)
+	// Build a valid body, then corrupt the tarball bytes so the digests no
+	// longer match what the body claims.
+	body := publishBody("pkg", "1.0.0", []byte("original"))
+	var doc map[string]any
+	_ = json.Unmarshal(body, &doc)
+	att := doc["_attachments"].(map[string]any)["pkg-1.0.0.tgz"].(map[string]any)
+	att["data"] = base64.StdEncoding.EncodeToString([]byte("tampered"))
+	tampered, _ := json.Marshal(doc)
+
+	rr := h.do(t, http.MethodPut, base+"/pkg", tampered, tok)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("tampered publish: status = %d, want 400", rr.Code)
+	}
+}
+
+// TestGCKeepsNpmTarballs proves the collector marks npm tarball blobs so a sweep
+// never deletes live package content — the cross-format GC guarantee.
+func TestGCKeepsNpmTarballs(t *testing.T) {
+	h := newHarness(t)
+	tok := h.token(t)
+	h.do(t, http.MethodPut, base+"/pkg", publishBody("pkg", "1.0.0", []byte("live-tarball")), tok)
+
+	ctx := context.Background()
+	// A cutoff far in the future makes every blob old enough to sweep, so only
+	// the mark set protects them.
+	future := time.Now().UTC().Add(48 * time.Hour)
+
+	// Without the npm referencer, the tarball is unreferenced and swept.
+	bare := oci.NewCollector(h.blobs, h.db)
+	if rep, err := bare.Collect(ctx, "admin", 0, true, future); err != nil {
+		t.Fatalf("bare Collect: %v", err)
+	} else if rep.Deleted == 0 {
+		t.Fatal("expected the tarball to be sweepable without the npm referencer")
+	}
+
+	// With it, the tarball is marked and kept.
+	guarded := oci.NewCollector(h.blobs, h.db, npm.NewReferencer(h.db))
+	rep, err := guarded.Collect(ctx, "admin", 0, true, future)
+	if err != nil {
+		t.Fatalf("guarded Collect: %v", err)
+	}
+	if rep.Deleted != 0 {
+		t.Errorf("GC deleted %d blobs; npm tarballs must be kept", rep.Deleted)
+	}
+}

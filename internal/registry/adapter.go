@@ -5,6 +5,7 @@
 package registry
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 
@@ -35,4 +36,13 @@ type Adapter interface {
 	Key() string
 	// Mount registers protocol routes on r using deps.
 	Mount(r chi.Router, deps Deps)
+}
+
+// BlobReferencer reports the blob digests a format still needs, so garbage
+// collection marks them before sweeping. Blobs are a shared CAS across every
+// format, so the collector must union the referrers of all of them — a missing
+// referrer means live content gets deleted. Each adapter implements this over
+// its own metadata; adapters never see one another, the collector unions them.
+type BlobReferencer interface {
+	ReferencedBlobs(ctx context.Context) (map[string]struct{}, error)
 }

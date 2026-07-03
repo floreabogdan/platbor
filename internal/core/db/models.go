@@ -29,6 +29,34 @@ type AuditLog struct {
 	CreatedAt  string         `json:"created_at"`
 }
 
+type NpmDistTag struct {
+	PackageID string `json:"package_id"`
+	Tag       string `json:"tag"`
+	Version   string `json:"version"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+type NpmPackage struct {
+	ID         string `json:"id"`
+	ProjectID  string `json:"project_id"`
+	Repository string `json:"repository"`
+	Name       string `json:"name"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
+type NpmVersion struct {
+	ID            string `json:"id"`
+	PackageID     string `json:"package_id"`
+	Version       string `json:"version"`
+	Manifest      []byte `json:"manifest"`
+	TarballDigest string `json:"tarball_digest"`
+	TarballSize   int64  `json:"tarball_size"`
+	Shasum        string `json:"shasum"`
+	Integrity     string `json:"integrity"`
+	CreatedAt     string `json:"created_at"`
+}
+
 type OciManifest struct {
 	ID           string `json:"id"`
 	ProjectID    string `json:"project_id"`
