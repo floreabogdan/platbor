@@ -14,6 +14,7 @@ import type {
   ListReposResponse,
   ListRepositoriesResponse,
   ListTagsResponse,
+  ListPypisResponse,
   ManifestDetail,
   Member,
   MemberRole,
@@ -21,6 +22,7 @@ import type {
   NugetPackageDetail,
   Problem,
   Project,
+  PyPIPackageDetail,
   Repo,
   Token,
   UpdateRepoRequest,
@@ -183,6 +185,14 @@ export const api = {
   getNugetPackage: (project: string, repo: string, id: string): Promise<NugetPackageDetail> =>
     request<NugetPackageDetail>(
       `/registry/${encodeURIComponent(project)}/nuget-package${query({ repo, id })}`,
+    ),
+
+  // PyPI package browser
+  listPypis: (): Promise<ListPypisResponse> => request<ListPypisResponse>(`/registry/pypi-packages`),
+
+  getPypiPackage: (project: string, repo: string, name: string): Promise<PyPIPackageDetail> =>
+    request<PyPIPackageDetail>(
+      `/registry/${encodeURIComponent(project)}/pypi-package${query({ repo, name })}`,
     ),
 
   // Generic file browser

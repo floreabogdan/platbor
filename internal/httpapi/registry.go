@@ -15,6 +15,7 @@ import (
 	"github.com/platbor/platbor/internal/registry/npm"
 	"github.com/platbor/platbor/internal/registry/nuget"
 	"github.com/platbor/platbor/internal/registry/oci"
+	"github.com/platbor/platbor/internal/registry/pypi"
 )
 
 // gcGracePeriod spares blobs written within this window of a sweep: they may be
@@ -29,6 +30,7 @@ type registryHandler struct {
 	packages  *npm.Browser
 	nugets    *nuget.Browser
 	generics  *generic.Browser
+	pypis     *pypi.Browser
 	manager   *oci.Manager
 	collector *oci.Collector
 	retention *RetentionService
@@ -42,6 +44,7 @@ func (h registryHandler) mount(r chi.Router) {
 	r.Get("/repositories", h.listRepositories)  // OCI repositories
 	r.Get("/packages", h.listPackages)          // npm packages
 	r.Get("/nuget-packages", h.listNugets)      // NuGet packages
+	r.Get("/pypi-packages", h.listPypis)        // PyPI packages
 	r.Get("/generic-files", h.listGenericFiles) // generic files
 	// Garbage collection is instance-wide and destructive: admins only.
 	r.With(requireAdmin).Post("/gc", h.runGC) // ?dryRun=true|false
@@ -56,6 +59,7 @@ func (h registryHandler) mount(r chi.Router) {
 		r.Get("/referrers", h.listReferrers)     // ?repo=<repo>&image=<image>&subject=<digest>
 		r.Get("/package", h.getPackage)          // ?repo=<repo>&name=<pkg> (npm detail)
 		r.Get("/nuget-package", h.getNuget)      // ?repo=<repo>&id=<id> (NuGet detail)
+		r.Get("/pypi-package", h.getPypi)        // ?repo=<repo>&name=<pkg> (PyPI detail)
 	})
 }
 
@@ -333,6 +337,89 @@ func (h registryHandler) getNuget(w http.ResponseWriter, r *http.Request) {
 		versions = append(versions, nugetVersionResponse{Version: v.Version, SizeBytes: v.SizeBytes, PublishedAt: v.PublishedAt})
 	}
 	writeJSON(w, h.log, http.StatusOK, nugetDetailResponse{ID: detail.ID, Versions: versions, Readme: detail.Description})
+}
+
+// --- PyPI ---
+
+type pypiResponse struct {
+	ProjectKey  string    `json:"projectKey"`
+	ProjectName string    `json:"projectName"`
+	RepoKey     string    `json:"repoKey"`
+	Name        string    `json:"name"`
+	Kind        string    `json:"kind"`
+	FileCount   int       `json:"fileCount"`
+	SizeBytes   int64     `json:"sizeBytes"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+type listPypisResponse struct {
+	Packages []pypiResponse `json:"packages"`
+}
+
+// listPypis returns every PyPI package across all projects.
+func (h registryHandler) listPypis(w http.ResponseWriter, r *http.Request) {
+	pkgs, err := h.pypis.Packages(r.Context())
+	if err != nil {
+		h.log.Error("listing pypi packages", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	items := make([]pypiResponse, 0, len(pkgs))
+	for _, p := range pkgs {
+		items = append(items, pypiResponse{
+			ProjectKey:  p.ProjectKey,
+			ProjectName: p.ProjectName,
+			RepoKey:     p.RepoKey,
+			Name:        p.Name,
+			Kind:        repoKind(p.IsProxy),
+			FileCount:   p.FileCount,
+			SizeBytes:   p.SizeBytes,
+			UpdatedAt:   p.UpdatedAt,
+		})
+	}
+	writeJSON(w, h.log, http.StatusOK, listPypisResponse{Packages: items})
+}
+
+type pypiFileResponse struct {
+	Filename       string `json:"filename"`
+	Version        string `json:"version"`
+	SizeBytes      int64  `json:"sizeBytes"`
+	SHA256         string `json:"sha256"`
+	RequiresPython string `json:"requiresPython,omitempty"`
+}
+
+type pypiDetailResponse struct {
+	Name  string             `json:"name"`
+	Files []pypiFileResponse `json:"files"`
+}
+
+// getPypi returns one PyPI package's distribution files for the detail page.
+func (h registryHandler) getPypi(w http.ResponseWriter, r *http.Request) {
+	projectKey := chi.URLParam(r, "project")
+	repoKey := r.URL.Query().Get("repo")
+	name := r.URL.Query().Get("name")
+	if repoKey == "" || name == "" {
+		writeProblem(w, http.StatusBadRequest, "Missing parameter", "repo and name are required")
+		return
+	}
+	detail, err := h.pypis.Package(r.Context(), projectKey, repoKey, name)
+	if err != nil {
+		if errors.Is(err, pypi.ErrPackageNotFound) {
+			writeProblem(w, http.StatusNotFound, "Package not found", "no such package in that project")
+			return
+		}
+		h.log.Error("getting pypi package", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	files := make([]pypiFileResponse, 0, len(detail.Files))
+	for _, f := range detail.Files {
+		files = append(files, pypiFileResponse{
+			Filename: f.Filename, Version: f.Version, SizeBytes: f.SizeBytes,
+			SHA256: f.SHA256, RequiresPython: f.RequiresPython,
+		})
+	}
+	writeJSON(w, h.log, http.StatusOK, pypiDetailResponse{Name: detail.Name, Files: files})
 }
 
 // --- generic ---

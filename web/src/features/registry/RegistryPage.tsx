@@ -2,12 +2,12 @@ import { Fragment, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button, Card, EmptyState, PageHeader } from '../../components/ui';
-import { FileIcon, NugetIcon, PackageIcon, RegistryIcon, SearchIcon } from '../../components/icons';
+import { FileIcon, NugetIcon, PackageIcon, PypiIcon, RegistryIcon, SearchIcon } from '../../components/icons';
 import { cx } from '../../lib/cx';
 import { formatBytes, formatRelativeTime } from '../../lib/format';
-import type { GenericFile, NpmPackage, NugetPackage, Repository } from '../../lib/types';
-import { nugetHref, ociHref, packageHref } from './packageRoute';
-import { useGenericFiles, useNugets, usePackages, useRepositories } from './useRegistry';
+import type { GenericFile, NpmPackage, NugetPackage, PyPIPackage, Repository } from '../../lib/types';
+import { nugetHref, ociHref, packageHref, pypiHref } from './packageRoute';
+import { useGenericFiles, useNugets, usePackages, usePypis, useRepositories } from './useRegistry';
 
 // The registry index. It lists every artifact — OCI container images, npm and
 // NuGet packages, and generic files — in one browser rather than separate tabs:
@@ -24,6 +24,7 @@ export function RegistryPage() {
   const repos = useRepositories();
   const pkgs = usePackages();
   const nugets = useNugets();
+  const pypis = usePypis();
   const generics = useGenericFiles();
 
   // One combined list once every source is in. Each artifact carries a format
@@ -33,6 +34,7 @@ export function RegistryPage() {
       repos.state !== 'ready' ||
       pkgs.state !== 'ready' ||
       nugets.state !== 'ready' ||
+      pypis.state !== 'ready' ||
       generics.state !== 'ready'
     ) {
       return [];
@@ -41,6 +43,7 @@ export function RegistryPage() {
       ...repos.repositories.map(fromRepository),
       ...pkgs.packages.map(fromPackage),
       ...nugets.packages.map(fromNuget),
+      ...pypis.packages.map(fromPypi),
       ...generics.files.map(fromGeneric),
     ];
   }, [
@@ -50,6 +53,8 @@ export function RegistryPage() {
     pkgs.packages,
     nugets.state,
     nugets.packages,
+    pypis.state,
+    pypis.packages,
     generics.state,
     generics.files,
   ]);
@@ -58,15 +63,21 @@ export function RegistryPage() {
     repos.state === 'loading' ||
     pkgs.state === 'loading' ||
     nugets.state === 'loading' ||
+    pypis.state === 'loading' ||
     generics.state === 'loading';
   const failed =
-    repos.state === 'error' || pkgs.state === 'error' || nugets.state === 'error' || generics.state === 'error';
-  const errorMessage = repos.error ?? pkgs.error ?? nugets.error ?? generics.error;
+    repos.state === 'error' ||
+    pkgs.state === 'error' ||
+    nugets.state === 'error' ||
+    pypis.state === 'error' ||
+    generics.state === 'error';
+  const errorMessage = repos.error ?? pkgs.error ?? nugets.error ?? pypis.error ?? generics.error;
 
   function reloadAll() {
     void repos.reload();
     void pkgs.reload();
     void nugets.reload();
+    void pypis.reload();
     void generics.reload();
   }
 
@@ -74,7 +85,7 @@ export function RegistryPage() {
     <div className="animate-rise">
       <PageHeader
         title="Registry"
-        subtitle="Container images, npm and NuGet packages, and generic files across every project."
+        subtitle="Container images, npm, NuGet and PyPI packages, and generic files across every project."
       />
 
       {loading ? <TableSkeleton /> : null}
@@ -102,7 +113,7 @@ export function RegistryPage() {
 
 // --- unified artifact model ---
 
-type Format = 'oci' | 'npm' | 'nuget' | 'generic';
+type Format = 'oci' | 'npm' | 'nuget' | 'pypi' | 'generic';
 
 // Artifact is the row model both formats normalize to. `contents` is the
 // format-specific rollup phrase ("3 tags" / "2 versions"); it is display-only
@@ -166,6 +177,22 @@ function fromNuget(p: NugetPackage): Artifact {
     updatedAt: p.updatedAt,
     href: nugetHref(p.projectKey, p.repoKey, p.id),
     key: `nuget:${p.projectKey}/${p.repoKey}/${p.id}`,
+  };
+}
+
+function fromPypi(p: PyPIPackage): Artifact {
+  return {
+    format: 'pypi',
+    projectKey: p.projectKey,
+    projectName: p.projectName,
+    repoKey: p.repoKey,
+    name: p.name,
+    kind: p.kind,
+    contents: `${String(p.fileCount)} ${p.fileCount === 1 ? 'file' : 'files'}`,
+    sizeBytes: p.sizeBytes,
+    updatedAt: p.updatedAt,
+    href: pypiHref(p.projectKey, p.repoKey, p.name),
+    key: `pypi:${p.projectKey}/${p.repoKey}/${p.name}`,
   };
 }
 
@@ -574,6 +601,7 @@ const FORMAT_META: Record<Format, { label: string; icon: ReactNode }> = {
   oci: { label: 'Container image', icon: <RegistryIcon className="h-4 w-4" /> },
   npm: { label: 'npm package', icon: <PackageIcon className="h-4 w-4" /> },
   nuget: { label: 'NuGet package', icon: <NugetIcon className="h-4 w-4" /> },
+  pypi: { label: 'PyPI package', icon: <PypiIcon className="h-4 w-4" /> },
   generic: { label: 'Generic file', icon: <FileIcon className="h-4 w-4" /> },
 };
 
@@ -645,6 +673,7 @@ function Toolbar({
         <option value="oci">Container images</option>
         <option value="npm">npm packages</option>
         <option value="nuget">NuGet packages</option>
+        <option value="pypi">PyPI packages</option>
         <option value="generic">Generic files</option>
       </select>
 

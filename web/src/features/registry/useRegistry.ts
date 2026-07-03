@@ -7,6 +7,8 @@ import type {
   NpmPackageDetail,
   NugetPackage,
   NugetPackageDetail,
+  PyPIPackage,
+  PyPIPackageDetail,
   Referrer,
   Repository,
   TagSummary,
@@ -108,6 +110,56 @@ export function useNugetDetail(project: string, repo: string, id: string) {
       setState('error');
     }
   }, [project, repo, id]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { detail, state, error, reload };
+}
+
+/** usePypis loads the global, project-grouped PyPI package index. */
+export function usePypis() {
+  const [packages, setPackages] = useState<PyPIPackage[]>([]);
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.listPypis();
+      setPackages(res.packages);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load PyPI packages');
+      setState('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { packages, state, error, reload };
+}
+
+/** usePypiDetail loads one PyPI package's distribution files. */
+export function usePypiDetail(project: string, repo: string, name: string) {
+  const [detail, setDetail] = useState<PyPIPackageDetail>();
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.getPypiPackage(project, repo, name);
+      setDetail(res);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load package');
+      setState('error');
+    }
+  }, [project, repo, name]);
 
   useEffect(() => {
     void reload();

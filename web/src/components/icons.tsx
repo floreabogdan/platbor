@@ -68,6 +68,19 @@ export function NugetIcon(props: IconProps) {
   );
 }
 
+export function PypiIcon(props: IconProps) {
+  // Two interlocking snake-tiles evoking Python's twin serpents, distinct from
+  // the other format glyphs.
+  return (
+    <Icon {...props}>
+      <path d="M8 4h5a2 2 0 0 1 2 2v5H10a2 2 0 0 0-2 2v-5a2 2 0 0 1 2-2h4" />
+      <path d="M16 20h-5a2 2 0 0 1-2-2v-5h5a2 2 0 0 0 2-2v5a2 2 0 0 1-2 2h-4" />
+      <circle cx="10" cy="6.5" r="0.6" fill="currentColor" stroke="none" />
+      <circle cx="14" cy="17.5" r="0.6" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
 export function FileIcon(props: IconProps) {
   // A document with a folded corner, for generic files.
   return (

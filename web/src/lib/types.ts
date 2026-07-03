@@ -214,6 +214,39 @@ export interface NugetPackageDetail {
   readme?: string;
 }
 
+// --- PyPI packages ---
+
+/** PyPIPackage — one Python package (project) in a repository. */
+export interface PyPIPackage {
+  projectKey: string;
+  projectName: string;
+  repoKey: string;
+  name: string;
+  kind: 'local' | 'proxy';
+  fileCount: number;
+  sizeBytes: number;
+  updatedAt: string;
+}
+
+export interface ListPypisResponse {
+  packages: PyPIPackage[];
+}
+
+/** PyPIFile — one distribution file (an sdist or wheel) of a package. */
+export interface PyPIFile {
+  filename: string;
+  version: string;
+  sizeBytes: number;
+  sha256: string;
+  requiresPython?: string;
+}
+
+/** PyPIPackageDetail — a package with its distribution files. */
+export interface PyPIPackageDetail {
+  name: string;
+  files: PyPIFile[];
+}
+
 // --- Generic files ---
 
 /** GenericFile — one arbitrary versioned file at a path under a project. */

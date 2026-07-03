@@ -22,6 +22,16 @@ export function nugetHref(projectKey: string, repoKey: string, id: string): stri
   return `/registry/${encodeURIComponent(projectKey)}/-nuget-/${encodeURIComponent(repoKey)}/${encodeURIComponent(id)}`;
 }
 
+// The PyPI package detail route uses a distinct "-pypi-" sentinel segment. The
+// splat carries <repo>/<name>; a PyPI project name has no slashes.
+//
+//   /registry/<project>/-pypi-/<repo>/<name>
+
+/** pypiHref builds the link to a PyPI package's detail page. */
+export function pypiHref(projectKey: string, repoKey: string, name: string): string {
+  return `/registry/${encodeURIComponent(projectKey)}/-pypi-/${encodeURIComponent(repoKey)}/${encodeURIComponent(name)}`;
+}
+
 /** ociHref builds the link to an OCI image's detail page: the bare splat carries
  *  <repo>/<image>. */
 export function ociHref(projectKey: string, repoKey: string, image: string): string {

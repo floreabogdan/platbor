@@ -69,6 +69,7 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 				packages:  npm.NewBrowser(api.DB),
 				nugets:    nuget.NewBrowser(api.DB),
 				generics:  generic.NewBrowser(api.DB),
+				pypis:     pypi.NewBrowser(api.DB),
 				manager:   oci.NewManager(api.DB),
 				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB), generic.NewReferencer(api.DB), nuget.NewReferencer(api.DB), pypi.NewReferencer(api.DB)),
 				retention: NewRetentionService(api.DB, map[repository.Format]registry.Pruner{
