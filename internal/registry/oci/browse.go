@@ -25,7 +25,13 @@ func NewBrowser(sqlDB *sql.DB) *Browser { return &Browser{q: db.New(sqlDB)} }
 const (
 	KindImage = "image"
 	KindIndex = "index"
+	KindChart = "chart" // a Helm chart (OCI artifact with the Helm config media type)
 )
+
+// helmConfigMediaType marks an OCI manifest as a Helm chart. Helm 3.8+ pushes
+// charts as OCI artifacts with this config type, so the registry stores them like
+// any image; we recognize it only to label them and show `helm pull` in the UI.
+const helmConfigMediaType = "application/vnd.cncf.helm.config.v1+json"
 
 // RepositorySummary is one OCI image in the browser's project-grouped index.
 type RepositorySummary struct {
@@ -282,6 +288,9 @@ func buildManifestView(digest, mediaType string, payload []byte) ManifestView {
 	if doc.Config != nil {
 		view.Config = &LayerRef{MediaType: doc.Config.MediaType, Digest: doc.Config.Digest, Size: doc.Config.Size}
 		view.TotalSize += doc.Config.Size
+		if doc.Config.MediaType == helmConfigMediaType {
+			view.Kind = KindChart
+		}
 	}
 	for _, l := range doc.Layers {
 		view.Layers = append(view.Layers, LayerRef{MediaType: l.MediaType, Digest: l.Digest, Size: l.Size})
@@ -298,13 +307,17 @@ func summarize(mediaType string, payload []byte) (kind string, size int64, count
 	if imageIndexTypes[mediaType] {
 		return KindIndex, 0, len(doc.Manifests)
 	}
+	kind = KindImage
 	if doc.Config != nil {
 		size += doc.Config.Size
+		if doc.Config.MediaType == helmConfigMediaType {
+			kind = KindChart
+		}
 	}
 	for _, l := range doc.Layers {
 		size += l.Size
 	}
-	return KindImage, size, len(doc.Layers)
+	return kind, size, len(doc.Layers)
 }
 
 // parseTime parses an RFC 3339 timestamp, returning the zero time on failure so

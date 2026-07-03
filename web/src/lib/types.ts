@@ -107,8 +107,9 @@ export interface Problem {
 
 // --- Registry browser ---
 
-/** A manifest is either a single-platform image or a multi-platform index. */
-export type ManifestKind = 'image' | 'index';
+/** A manifest is a single-platform image, a multi-platform index, or a Helm
+ *  chart (an image-shaped OCI artifact with the Helm config media type). */
+export type ManifestKind = 'image' | 'index' | 'chart';
 
 /** Repository — one artifact repository in a project (registry index). */
 export interface Repository {

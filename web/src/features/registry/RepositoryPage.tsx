@@ -162,10 +162,10 @@ function TagsTable({
                   <KindBadge kind={tag.kind} />
                 </Td>
                 <Td className="text-right tabular-nums text-slate-600">
-                  {tag.kind === 'image' ? formatBytes(tag.size) : '—'}
+                  {tag.kind === 'index' ? '—' : formatBytes(tag.size)}
                 </Td>
                 <Td className="text-right tabular-nums text-slate-600">
-                  {tag.kind === 'image' ? tag.count : `${String(tag.count)} platforms`}
+                  {tag.kind === 'index' ? `${String(tag.count)} platforms` : tag.count}
                 </Td>
                 <Td className="text-slate-500">{formatDate(tag.pushedAt)}</Td>
                 <Td>
@@ -236,7 +236,7 @@ function ManifestPanel({
           <KindBadge kind={manifest.kind} />
         </div>
         <div className="flex items-center gap-3">
-          {manifest.kind === 'image' ? (
+          {manifest.kind !== 'index' ? (
             <span className="text-sm text-slate-500">
               Total size <span className="font-medium text-slate-700">{formatBytes(manifest.totalSize)}</span>
             </span>
@@ -262,12 +262,12 @@ function ManifestPanel({
         </Field>
       </dl>
 
-      <PullCommand project={project} repo={repo} image={image} reference={reference} />
+      <PullCommand project={project} repo={repo} image={image} reference={reference} kind={manifest.kind} />
 
-      {manifest.kind === 'image' ? (
-        <LayersTable config={manifest.config} layers={manifest.layers} />
-      ) : (
+      {manifest.kind === 'index' ? (
         <PlatformsTable manifests={manifest.manifests} />
+      ) : (
+        <LayersTable config={manifest.config} layers={manifest.layers} />
       )}
 
       {referrers.length > 0 ? <ReferrersSection referrers={referrers} /> : null}
@@ -343,15 +343,25 @@ function PullCommand({
   repo,
   image,
   reference,
+  kind,
 }: {
   project: string;
   repo: string;
   image: string;
   reference: string;
+  kind: ManifestKind;
 }) {
   const host = window.location.host;
-  const sep = reference.includes(':') ? '@' : ':';
-  const command = `docker pull ${host}/${project}/${repo}/${image}${sep}${reference}`;
+  const path = `${host}/${project}/${repo}/${image}`;
+  // A Helm chart is pulled by version with the helm client; images/indexes with
+  // docker. A digest reference (contains ':') is addressed with @ for docker.
+  const isDigest = reference.includes(':');
+  // A Helm chart is pulled by version with the helm client (charts are selected
+  // by tag); images and indexes use docker, with @ for a digest reference.
+  const command =
+    kind === 'chart'
+      ? `helm pull oci://${path} --version ${reference}`
+      : `docker pull ${path}${isDigest ? '@' : ':'}${reference}`;
 
   return (
     <div className="mt-5">
@@ -443,19 +453,22 @@ function PlatformsTable({ manifests }: { manifests: IndexEntry[] }) {
 
 // --- small building blocks ---
 
+const KIND_BADGE: Record<ManifestKind, { label: string; styles: string }> = {
+  image: { label: 'Image', styles: 'bg-teal-50 text-teal-700 ring-teal-600/20' },
+  index: { label: 'Index', styles: 'bg-violet-50 text-violet-700 ring-violet-600/20' },
+  chart: { label: 'Helm chart', styles: 'bg-sky-50 text-sky-700 ring-sky-600/20' },
+};
+
 function KindBadge({ kind }: { kind: ManifestKind }) {
-  const styles =
-    kind === 'image'
-      ? 'bg-teal-50 text-teal-700 ring-teal-600/20'
-      : 'bg-violet-50 text-violet-700 ring-violet-600/20';
+  const badge = KIND_BADGE[kind];
   return (
     <span
       className={cx(
         'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset',
-        styles,
+        badge.styles,
       )}
     >
-      {kind === 'image' ? 'Image' : 'Index'}
+      {badge.label}
     </span>
   );
 }
