@@ -3,12 +3,21 @@ package blob_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha512"
+	"encoding/hex"
 	"errors"
 	"io"
 	"testing"
 
 	"github.com/platbor/platbor/internal/core/blob"
 )
+
+// sha512Digest is the canonical "sha512:<hex>" digest of data, used to exercise
+// the store with a non-default algorithm.
+func sha512Digest(data []byte) string {
+	sum := sha512.Sum512(data)
+	return "sha512:" + hex.EncodeToString(sum[:])
+}
 
 // runStoreContract exercises the behavior every blob.Store must exhibit. It is
 // driver-agnostic: the fs suite runs it today, and the future s3 suite will run
@@ -30,6 +39,42 @@ func runStoreContract(t *testing.T, newStore func(t *testing.T) blob.Store) {
 		}
 		if data := readBlob(t, s, desc.Digest); !bytes.Equal(data, content) {
 			t.Fatalf("content = %q, want %q", data, content)
+		}
+	})
+
+	t.Run("commit then read back a sha512 blob", func(t *testing.T) {
+		s := newStore(t)
+		content := []byte("content addressed under sha512")
+		want := sha512Digest(content)
+
+		up, err := s.StartUpload(ctx)
+		if err != nil {
+			t.Fatalf("StartUpload: %v", err)
+		}
+		mustWrite(t, up, content)
+		desc, err := up.Commit(ctx, want)
+		if err != nil {
+			t.Fatalf("Commit: %v", err)
+		}
+		if desc.Digest != want {
+			t.Fatalf("Digest = %s, want %s", desc.Digest, want)
+		}
+		if data := readBlob(t, s, desc.Digest); !bytes.Equal(data, content) {
+			t.Fatalf("content = %q, want %q", data, content)
+		}
+
+		// Walk must enumerate a sha512 blob alongside sha256 ones.
+		found := false
+		if err := s.Walk(ctx, func(info blob.Info) error {
+			if info.Digest == want {
+				found = true
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("Walk: %v", err)
+		}
+		if !found {
+			t.Errorf("Walk did not visit the sha512 blob %s", want)
 		}
 	})
 

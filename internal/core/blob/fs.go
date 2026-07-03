@@ -13,9 +13,9 @@ import (
 )
 
 // FSStore is a filesystem-backed content-addressable store. Committed blobs live
-// at {root}/blobs/sha256/<ab>/<hex>; in-progress uploads are temp files under
-// {root}/uploads/<id>. A commit renames the temp file into place, which is
-// atomic on a single volume.
+// at {root}/blobs/<algo>/<ab>/<hex> (algo is sha256 or sha512); in-progress
+// uploads are temp files under {root}/uploads/<id>. A commit renames the temp
+// file into place, which is atomic on a single volume.
 type FSStore struct {
 	root string
 }
@@ -36,7 +36,7 @@ func NewFS(root string) (*FSStore, error) {
 
 func (s *FSStore) blobPath(digest string) string {
 	h := digestHex(digest)
-	return filepath.Join(s.root, "blobs", algoSHA256, h[:2], h)
+	return filepath.Join(s.root, "blobs", digestAlgo(digest), h[:2], h)
 }
 
 func (s *FSStore) uploadPath(id string) string {
@@ -84,36 +84,39 @@ func (s *FSStore) Delete(_ context.Context, digest string) error {
 	return nil
 }
 
-// Walk implements Store. It walks {root}/blobs/sha256/<ab>/<hex>, reconstructing
-// each digest from its path. Files whose name is not a valid hex digest (e.g. a
-// stray temp file) are skipped rather than reported as blobs.
+// Walk implements Store. It walks {root}/blobs/<algo>/<ab>/<hex> for every
+// supported algorithm, reconstructing each digest from its path. Files whose
+// name is not a valid hex digest (e.g. a stray temp file) are skipped rather
+// than reported as blobs.
 func (s *FSStore) Walk(_ context.Context, fn func(Info) error) error {
-	shaRoot := filepath.Join(s.root, "blobs", algoSHA256)
-	err := filepath.WalkDir(shaRoot, func(_ string, d os.DirEntry, err error) error {
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return nil // nothing committed yet
+	for _, algo := range supportedAlgos {
+		algoRoot := filepath.Join(s.root, "blobs", algo)
+		err := filepath.WalkDir(algoRoot, func(_ string, d os.DirEntry, err error) error {
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					return nil // nothing committed under this algorithm yet
+				}
+				return err
 			}
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		digest := algoSHA256 + ":" + d.Name()
-		if ValidateDigest(digest) != nil {
-			return nil // not a blob file
-		}
-		info, err := d.Info()
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return nil // removed concurrently
+			if d.IsDir() {
+				return nil
 			}
-			return fmt.Errorf("stat blob %s: %w", digest, err)
+			digest := algo + ":" + d.Name()
+			if ValidateDigest(digest) != nil {
+				return nil // not a blob file
+			}
+			info, err := d.Info()
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					return nil // removed concurrently
+				}
+				return fmt.Errorf("stat blob %s: %w", digest, err)
+			}
+			return fn(Info{Digest: digest, Size: info.Size(), ModTime: info.ModTime()})
+		})
+		if err != nil {
+			return fmt.Errorf("walking blobs: %w", err)
 		}
-		return fn(Info{Digest: digest, Size: info.Size(), ModTime: info.ModTime()})
-	})
-	if err != nil {
-		return fmt.Errorf("walking blobs: %w", err)
 	}
 	return nil
 }
@@ -200,7 +203,7 @@ func (u *fsUpload) Commit(_ context.Context, expectedDigest string) (Descriptor,
 		return Descriptor{}, fmt.Errorf("flushing upload %s: %w", u.id, err)
 	}
 
-	digest, size, err := u.hashFile()
+	digest, size, err := u.hashFile(digestAlgo(expectedDigest))
 	if err != nil {
 		return Descriptor{}, err
 	}
@@ -225,14 +228,15 @@ func (u *fsUpload) Commit(_ context.Context, expectedDigest string) (Descriptor,
 	return Descriptor{Digest: digest, Size: size}, nil
 }
 
-// hashFile reopens the temp file read-only and streams it through sha256.
-func (u *fsUpload) hashFile() (string, int64, error) {
+// hashFile reopens the temp file read-only and streams it through the expected
+// digest's algorithm.
+func (u *fsUpload) hashFile(algo string) (string, int64, error) {
 	f, err := os.Open(u.path)
 	if err != nil {
 		return "", 0, fmt.Errorf("reopening upload %s: %w", u.id, err)
 	}
 	defer func() { _ = f.Close() }()
-	return digestReader(f)
+	return digestReader(algo, f)
 }
 
 func newUploadID() (string, error) {
