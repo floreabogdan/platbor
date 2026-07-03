@@ -40,8 +40,9 @@ type VersionSummary struct {
 
 // PackageDetail is a package with its versions, newest first.
 type PackageDetail struct {
-	ID       string
-	Versions []VersionSummary
+	ID          string
+	Description string // the latest version's nuspec <description>, shown as its README
+	Versions    []VersionSummary
 }
 
 // ErrPackageNotFound is returned by Package when the package has no versions.
@@ -104,7 +105,17 @@ func (b *Browser) Package(ctx context.Context, projectKey, repoKey, id string) (
 			PublishedAt: parseBrowseTime(r.CreatedAt),
 		})
 	}
-	return PackageDetail{ID: displayID, Versions: versions}, nil
+
+	// NuGet has no README document in the feed metadata; the nuspec <description>
+	// is what nuget.org shows as a package's summary, so use the newest version's.
+	description := ""
+	if spec, err := parseNuspec(rows[len(rows)-1].Nuspec); err == nil {
+		description = spec.Metadata.Description
+		if spec.Metadata.ID != "" {
+			displayID = spec.Metadata.ID
+		}
+	}
+	return PackageDetail{ID: displayID, Description: description, Versions: versions}, nil
 }
 
 func parseBrowseTime(s string) time.Time {

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { useParams } from 'react-router-dom';
 import { Breadcrumb, Card, CopyButton, EmptyState, PageHeader } from '../../components/ui';
+import { Markdown } from '../../components/Markdown';
 import { LayersIcon, RegistryIcon } from '../../components/icons';
 import { cx } from '../../lib/cx';
 import { formatBytes, formatDate } from '../../lib/format';
@@ -46,6 +47,7 @@ export function NugetPage() {
         ) : (
           <div className="space-y-5">
             <InstallSnippet project={project} repo={repo} id={id} />
+            {detail.readme ? <DescriptionCard source={detail.readme} /> : null}
             <VersionsTable versions={detail.versions} />
           </div>
         )
@@ -72,6 +74,16 @@ function InstallSnippet({ project, repo, id }: { project: string; repo: string; 
         <CommandLine command={sourceCommand} />
         <CommandLine command={addCommand} />
       </div>
+    </Card>
+  );
+}
+
+// DescriptionCard renders the package's nuspec <description> as its summary.
+function DescriptionCard({ source }: { source: string }) {
+  return (
+    <Card className="p-6">
+      <div className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-400">Description</div>
+      <Markdown source={source} className="space-y-3 text-sm text-slate-700" />
     </Card>
   );
 }

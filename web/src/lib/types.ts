@@ -159,6 +159,8 @@ export interface NpmPackageDetail {
   name: string;
   distTags: Record<string, string>;
   versions: NpmPackageVersion[];
+  /** The latest version's README markdown, when published with one. */
+  readme?: string;
 }
 
 // --- NuGet packages ---
@@ -190,6 +192,8 @@ export interface NugetPackageVersion {
 export interface NugetPackageDetail {
   id: string;
   versions: NugetPackageVersion[];
+  /** The nuspec <description> of the latest version, shown as the README. */
+  readme?: string;
 }
 
 // --- Generic files ---

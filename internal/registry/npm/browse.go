@@ -3,6 +3,7 @@ package npm
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -46,6 +47,7 @@ type PackageDetail struct {
 	Name     string
 	DistTags map[string]string
 	Versions []VersionSummary
+	Readme   string // the latest version's README markdown, when published with one
 }
 
 // ErrPackageNotFound is returned by Package when the package has no versions in
@@ -103,6 +105,10 @@ func (b *Browser) Package(ctx context.Context, projectKey, repoKey, name string)
 		})
 	}
 
+	// The README ships in the version manifest; use the newest version that has
+	// one (proxied packages cache a minimal manifest, so this is empty for them).
+	readme := readmeFromManifest(rows[len(rows)-1].Manifest)
+
 	tagRows, err := b.q.ListNpmDistTags(ctx, db.ListNpmDistTagsParams{RepositoryID: repoID, Name: name})
 	if err != nil {
 		return PackageDetail{}, fmt.Errorf("listing dist-tags: %w", err)
@@ -112,7 +118,22 @@ func (b *Browser) Package(ctx context.Context, projectKey, repoKey, name string)
 		tags[t.Tag] = t.Version
 	}
 
-	return PackageDetail{Name: name, DistTags: tags, Versions: versions}, nil
+	return PackageDetail{Name: name, DistTags: tags, Versions: versions, Readme: readme}, nil
+}
+
+// readmeFromManifest extracts the "readme" field npm records in a version
+// manifest. Absent or unreadable manifests yield an empty string.
+func readmeFromManifest(manifest []byte) string {
+	if len(manifest) == 0 {
+		return ""
+	}
+	var doc struct {
+		Readme string `json:"readme"`
+	}
+	if err := json.Unmarshal(manifest, &doc); err != nil {
+		return ""
+	}
+	return doc.Readme
 }
 
 // resolveRepo maps (projectKey, repoKey) to a repository id, or ErrPackageNotFound.

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { useParams } from 'react-router-dom';
 import { Breadcrumb, Card, CopyButton, EmptyState, PageHeader } from '../../components/ui';
+import { Markdown } from '../../components/Markdown';
 import { LayersIcon, RegistryIcon } from '../../components/icons';
 import { cx } from '../../lib/cx';
 import { formatBytes, formatDate } from '../../lib/format';
@@ -48,6 +49,7 @@ export function PackagePage() {
           <div className="space-y-5">
             <InstallSnippet project={project} repo={repo} name={name} />
             {Object.keys(detail.distTags).length > 0 ? <DistTags distTags={detail.distTags} /> : null}
+            {detail.readme ? <ReadmeCard source={detail.readme} /> : null}
             <VersionsTable versions={detail.versions} distTags={detail.distTags} />
           </div>
         )
@@ -92,6 +94,16 @@ function CommandLine({ command }: { command: string }) {
       <code className="truncate font-mono text-xs text-slate-200">{command}</code>
       <CopyButton value={command} label="Copy" className="shrink-0 text-slate-400 hover:bg-white/10 hover:text-white" />
     </div>
+  );
+}
+
+// ReadmeCard renders the package's README beneath the install snippet.
+function ReadmeCard({ source }: { source: string }) {
+  return (
+    <Card className="p-6">
+      <div className="mb-3 text-xs font-medium uppercase tracking-wide text-slate-400">Readme</div>
+      <Markdown source={source} className="space-y-3 text-sm text-slate-700" />
+    </Card>
   );
 }
 

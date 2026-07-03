@@ -213,6 +213,7 @@ type packageDetailResponse struct {
 	Name     string                   `json:"name"`
 	DistTags map[string]string        `json:"distTags"`
 	Versions []packageVersionResponse `json:"versions"`
+	Readme   string                   `json:"readme,omitempty"`
 }
 
 // getPackage returns one npm package's versions and dist-tags for the detail
@@ -251,6 +252,7 @@ func (h registryHandler) getPackage(w http.ResponseWriter, r *http.Request) {
 		Name:     detail.Name,
 		DistTags: detail.DistTags,
 		Versions: versions,
+		Readme:   detail.Readme,
 	})
 }
 
@@ -304,6 +306,7 @@ type nugetVersionResponse struct {
 type nugetDetailResponse struct {
 	ID       string                 `json:"id"`
 	Versions []nugetVersionResponse `json:"versions"`
+	Readme   string                 `json:"readme,omitempty"`
 }
 
 // getNuget returns one NuGet package's versions for the detail page.
@@ -329,7 +332,7 @@ func (h registryHandler) getNuget(w http.ResponseWriter, r *http.Request) {
 	for _, v := range detail.Versions {
 		versions = append(versions, nugetVersionResponse{Version: v.Version, SizeBytes: v.SizeBytes, PublishedAt: v.PublishedAt})
 	}
-	writeJSON(w, h.log, http.StatusOK, nugetDetailResponse{ID: detail.ID, Versions: versions})
+	writeJSON(w, h.log, http.StatusOK, nugetDetailResponse{ID: detail.ID, Versions: versions, Readme: detail.Description})
 }
 
 // --- generic ---
