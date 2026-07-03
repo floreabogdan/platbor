@@ -35,6 +35,66 @@ jobs:
       - name: Build
         run: go build ./...
 
+  conformance:
+    name: OCI conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+      # The committed web/dist placeholder lets the binary build without the SPA,
+      # which the registry protocol does not need.
+      - name: Build platbor
+        run: go build -o platbor ./cmd/platbor
+      - name: Start platbor and create the conformance project
+        env:
+          PLATBOR_ADDR: ":8088"
+          PLATBOR_DATA_DIR: "conformance-data"
+          PLATBOR_ADMIN_PASSWORD: "platbor"
+        run: |
+          ./platbor > platbor.log 2>&1 &
+          # Wait for the registry to answer the /v2/ auth challenge (401 = ready).
+          ready=0
+          for _ in $(seq 1 30); do
+            if [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/v2/)" = "401" ]; then
+              ready=1; break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != "1" ]; then echo "platbor did not become ready"; cat platbor.log; exit 1; fi
+          # The suite pushes into <project>/<repo>; every repo is project-scoped, so
+          # the target project must exist before the run.
+          curl -sf -c cookies.txt -X POST http://localhost:8088/api/v1/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"admin","password":"platbor"}' -o /dev/null
+          curl -sf -b cookies.txt -X POST http://localhost:8088/api/v1/projects \
+            -H 'Content-Type: application/json' \
+            -d '{"key":"conformance","name":"Conformance"}' -o /dev/null
+      # Official OCI suite, pinned to the commit Platbor is verified against
+      # (opencontainers/distribution-spec main @ 2026-06-18). Blob deletion is
+      # intentionally not enabled: Platbor removes blobs only via garbage
+      # collection, never inline, so those cases stay out of scope by design.
+      - name: Run OCI distribution-spec conformance
+        uses: opencontainers/distribution-spec@fcfba1ec55526073f48b2f6d4e3d7eef410ddcbc
+        env:
+          OCI_REGISTRY: "localhost:8088"
+          OCI_TLS: "disabled"
+          OCI_REPO1: "conformance/first"
+          OCI_REPO2: "conformance/second"
+          OCI_USERNAME: "admin"
+          OCI_PASSWORD: "platbor"
+          OCI_API_PULL: "1"
+          OCI_API_PUSH: "1"
+          OCI_API_REFERRER: "1"
+          OCI_API_TAGS_LIST: "1"
+          OCI_API_TAGS_DELETE: "1"
+          OCI_API_MANIFESTS_DELETE: "1"
+      - name: Show platbor logs on failure
+        if: failure()
+        run: cat platbor.log
+
   frontend:
     name: Frontend (web)
     runs-on: ubuntu-latest
