@@ -9,6 +9,26 @@ import (
 	"context"
 )
 
+const deleteNugetVersion = `-- name: DeleteNugetVersion :execrows
+DELETE FROM nuget_versions
+WHERE package_id = (SELECT id FROM nuget_packages WHERE project_id = ? AND id_lower = ?)
+  AND version_lower = ?
+`
+
+type DeleteNugetVersionParams struct {
+	ProjectID    string `json:"project_id"`
+	IDLower      string `json:"id_lower"`
+	VersionLower string `json:"version_lower"`
+}
+
+func (q *Queries) DeleteNugetVersion(ctx context.Context, arg DeleteNugetVersionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteNugetVersion, arg.ProjectID, arg.IDLower, arg.VersionLower)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getNugetNupkg = `-- name: GetNugetNupkg :one
 SELECT v.nupkg_digest, v.nupkg_size
 FROM nuget_versions v
@@ -220,6 +240,45 @@ func (q *Queries) ListNugetVersions(ctx context.Context, arg ListNugetVersionsPa
 			&i.Nuspec,
 			&i.CreatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNugetVersionsForRetention = `-- name: ListNugetVersionsForRetention :many
+SELECT p.id_lower AS id_lower, v.version_lower AS version_lower, v.created_at AS created_at
+FROM nuget_versions v
+JOIN nuget_packages p ON p.id = v.package_id
+WHERE p.project_id = ?
+ORDER BY p.id_lower ASC, v.created_at DESC
+`
+
+type ListNugetVersionsForRetentionRow struct {
+	IDLower      string `json:"id_lower"`
+	VersionLower string `json:"version_lower"`
+	CreatedAt    string `json:"created_at"`
+}
+
+// Every version in a project, grouped by package and newest first, for
+// keep-last-N pruning.
+func (q *Queries) ListNugetVersionsForRetention(ctx context.Context, projectID string) ([]ListNugetVersionsForRetentionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listNugetVersionsForRetention, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNugetVersionsForRetentionRow{}
+	for rows.Next() {
+		var i ListNugetVersionsForRetentionRow
+		if err := rows.Scan(&i.IDLower, &i.VersionLower, &i.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -39,6 +39,20 @@ FROM nuget_versions v
 JOIN nuget_packages p ON p.id = v.package_id
 WHERE p.project_id = ? AND p.id_lower = ? AND v.version_lower = ?;
 
+-- name: ListNugetVersionsForRetention :many
+-- Every version in a project, grouped by package and newest first, for
+-- keep-last-N pruning.
+SELECT p.id_lower AS id_lower, v.version_lower AS version_lower, v.created_at AS created_at
+FROM nuget_versions v
+JOIN nuget_packages p ON p.id = v.package_id
+WHERE p.project_id = ?
+ORDER BY p.id_lower ASC, v.created_at DESC;
+
+-- name: DeleteNugetVersion :execrows
+DELETE FROM nuget_versions
+WHERE package_id = (SELECT id FROM nuget_packages WHERE project_id = ? AND id_lower = ?)
+  AND version_lower = ?;
+
 -- name: ListNugetBlobDigests :many
 -- Distinct nupkg digests every version references, for garbage collection to
 -- mark them alongside the other formats (shared CAS).

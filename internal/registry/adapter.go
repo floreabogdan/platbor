@@ -38,6 +38,16 @@ type Adapter interface {
 	Mount(r chi.Router, deps Deps)
 }
 
+// Pruner applies a retention policy to one format's artifacts within a project:
+// keep only the newest keepLast versions/tags of each artifact (0 = keep all),
+// and for formats with the notion, sweep untagged content when deleteUntagged is
+// set. It returns how many versions/tags it removed (or would remove, on a dry
+// run). Pruning deletes metadata; blobs are reclaimed later by GC. Each adapter
+// implements this over its own store; the retention orchestrator runs them all.
+type Pruner interface {
+	Prune(ctx context.Context, projectID string, keepLast int, deleteUntagged, dryRun bool, actor string) (int, error)
+}
+
 // BlobReferencer reports the blob digests a format still needs, so garbage
 // collection marks them before sweeping. Blobs are a shared CAS across every
 // format, so the collector must union the referrers of all of them — a missing

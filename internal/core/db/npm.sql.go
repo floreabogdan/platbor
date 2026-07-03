@@ -27,6 +27,26 @@ func (q *Queries) DeleteNpmDistTag(ctx context.Context, arg DeleteNpmDistTagPara
 	return result.RowsAffected()
 }
 
+const deleteNpmVersion = `-- name: DeleteNpmVersion :execrows
+DELETE FROM npm_versions
+WHERE package_id = (SELECT id FROM npm_packages WHERE project_id = ? AND name = ?)
+  AND version = ?
+`
+
+type DeleteNpmVersionParams struct {
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
+	Version   string `json:"version"`
+}
+
+func (q *Queries) DeleteNpmVersion(ctx context.Context, arg DeleteNpmVersionParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteNpmVersion, arg.ProjectID, arg.Name, arg.Version)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const getNpmPackage = `-- name: GetNpmPackage :one
 SELECT id, project_id, name, created_at, updated_at FROM npm_packages
 WHERE project_id = ? AND name = ?
@@ -284,6 +304,45 @@ func (q *Queries) ListNpmVersions(ctx context.Context, arg ListNpmVersionsParams
 			&i.Integrity,
 			&i.CreatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNpmVersionsForRetention = `-- name: ListNpmVersionsForRetention :many
+SELECT p.name AS name, v.version AS version, v.created_at AS created_at
+FROM npm_versions v
+JOIN npm_packages p ON p.id = v.package_id
+WHERE p.project_id = ?
+ORDER BY p.name ASC, v.created_at DESC
+`
+
+type ListNpmVersionsForRetentionRow struct {
+	Name      string `json:"name"`
+	Version   string `json:"version"`
+	CreatedAt string `json:"created_at"`
+}
+
+// Every version in a project, grouped by package and newest first, for
+// keep-last-N pruning.
+func (q *Queries) ListNpmVersionsForRetention(ctx context.Context, projectID string) ([]ListNpmVersionsForRetentionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listNpmVersionsForRetention, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNpmVersionsForRetentionRow{}
+	for rows.Next() {
+		var i ListNpmVersionsForRetentionRow
+		if err := rows.Scan(&i.Name, &i.Version, &i.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

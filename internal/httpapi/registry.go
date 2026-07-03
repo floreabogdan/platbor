@@ -30,6 +30,7 @@ type registryHandler struct {
 	generics  *generic.Browser
 	manager   *oci.Manager
 	collector *oci.Collector
+	retention *RetentionService
 	projects  *project.Service
 	log       *slog.Logger
 }
@@ -42,6 +43,9 @@ func (h registryHandler) mount(r chi.Router) {
 	r.Get("/generic-files", h.listGenericFiles) // generic files
 	// Garbage collection is instance-wide and destructive: admins only.
 	r.With(requireAdmin).Post("/gc", h.runGC) // ?dryRun=true|false
+	// Retention: an admin-triggered run across all policied projects. The
+	// per-project policy config lives under /{project}/retention below.
+	r.With(requireAdmin).Post("/retention", h.runRetention) // ?dryRun=true|false
 	// Everything below is scoped to one project.
 	r.Route("/{project}", func(r chi.Router) {
 		r.Get("/tags", h.listTags)               // ?repository=<repo>
@@ -50,6 +54,8 @@ func (h registryHandler) mount(r chi.Router) {
 		r.Get("/referrers", h.listReferrers)     // ?repository=<repo>&subject=<digest>
 		r.Get("/package", h.getPackage)          // ?name=<pkg> (npm detail)
 		r.Get("/nuget-package", h.getNuget)      // ?id=<id> (NuGet detail)
+		r.Get("/retention", h.getRetention)      // retention policy for this project
+		r.With(requireAdmin).Put("/retention", h.setRetention)
 	})
 }
 

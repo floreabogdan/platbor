@@ -24,6 +24,8 @@ type Querier interface {
 	DeleteGenericFile(ctx context.Context, arg DeleteGenericFileParams) (int64, error)
 	DeleteManifest(ctx context.Context, arg DeleteManifestParams) (int64, error)
 	DeleteNpmDistTag(ctx context.Context, arg DeleteNpmDistTagParams) (int64, error)
+	DeleteNpmVersion(ctx context.Context, arg DeleteNpmVersionParams) (int64, error)
+	DeleteNugetVersion(ctx context.Context, arg DeleteNugetVersionParams) (int64, error)
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash string) error
 	DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error)
 	DeleteTagsForDigest(ctx context.Context, arg DeleteTagsForDigestParams) error
@@ -39,6 +41,7 @@ type Querier interface {
 	GetProjectByID(ctx context.Context, id string) (Project, error)
 	GetProjectByKey(ctx context.Context, key string) (Project, error)
 	GetProxyByProjectID(ctx context.Context, projectID string) (RegistryProxy, error)
+	GetRetentionPolicy(ctx context.Context, projectID string) (RetentionPolicy, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (GetSessionByTokenHashRow, error)
 	GetTag(ctx context.Context, arg GetTagParams) (OciTag, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
@@ -85,12 +88,18 @@ type Querier interface {
 	// Every published version of a package, oldest first, with the verbatim version
 	// metadata and its tarball's digests, so the packument can be rebuilt.
 	ListNpmVersions(ctx context.Context, arg ListNpmVersionsParams) ([]ListNpmVersionsRow, error)
+	// Every version in a project, grouped by package and newest first, for
+	// keep-last-N pruning.
+	ListNpmVersionsForRetention(ctx context.Context, projectID string) ([]ListNpmVersionsForRetentionRow, error)
 	// Distinct nupkg digests every version references, for garbage collection to
 	// mark them alongside the other formats (shared CAS).
 	ListNugetBlobDigests(ctx context.Context) ([]string, error)
 	// Every version of a package, oldest first, with the nuspec and nupkg pointer,
 	// for the flat-container index, registration, and downloads.
 	ListNugetVersions(ctx context.Context, arg ListNugetVersionsParams) ([]ListNugetVersionsRow, error)
+	// Every version in a project, grouped by package and newest first, for
+	// keep-last-N pruning.
+	ListNugetVersionsForRetention(ctx context.Context, projectID string) ([]ListNugetVersionsForRetentionRow, error)
 	// Keyset pagination on the unique `key` column. The first page passes the empty
 	// string, which sorts before any valid key, so a single query serves both the
 	// first page and subsequent pages.
@@ -102,12 +111,20 @@ type Querier interface {
 	// Manifests whose subject is the given digest (a subject's signatures, SBOMs,
 	// and other attestations) for the referrers API. Newest first.
 	ListReferrers(ctx context.Context, arg ListReferrersParams) ([]ListReferrersRow, error)
+	// Every project with an effective policy (keeps some, or sweeps untagged), with
+	// its key, for a retention run.
+	ListRetentionPolicies(ctx context.Context) ([]ListRetentionPoliciesRow, error)
 	// Keyset pagination on `tag`: the empty string sorts before any tag, so the
 	// first page and subsequent pages share one query.
 	ListTags(ctx context.Context, arg ListTagsParams) ([]string, error)
+	// Every tag in a project, grouped by repository and newest first, so a
+	// keep-last-N policy can keep the newest tags and delete the rest.
+	ListTagsForRetention(ctx context.Context, projectID string) ([]ListTagsForRetentionRow, error)
 	// Tags in a repository joined to the manifest each points at, so the browser can
 	// show media type and size without a second round-trip. Newest push first.
 	ListTagsWithManifest(ctx context.Context, arg ListTagsWithManifestParams) ([]ListTagsWithManifestRow, error)
+	// Manifests in a project that no tag points at, for the delete-untagged policy.
+	ListUntaggedManifests(ctx context.Context, projectID string) ([]ListUntaggedManifestsRow, error)
 	ManifestExists(ctx context.Context, arg ManifestExistsParams) (int64, error)
 	// Whether a specific version is already published. npm forbids overwriting a
 	// published version, so the handler rejects a re-publish before inserting.
@@ -132,6 +149,7 @@ type Querier interface {
 	// Ensure the package row for (project, id_lower) exists, returning its id.
 	// Pushing a new version of an existing package bumps updated_at.
 	UpsertNugetPackage(ctx context.Context, arg UpsertNugetPackageParams) (string, error)
+	UpsertRetentionPolicy(ctx context.Context, arg UpsertRetentionPolicyParams) error
 	UpsertTag(ctx context.Context, arg UpsertTagParams) error
 }
 

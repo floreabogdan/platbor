@@ -57,6 +57,20 @@ DO UPDATE SET version = excluded.version, updated_at = excluded.updated_at;
 DELETE FROM npm_dist_tags
 WHERE package_id = ? AND tag = ?;
 
+-- name: ListNpmVersionsForRetention :many
+-- Every version in a project, grouped by package and newest first, for
+-- keep-last-N pruning.
+SELECT p.name AS name, v.version AS version, v.created_at AS created_at
+FROM npm_versions v
+JOIN npm_packages p ON p.id = v.package_id
+WHERE p.project_id = ?
+ORDER BY p.name ASC, v.created_at DESC;
+
+-- name: DeleteNpmVersion :execrows
+DELETE FROM npm_versions
+WHERE package_id = (SELECT id FROM npm_packages WHERE project_id = ? AND name = ?)
+  AND version = ?;
+
 -- name: ListNpmTarballDigests :many
 -- Distinct tarball digests every npm version references, for garbage collection
 -- to mark them alongside OCI blobs. Blobs are a shared CAS spanning all formats.

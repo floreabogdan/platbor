@@ -380,6 +380,43 @@ func (q *Queries) ListTags(ctx context.Context, arg ListTagsParams) ([]string, e
 	return items, nil
 }
 
+const listTagsForRetention = `-- name: ListTagsForRetention :many
+SELECT repository, tag, updated_at FROM oci_tags
+WHERE project_id = ?
+ORDER BY repository ASC, updated_at DESC, tag DESC
+`
+
+type ListTagsForRetentionRow struct {
+	Repository string `json:"repository"`
+	Tag        string `json:"tag"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
+// Every tag in a project, grouped by repository and newest first, so a
+// keep-last-N policy can keep the newest tags and delete the rest.
+func (q *Queries) ListTagsForRetention(ctx context.Context, projectID string) ([]ListTagsForRetentionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTagsForRetention, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTagsForRetentionRow{}
+	for rows.Next() {
+		var i ListTagsForRetentionRow
+		if err := rows.Scan(&i.Repository, &i.Tag, &i.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTagsWithManifest = `-- name: ListTagsWithManifest :many
 SELECT
     t.tag        AS tag,
@@ -428,6 +465,44 @@ func (q *Queries) ListTagsWithManifest(ctx context.Context, arg ListTagsWithMani
 			&i.Size,
 			&i.Payload,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUntaggedManifests = `-- name: ListUntaggedManifests :many
+SELECT m.repository AS repository, m.digest AS digest FROM oci_manifests m
+WHERE m.project_id = ?
+  AND NOT EXISTS (
+    SELECT 1 FROM oci_tags t
+    WHERE t.project_id = m.project_id AND t.repository = m.repository AND t.digest = m.digest
+  )
+`
+
+type ListUntaggedManifestsRow struct {
+	Repository string `json:"repository"`
+	Digest     string `json:"digest"`
+}
+
+// Manifests in a project that no tag points at, for the delete-untagged policy.
+func (q *Queries) ListUntaggedManifests(ctx context.Context, projectID string) ([]ListUntaggedManifestsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUntaggedManifests, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUntaggedManifestsRow{}
+	for rows.Next() {
+		var i ListUntaggedManifestsRow
+		if err := rows.Scan(&i.Repository, &i.Digest); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

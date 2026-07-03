@@ -100,6 +100,22 @@ SELECT COUNT(*) FROM (SELECT DISTINCT project_id, repository FROM oci_manifests)
 -- name: CountTags :one
 SELECT COUNT(*) FROM oci_tags;
 
+-- name: ListTagsForRetention :many
+-- Every tag in a project, grouped by repository and newest first, so a
+-- keep-last-N policy can keep the newest tags and delete the rest.
+SELECT repository, tag, updated_at FROM oci_tags
+WHERE project_id = ?
+ORDER BY repository ASC, updated_at DESC, tag DESC;
+
+-- name: ListUntaggedManifests :many
+-- Manifests in a project that no tag points at, for the delete-untagged policy.
+SELECT m.repository AS repository, m.digest AS digest FROM oci_manifests m
+WHERE m.project_id = ?
+  AND NOT EXISTS (
+    SELECT 1 FROM oci_tags t
+    WHERE t.project_id = m.project_id AND t.repository = m.repository AND t.digest = m.digest
+  );
+
 -- name: ListTagsWithManifest :many
 -- Tags in a repository joined to the manifest each points at, so the browser can
 -- show media type and size without a second round-trip. Newest push first.

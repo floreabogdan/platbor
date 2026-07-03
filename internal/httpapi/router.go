@@ -58,6 +58,7 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 				generics:  generic.NewBrowser(api.DB),
 				manager:   oci.NewManager(api.DB),
 				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB), generic.NewReferencer(api.DB), nuget.NewReferencer(api.DB)),
+				retention: NewRetentionService(api.DB, oci.NewPruner(api.DB), npm.NewPruner(api.DB), nuget.NewPruner(api.DB)),
 				projects:  api.Projects,
 				log:       log,
 			}.mount)

@@ -1,0 +1,78 @@
+package nuget
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"time"
+
+	"github.com/platbor/platbor/internal/core/db"
+	"github.com/platbor/platbor/internal/core/id"
+)
+
+// Pruner applies retention to NuGet packages: keep the newest keepLast versions
+// of each package and delete the rest. NuGet has no untagged concept.
+type Pruner struct {
+	db  *sql.DB
+	q   *db.Queries
+	now func() time.Time
+}
+
+// NewPruner wires a NuGet pruner to the metadata database.
+func NewPruner(sqlDB *sql.DB) *Pruner {
+	return &Pruner{db: sqlDB, q: db.New(sqlDB), now: func() time.Time { return time.Now().UTC() }}
+}
+
+// Prune implements registry.Pruner.
+func (p *Pruner) Prune(ctx context.Context, projectID string, keepLast int, _ bool, dryRun bool, actor string) (int, error) {
+	if keepLast <= 0 {
+		return 0, nil
+	}
+	rows, err := p.q.ListNugetVersionsForRetention(ctx, projectID)
+	if err != nil {
+		return 0, err
+	}
+	perPkg := map[string]int{}
+	deleted := 0
+	for _, r := range rows {
+		perPkg[r.IDLower]++
+		if perPkg[r.IDLower] <= keepLast {
+			continue
+		}
+		deleted++
+		if dryRun {
+			continue
+		}
+		if err := p.deleteVersion(ctx, projectID, r.IDLower, r.VersionLower, actor); err != nil {
+			return deleted, err
+		}
+	}
+	return deleted, nil
+}
+
+func (p *Pruner) deleteVersion(ctx context.Context, projectID, idLower, versionLower, actor string) error {
+	ts := p.now().Format(time.RFC3339Nano)
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	qtx := p.q.WithTx(tx)
+
+	if _, err := qtx.DeleteNugetVersion(ctx, db.DeleteNugetVersionParams{ProjectID: projectID, IDLower: idLower, VersionLower: versionLower}); err != nil {
+		return fmt.Errorf("deleting version: %w", err)
+	}
+	if _, err := qtx.InsertAuditEntry(ctx, db.InsertAuditEntryParams{
+		ID:         id.New("audit"),
+		ProjectID:  sql.NullString{String: projectID, Valid: true},
+		Actor:      actorOrSystem(actor),
+		Action:     "nuget.retention.prune",
+		TargetType: "version",
+		TargetID:   idLower + "/" + versionLower,
+		Metadata:   "{}",
+		CreatedAt:  ts,
+	}); err != nil {
+		return fmt.Errorf("writing audit entry: %w", err)
+	}
+	return tx.Commit()
+}

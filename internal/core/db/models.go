@@ -128,6 +128,13 @@ type RegistryProxy struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
+type RetentionPolicy struct {
+	ProjectID      string `json:"project_id"`
+	KeepLast       int64  `json:"keep_last"`
+	DeleteUntagged int64  `json:"delete_untagged"`
+	UpdatedAt      string `json:"updated_at"`
+}
+
 type Session struct {
 	ID        string `json:"id"`
 	TokenHash string `json:"token_hash"`
