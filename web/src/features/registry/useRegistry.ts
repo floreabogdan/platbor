@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import type {
+  GenericFile,
   ManifestDetail,
   NpmPackage,
   NpmPackageDetail,
+  NugetPackage,
+  NugetPackageDetail,
   Referrer,
   Repository,
   TagSummary,
@@ -61,6 +64,81 @@ export function usePackages() {
   }, [reload]);
 
   return { packages, state, error, reload };
+}
+
+/** useNugets loads the global, project-grouped NuGet package index. */
+export function useNugets() {
+  const [packages, setPackages] = useState<NugetPackage[]>([]);
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.listNugets();
+      setPackages(res.packages);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load NuGet packages');
+      setState('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { packages, state, error, reload };
+}
+
+/** useNugetDetail loads one NuGet package's versions. */
+export function useNugetDetail(project: string, id: string) {
+  const [detail, setDetail] = useState<NugetPackageDetail>();
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.getNugetPackage(project, id);
+      setDetail(res);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load package');
+      setState('error');
+    }
+  }, [project, id]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { detail, state, error, reload };
+}
+
+/** useGenericFiles loads the global, project-grouped generic file index. */
+export function useGenericFiles() {
+  const [files, setFiles] = useState<GenericFile[]>([]);
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.listGenericFiles();
+      setFiles(res.files);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load generic files');
+      setState('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { files, state, error, reload };
 }
 
 /** usePackageDetail loads one npm package's versions and dist-tags. */

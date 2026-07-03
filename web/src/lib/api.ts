@@ -4,6 +4,8 @@ import type {
   CreateTokenResponse,
   DashboardResponse,
   GCResult,
+  ListGenericFilesResponse,
+  ListNugetsResponse,
   ListPackagesResponse,
   ListProjectsResponse,
   ListReferrersResponse,
@@ -11,6 +13,7 @@ import type {
   ListTagsResponse,
   ManifestDetail,
   NpmPackageDetail,
+  NugetPackageDetail,
   Problem,
   Project,
   Token,
@@ -124,6 +127,19 @@ export const api = {
     request<NpmPackageDetail>(
       `/registry/${encodeURIComponent(project)}/package${query({ name })}`,
     ),
+
+  // NuGet package browser
+  listNugets: (): Promise<ListNugetsResponse> =>
+    request<ListNugetsResponse>(`/registry/nuget-packages`),
+
+  getNugetPackage: (project: string, id: string): Promise<NugetPackageDetail> =>
+    request<NugetPackageDetail>(
+      `/registry/${encodeURIComponent(project)}/nuget-package${query({ id })}`,
+    ),
+
+  // Generic file browser
+  listGenericFiles: (): Promise<ListGenericFilesResponse> =>
+    request<ListGenericFilesResponse>(`/registry/generic-files`),
 
   // Dashboard
   getDashboard: (): Promise<DashboardResponse> => request<DashboardResponse>(`/dashboard`),

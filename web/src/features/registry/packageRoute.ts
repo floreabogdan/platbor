@@ -13,3 +13,15 @@ export function packageHref(projectKey: string, name: string): string {
   // slash so the splat captures the whole "@scope/name".
   return `/registry/${encodeURIComponent(projectKey)}/-/${name}`;
 }
+
+// The NuGet package detail route uses a distinct "-nuget-" sentinel segment so it
+// never collides with the npm route ("-") or the OCI repo route (a bare splat):
+//
+//   /registry/<project>/-nuget-/<id>
+//
+// A NuGet id is dot-separated with no slashes, so it is a single safe segment.
+
+/** nugetHref builds the link to a NuGet package's detail page. */
+export function nugetHref(projectKey: string, id: string): string {
+  return `/registry/${encodeURIComponent(projectKey)}/-nuget-/${encodeURIComponent(id)}`;
+}

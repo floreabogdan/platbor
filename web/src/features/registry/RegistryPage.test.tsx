@@ -1,17 +1,24 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RegistryPage } from './RegistryPage';
 import { api } from '../../lib/api';
-import type { NpmPackage, Repository } from '../../lib/types';
+import type { GenericFile, NpmPackage, NugetPackage, Repository } from '../../lib/types';
 
 vi.mock('../../lib/api', () => ({
   ApiError: class ApiError extends Error {},
-  api: { listRepositories: vi.fn(), listPackages: vi.fn() },
+  api: {
+    listRepositories: vi.fn(),
+    listPackages: vi.fn(),
+    listNugets: vi.fn(),
+    listGenericFiles: vi.fn(),
+  },
 }));
 
 const listRepositories = vi.mocked(api.listRepositories);
 const listPackages = vi.mocked(api.listPackages);
+const listNugets = vi.mocked(api.listNugets);
+const listGenericFiles = vi.mocked(api.listGenericFiles);
 
 function renderPage() {
   return render(
@@ -20,6 +27,15 @@ function renderPage() {
     </MemoryRouter>,
   );
 }
+
+// Every format is fetched now; default each to empty and let a test override the
+// ones it exercises.
+beforeEach(() => {
+  listRepositories.mockResolvedValue({ repositories: [] });
+  listPackages.mockResolvedValue({ packages: [] });
+  listNugets.mockResolvedValue({ packages: [] });
+  listGenericFiles.mockResolvedValue({ files: [] });
+});
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -43,6 +59,27 @@ const pkg = (over: Partial<NpmPackage>): NpmPackage => ({
   name: 'left-pad',
   kind: 'local',
   versionCount: 1,
+  sizeBytes: 0,
+  updatedAt: '2026-07-02T10:00:00Z',
+  ...over,
+});
+
+const nug = (over: Partial<NugetPackage>): NugetPackage => ({
+  projectKey: 'library',
+  projectName: 'Library',
+  id: 'Newtonsoft.Json',
+  kind: 'local',
+  versionCount: 1,
+  sizeBytes: 0,
+  updatedAt: '2026-07-02T10:00:00Z',
+  ...over,
+});
+
+const gen = (over: Partial<GenericFile>): GenericFile => ({
+  projectKey: 'library',
+  projectName: 'Library',
+  path: 'installers/tool-1.0.0.bin',
+  kind: 'local',
   sizeBytes: 0,
   updatedAt: '2026-07-02T10:00:00Z',
   ...over,
@@ -114,6 +151,41 @@ describe('RegistryPage', () => {
     fireEvent.change(screen.getByLabelText('Filter by format'), { target: { value: 'npm' } });
     expect(screen.queryByRole('link', { name: 'alpine' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'left-pad' })).toBeInTheDocument();
+  });
+
+  it('lists NuGet packages and generic files with their own icons', async () => {
+    listNugets.mockResolvedValue({ packages: [nug({ id: 'Newtonsoft.Json', versionCount: 3 })] });
+    listGenericFiles.mockResolvedValue({ files: [gen({ path: 'installers/tool-1.0.0.bin', sizeBytes: 1024 })] });
+    renderPage();
+
+    // The NuGet package links into its detail route (the "-nuget-" sentinel).
+    const nuget = await screen.findByRole('link', { name: 'Newtonsoft.Json' });
+    expect(nuget).toHaveAttribute('href', '/registry/library/-nuget-/Newtonsoft.Json');
+    expect(screen.getByLabelText('NuGet package')).toBeInTheDocument();
+    expect(within(nuget.closest('tr') as HTMLElement).getByText('3 versions')).toBeInTheDocument();
+
+    // The generic file shows its path but is display-only (no detail page).
+    expect(screen.getByText('installers/tool-1.0.0.bin')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'installers/tool-1.0.0.bin' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Generic file')).toBeInTheDocument();
+  });
+
+  it('narrows to NuGet and to generic via the format dropdown', async () => {
+    listRepositories.mockResolvedValue({ repositories: [repo({ repository: 'alpine' })] });
+    listNugets.mockResolvedValue({ packages: [nug({ id: 'Newtonsoft.Json' })] });
+    listGenericFiles.mockResolvedValue({ files: [gen({ path: 'blob.bin' })] });
+    renderPage();
+
+    await screen.findByRole('link', { name: 'alpine' });
+
+    fireEvent.change(screen.getByLabelText('Filter by format'), { target: { value: 'nuget' } });
+    expect(screen.getByRole('link', { name: 'Newtonsoft.Json' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'alpine' })).not.toBeInTheDocument();
+    expect(screen.queryByText('blob.bin')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Filter by format'), { target: { value: 'generic' } });
+    expect(screen.getByText('blob.bin')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Newtonsoft.Json' })).not.toBeInTheDocument();
   });
 
   it('switches to a flat table that carries the project on each row', async () => {

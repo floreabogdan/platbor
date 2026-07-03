@@ -58,6 +58,26 @@ export function PackageIcon(props: IconProps) {
   );
 }
 
+export function NugetIcon(props: IconProps) {
+  // A hexagon — evokes the NuGet package mark, distinct from the OCI cube and the
+  // flat npm parcel.
+  return (
+    <Icon {...props}>
+      <path d="M12 2.5 4 7v10l8 4.5 8-4.5V7z" />
+    </Icon>
+  );
+}
+
+export function FileIcon(props: IconProps) {
+  // A document with a folded corner, for generic files.
+  return (
+    <Icon {...props}>
+      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+      <path d="M14 3v6h6" />
+    </Icon>
+  );
+}
+
 export function SearchIcon(props: IconProps) {
   return (
     <Icon {...props}>

@@ -2,48 +2,80 @@ import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button, Card, EmptyState, PageHeader } from '../../components/ui';
-import { PackageIcon, RegistryIcon, SearchIcon } from '../../components/icons';
+import { FileIcon, NugetIcon, PackageIcon, RegistryIcon, SearchIcon } from '../../components/icons';
 import { cx } from '../../lib/cx';
 import { formatBytes, formatRelativeTime } from '../../lib/format';
-import type { NpmPackage, Repository } from '../../lib/types';
-import { packageHref } from './packageRoute';
-import { usePackages, useRepositories } from './useRegistry';
+import type { GenericFile, NpmPackage, NugetPackage, Repository } from '../../lib/types';
+import { nugetHref, packageHref } from './packageRoute';
+import { useGenericFiles, useNugets, usePackages, useRepositories } from './useRegistry';
 
-// The registry index. It lists every artifact — OCI container images and npm
-// packages — in one browser rather than separate tabs: they are the same kind of
-// thing (named, versioned content in a project), so a per-row format icon plus
-// an optional format filter beats a hard split. Registries accumulate thousands
-// of artifacts across a smaller number of projects, so the default is a
-// "grouped" view — collapsible per-project sections with rollups, which answers
-// "what's where" at a glance. A "flat" toggle swaps in one sortable table for
-// cross-project questions ("the biggest artifact anywhere"). Both are one aligned
-// table — never a literal table nested inside a cell.
+// The registry index. It lists every artifact — OCI container images, npm and
+// NuGet packages, and generic files — in one browser rather than separate tabs:
+// they are the same kind of thing (named, versioned content in a project), so a
+// per-row format icon plus an optional format filter beats a hard split.
+// Registries accumulate thousands of artifacts across a smaller number of
+// projects, so the default is a "grouped" view — collapsible per-project
+// sections with rollups, which answers "what's where" at a glance. A "flat"
+// toggle swaps in one sortable table for cross-project questions ("the biggest
+// artifact anywhere"). Both are one aligned table — never a literal table nested
+// inside a cell.
 
 export function RegistryPage() {
   const repos = useRepositories();
   const pkgs = usePackages();
+  const nugets = useNugets();
+  const generics = useGenericFiles();
 
-  // One combined list once both sources are in. Each artifact carries a format
+  // One combined list once every source is in. Each artifact carries a format
   // discriminator, its detail-route href, and a globally unique key.
   const artifacts = useMemo<Artifact[]>(() => {
-    if (repos.state !== 'ready' || pkgs.state !== 'ready') {
+    if (
+      repos.state !== 'ready' ||
+      pkgs.state !== 'ready' ||
+      nugets.state !== 'ready' ||
+      generics.state !== 'ready'
+    ) {
       return [];
     }
-    return [...repos.repositories.map(fromRepository), ...pkgs.packages.map(fromPackage)];
-  }, [repos.state, repos.repositories, pkgs.state, pkgs.packages]);
+    return [
+      ...repos.repositories.map(fromRepository),
+      ...pkgs.packages.map(fromPackage),
+      ...nugets.packages.map(fromNuget),
+      ...generics.files.map(fromGeneric),
+    ];
+  }, [
+    repos.state,
+    repos.repositories,
+    pkgs.state,
+    pkgs.packages,
+    nugets.state,
+    nugets.packages,
+    generics.state,
+    generics.files,
+  ]);
 
-  const loading = repos.state === 'loading' || pkgs.state === 'loading';
-  const failed = repos.state === 'error' || pkgs.state === 'error';
-  const errorMessage = repos.error ?? pkgs.error;
+  const loading =
+    repos.state === 'loading' ||
+    pkgs.state === 'loading' ||
+    nugets.state === 'loading' ||
+    generics.state === 'loading';
+  const failed =
+    repos.state === 'error' || pkgs.state === 'error' || nugets.state === 'error' || generics.state === 'error';
+  const errorMessage = repos.error ?? pkgs.error ?? nugets.error ?? generics.error;
 
   function reloadAll() {
     void repos.reload();
     void pkgs.reload();
+    void nugets.reload();
+    void generics.reload();
   }
 
   return (
     <div className="animate-rise">
-      <PageHeader title="Registry" subtitle="Container images and npm packages across every project." />
+      <PageHeader
+        title="Registry"
+        subtitle="Container images, npm and NuGet packages, and generic files across every project."
+      />
 
       {loading ? <TableSkeleton /> : null}
 
@@ -59,7 +91,7 @@ export function RegistryPage() {
       {!loading && !failed && artifacts.length === 0 ? (
         <EmptyState
           icon={<RegistryIcon className="h-8 w-8" />}
-          message="No artifacts yet. Create a project, then push an image (docker push <host>/<project>/<repo>:<tag>) or publish a package (npm publish) to it."
+          message="No artifacts yet. Create a project, then push to it — docker push, npm publish, dotnet nuget push, or a generic file upload."
         />
       ) : null}
 
@@ -70,7 +102,7 @@ export function RegistryPage() {
 
 // --- unified artifact model ---
 
-type Format = 'oci' | 'npm';
+type Format = 'oci' | 'npm' | 'nuget' | 'generic';
 
 // Artifact is the row model both formats normalize to. `contents` is the
 // format-specific rollup phrase ("3 tags" / "2 versions"); it is display-only
@@ -79,13 +111,13 @@ interface Artifact {
   format: Format;
   projectKey: string;
   projectName: string;
-  name: string; // oci: repository; npm: package name
+  name: string; // oci: repository; npm/nuget: package name; generic: file path
   kind: 'local' | 'proxy';
   contents: string;
   sizeBytes: number;
   updatedAt: string;
-  href: string;
-  key: string; // unique across both formats
+  href: string; // detail-route link; empty when the format has no detail page (generic)
+  key: string; // unique across every format
 }
 
 function fromRepository(r: Repository): Artifact {
@@ -115,6 +147,37 @@ function fromPackage(p: NpmPackage): Artifact {
     updatedAt: p.updatedAt,
     href: packageHref(p.projectKey, p.name),
     key: `npm:${p.projectKey}/${p.name}`,
+  };
+}
+
+function fromNuget(p: NugetPackage): Artifact {
+  return {
+    format: 'nuget',
+    projectKey: p.projectKey,
+    projectName: p.projectName,
+    name: p.id,
+    kind: p.kind,
+    contents: `${String(p.versionCount)} ${p.versionCount === 1 ? 'version' : 'versions'}`,
+    sizeBytes: p.sizeBytes,
+    updatedAt: p.updatedAt,
+    href: nugetHref(p.projectKey, p.id),
+    key: `nuget:${p.projectKey}/${p.id}`,
+  };
+}
+
+function fromGeneric(f: GenericFile): Artifact {
+  return {
+    format: 'generic',
+    projectKey: f.projectKey,
+    projectName: f.projectName,
+    name: f.path,
+    kind: f.kind,
+    // A generic file is a single file, not a container of versions/tags.
+    contents: 'file',
+    sizeBytes: f.sizeBytes,
+    updatedAt: f.updatedAt,
+    href: '', // generic files have no detail page — display only
+    key: `generic:${f.projectKey}/${f.path}`,
   };
 }
 
@@ -394,12 +457,22 @@ function ArtifactRow({
   navigate: NavigateFn;
 }) {
   const { href } = artifact;
+  // Most formats have a detail page; a generic file does not (href is empty), so
+  // its row is display-only — no navigation, name shown as plain text.
+  const clickable = href !== '';
   return (
     <tr
-      onClick={() => {
-        navigate(href);
-      }}
-      className="cursor-pointer border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50"
+      onClick={
+        clickable
+          ? () => {
+              navigate(href);
+            }
+          : undefined
+      }
+      className={cx(
+        'border-b border-slate-100 transition-colors last:border-0',
+        clickable ? 'cursor-pointer hover:bg-slate-50' : '',
+      )}
     >
       {/* The format glyph sits in a fixed gutter (the same width as the group
           caret), so a row's name aligns under its project header and the icon
@@ -407,13 +480,17 @@ function ArtifactRow({
       <td className="py-2.5 pl-4 pr-3">
         <div className="flex items-center">
           <FormatGlyph format={artifact.format} />
-          <Link
-            to={href}
-            onClick={(e) => e.stopPropagation()}
-            className="font-mono font-medium text-slate-900 hover:text-teal-700"
-          >
-            {artifact.name}
-          </Link>
+          {clickable ? (
+            <Link
+              to={href}
+              onClick={(e) => e.stopPropagation()}
+              className="font-mono font-medium text-slate-900 hover:text-teal-700"
+            >
+              {artifact.name}
+            </Link>
+          ) : (
+            <span className="font-mono font-medium text-slate-700">{artifact.name}</span>
+          )}
         </div>
       </td>
       {showProject ? (
@@ -438,15 +515,21 @@ function ArtifactRow({
   );
 }
 
-// FormatGlyph is the leading per-row icon: a 3D cube for container images, a flat
-// parcel for npm packages. It occupies the caret-width gutter so names stay
-// aligned under their project header.
+// FormatGlyph is the leading per-row icon — a distinct glyph per format so the
+// format is scannable at a glance. It occupies the caret-width gutter so names
+// stay aligned under their project header.
+const FORMAT_META: Record<Format, { label: string; icon: ReactNode }> = {
+  oci: { label: 'Container image', icon: <RegistryIcon className="h-4 w-4" /> },
+  npm: { label: 'npm package', icon: <PackageIcon className="h-4 w-4" /> },
+  nuget: { label: 'NuGet package', icon: <NugetIcon className="h-4 w-4" /> },
+  generic: { label: 'Generic file', icon: <FileIcon className="h-4 w-4" /> },
+};
+
 function FormatGlyph({ format }: { format: Format }) {
-  const oci = format === 'oci';
-  const label = oci ? 'Container image' : 'npm package';
+  const { label, icon } = FORMAT_META[format];
   return (
     <span className="flex w-5 shrink-0 items-center text-slate-400" role="img" aria-label={label} title={label}>
-      {oci ? <RegistryIcon className="h-4 w-4" /> : <PackageIcon className="h-4 w-4" />}
+      {icon}
     </span>
   );
 }
@@ -509,6 +592,8 @@ function Toolbar({
         <option value="">All formats</option>
         <option value="oci">Container images</option>
         <option value="npm">npm packages</option>
+        <option value="nuget">NuGet packages</option>
+        <option value="generic">Generic files</option>
       </select>
 
       <select

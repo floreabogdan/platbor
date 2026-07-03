@@ -8,6 +8,7 @@ import { ProfilePage } from '../features/profile/ProfilePage';
 import { RegistryPage } from '../features/registry/RegistryPage';
 import { RepositoryPage } from '../features/registry/RepositoryPage';
 import { PackagePage } from '../features/registry/PackagePage';
+import { NugetPage } from '../features/registry/NugetPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import { PlaceholderPage } from '../features/placeholder/PlaceholderPage';
 
@@ -43,9 +44,11 @@ function Gate() {
         <Route index element={<DashboardPage />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="registry" element={<RegistryPage />} />
-        {/* npm package detail — the reserved "-" segment (which an OCI repo name
-            can never start with) keeps this distinct from the OCI repo route. */}
+        {/* npm and NuGet package detail — reserved sentinel segments ("-" and
+            "-nuget-", which an OCI repo name can never start with) keep these
+            distinct from the OCI repo route below. */}
         <Route path="registry/:project/-/*" element={<PackagePage />} />
+        <Route path="registry/:project/-nuget-/*" element={<NugetPage />} />
         <Route path="registry/:project/*" element={<RepositoryPage />} />
         <Route
           path="catalog"

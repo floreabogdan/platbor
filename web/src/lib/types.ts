@@ -121,6 +121,52 @@ export interface NpmPackageDetail {
   versions: NpmPackageVersion[];
 }
 
+// --- NuGet packages ---
+
+/** NugetPackage — one NuGet package in a project (the project is the feed). */
+export interface NugetPackage {
+  projectKey: string;
+  projectName: string;
+  id: string;
+  kind: 'local' | 'proxy';
+  versionCount: number;
+  sizeBytes: number;
+  updatedAt: string;
+}
+
+export interface ListNugetsResponse {
+  packages: NugetPackage[];
+}
+
+/** NugetPackageVersion — one pushed version of a NuGet package. */
+export interface NugetPackageVersion {
+  version: string;
+  sizeBytes: number;
+  publishedAt: string;
+}
+
+/** NugetPackageDetail — a package with its versions (newest first). */
+export interface NugetPackageDetail {
+  id: string;
+  versions: NugetPackageVersion[];
+}
+
+// --- Generic files ---
+
+/** GenericFile — one arbitrary versioned file at a path under a project. */
+export interface GenericFile {
+  projectKey: string;
+  projectName: string;
+  path: string;
+  kind: 'local' | 'proxy';
+  sizeBytes: number;
+  updatedAt: string;
+}
+
+export interface ListGenericFilesResponse {
+  files: GenericFile[];
+}
+
 /** TagSummary — a tag with the media type and size of the manifest it points at.
  *  `count` is the layer count for an image, or the platform count for an index. */
 export interface TagSummary {
