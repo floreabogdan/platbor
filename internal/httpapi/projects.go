@@ -25,24 +25,39 @@ func (h projectsHandler) mount(r chi.Router) {
 }
 
 // projectResponse is the API view of a project (camelCase, RFC 3339 timestamps).
+// Kind is "local" or "proxy"; upstream is present only for proxy projects and
+// never carries the stored password.
 type projectResponse struct {
-	ID          string    `json:"id"`
-	Key         string    `json:"key"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID          string            `json:"id"`
+	Key         string            `json:"key"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Kind        string            `json:"kind"`
+	Upstream    *upstreamResponse `json:"upstream,omitempty"`
+	CreatedAt   time.Time         `json:"createdAt"`
+	UpdatedAt   time.Time         `json:"updatedAt"`
+}
+
+type upstreamResponse struct {
+	URL      string `json:"url"`
+	Username string `json:"username,omitempty"`
 }
 
 func toProjectResponse(p project.Project) projectResponse {
-	return projectResponse{
+	resp := projectResponse{
 		ID:          p.ID,
 		Key:         p.Key,
 		Name:        p.Name,
 		Description: p.Description,
+		Kind:        "local",
 		CreatedAt:   p.CreatedAt,
 		UpdatedAt:   p.UpdatedAt,
 	}
+	if p.Upstream != nil {
+		resp.Kind = "proxy"
+		resp.Upstream = &upstreamResponse{URL: p.Upstream.URL, Username: p.Upstream.Username}
+	}
+	return resp
 }
 
 type listProjectsResponse struct {
@@ -81,6 +96,14 @@ type createProjectRequest struct {
 	Key         string `json:"key"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	// Upstream, when present, creates a pull-through proxy of that registry.
+	Upstream *upstreamRequest `json:"upstream,omitempty"`
+}
+
+type upstreamRequest struct {
+	URL      string `json:"url"`
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 func (h projectsHandler) create(w http.ResponseWriter, r *http.Request) {
@@ -90,10 +113,20 @@ func (h projectsHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var upstream *project.Upstream
+	if req.Upstream != nil {
+		upstream = &project.Upstream{
+			URL:      req.Upstream.URL,
+			Username: req.Upstream.Username,
+			Password: req.Upstream.Password,
+		}
+	}
+
 	created, err := h.svc.Create(r.Context(), project.CreateInput{
 		Key:         req.Key,
 		Name:        req.Name,
 		Description: req.Description,
+		Upstream:    upstream,
 		Actor:       actorFrom(r),
 	})
 	if err != nil {
