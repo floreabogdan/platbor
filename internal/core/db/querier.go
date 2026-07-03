@@ -23,6 +23,7 @@ type Querier interface {
 	DeleteExpiredSessions(ctx context.Context, expiresAt string) error
 	DeleteGenericFile(ctx context.Context, arg DeleteGenericFileParams) (int64, error)
 	DeleteManifest(ctx context.Context, arg DeleteManifestParams) (int64, error)
+	DeleteMavenFile(ctx context.Context, arg DeleteMavenFileParams) (int64, error)
 	DeleteNpmDistTag(ctx context.Context, arg DeleteNpmDistTagParams) (int64, error)
 	DeleteNpmVersion(ctx context.Context, arg DeleteNpmVersionParams) (int64, error)
 	DeleteNugetVersion(ctx context.Context, arg DeleteNugetVersionParams) (int64, error)
@@ -35,6 +36,7 @@ type Querier interface {
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (GetAPITokenByHashRow, error)
 	GetGenericFile(ctx context.Context, arg GetGenericFileParams) (GenericFile, error)
 	GetManifest(ctx context.Context, arg GetManifestParams) (OciManifest, error)
+	GetMavenFile(ctx context.Context, arg GetMavenFileParams) (MavenFile, error)
 	GetNpmPackage(ctx context.Context, arg GetNpmPackageParams) (NpmPackage, error)
 	// The blob digest and size for one package version's tarball, to serve it.
 	GetNpmTarball(ctx context.Context, arg GetNpmTarballParams) (GetNpmTarballRow, error)
@@ -67,6 +69,10 @@ type Querier interface {
 	// project, for the registry browser's generic index. is_proxy is 1 for a proxy
 	// repository.
 	ListAllGenericFiles(ctx context.Context) ([]ListAllGenericFilesRow, error)
+	// Every Maven artifact (group:artifact) across all repositories, with its version
+	// count, total cached size, and a proxy flag, for the browser's project-grouped
+	// index. Metadata files count toward size but not toward the version count.
+	ListAllMavenArtifacts(ctx context.Context) ([]ListAllMavenArtifactsRow, error)
 	// Every npm package across all repositories, joined to its repository and
 	// project, with version count, total tarball size, and a proxy flag.
 	ListAllNpmPackages(ctx context.Context) ([]ListAllNpmPackagesRow, error)
@@ -96,6 +102,14 @@ type Querier interface {
 	// image references. Blobs are a shared CAS, so a layer used by two images is
 	// counted once per image (logical size), not physically.
 	ListManifestSizing(ctx context.Context) ([]ListManifestSizingRow, error)
+	// Distinct blob digests every cached/uploaded Maven file references, for garbage
+	// collection to mark them alongside other formats. Empty (uncached) rows excluded.
+	ListMavenBlobDigests(ctx context.Context) ([]string, error)
+	// Every file of one artifact (group + artifact), for its detail page.
+	ListMavenFilesForArtifact(ctx context.Context, arg ListMavenFilesForArtifactParams) ([]ListMavenFilesForArtifactRow, error)
+	// Every non-metadata file in a repository, grouped by artifact and newest first,
+	// for keep-last-N-versions pruning. Metadata files are excluded from counting.
+	ListMavenFilesForRetention(ctx context.Context, repositoryID string) ([]ListMavenFilesForRetentionRow, error)
 	ListNpmDistTags(ctx context.Context, arg ListNpmDistTagsParams) ([]ListNpmDistTagsRow, error)
 	// Distinct tarball digests every npm version references, for garbage collection
 	// to mark them alongside OCI blobs. Blobs are a shared CAS spanning all formats.
@@ -175,6 +189,9 @@ type Querier interface {
 	// image can be tagged repeatedly without duplicating the payload. subject and
 	// artifact_type are denormalized from the payload for the referrers API.
 	UpsertManifest(ctx context.Context, arg UpsertManifestParams) error
+	// Store a file at a path in a repository, replacing any existing file there
+	// (Maven paths are mutable: SNAPSHOT redeploys and metadata updates overwrite).
+	UpsertMavenFile(ctx context.Context, arg UpsertMavenFileParams) error
 	UpsertNpmDistTag(ctx context.Context, arg UpsertNpmDistTagParams) error
 	// Ensure the package row for (repository, name) exists, returning its id.
 	// Publishing a new version of an existing package just bumps updated_at.

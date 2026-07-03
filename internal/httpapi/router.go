@@ -13,6 +13,7 @@ import (
 	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry"
 	"github.com/platbor/platbor/internal/registry/generic"
+	"github.com/platbor/platbor/internal/registry/maven"
 	"github.com/platbor/platbor/internal/registry/npm"
 	"github.com/platbor/platbor/internal/registry/nuget"
 	"github.com/platbor/platbor/internal/registry/oci"
@@ -70,13 +71,15 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 				nugets:    nuget.NewBrowser(api.DB),
 				generics:  generic.NewBrowser(api.DB),
 				pypis:     pypi.NewBrowser(api.DB),
+				mavens:    maven.NewBrowser(api.DB),
 				manager:   oci.NewManager(api.DB),
-				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB), generic.NewReferencer(api.DB), nuget.NewReferencer(api.DB), pypi.NewReferencer(api.DB)),
+				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB), generic.NewReferencer(api.DB), nuget.NewReferencer(api.DB), pypi.NewReferencer(api.DB), maven.NewReferencer(api.DB)),
 				retention: NewRetentionService(api.DB, map[repository.Format]registry.Pruner{
 					repository.FormatOCI:   oci.NewPruner(api.DB),
 					repository.FormatNPM:   npm.NewPruner(api.DB),
 					repository.FormatNuGet: nuget.NewPruner(api.DB),
 					repository.FormatPyPI:  pypi.NewPruner(api.DB),
+					repository.FormatMaven: maven.NewPruner(api.DB),
 				}),
 				repos:    repository.NewService(api.DB),
 				projects: api.Projects,
@@ -108,6 +111,9 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 	})
 	r.Route("/pypi", func(sub chi.Router) {
 		pypi.New().Mount(sub, deps)
+	})
+	r.Route("/maven", func(sub chi.Router) {
+		maven.New().Mount(sub, deps)
 	})
 
 	// Everything else falls through to the embedded SPA.

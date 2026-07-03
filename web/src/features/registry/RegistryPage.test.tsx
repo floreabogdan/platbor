@@ -12,6 +12,7 @@ vi.mock('../../lib/api', () => ({
     listPackages: vi.fn(),
     listNugets: vi.fn(),
     listPypis: vi.fn(),
+    listMavens: vi.fn(),
     listGenericFiles: vi.fn(),
   },
 }));
@@ -20,6 +21,7 @@ const listRepositories = vi.mocked(api.listRepositories);
 const listPackages = vi.mocked(api.listPackages);
 const listNugets = vi.mocked(api.listNugets);
 const listPypis = vi.mocked(api.listPypis);
+const listMavens = vi.mocked(api.listMavens);
 const listGenericFiles = vi.mocked(api.listGenericFiles);
 
 function renderPage() {
@@ -37,6 +39,7 @@ beforeEach(() => {
   listPackages.mockResolvedValue({ packages: [] });
   listNugets.mockResolvedValue({ packages: [] });
   listPypis.mockResolvedValue({ packages: [] });
+  listMavens.mockResolvedValue({ artifacts: [] });
   listGenericFiles.mockResolvedValue({ files: [] });
 });
 

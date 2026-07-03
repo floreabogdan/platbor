@@ -6,6 +6,7 @@ import type {
   DashboardResponse,
   GCResult,
   ListGenericFilesResponse,
+  ListMavensResponse,
   ListMembersResponse,
   ListNugetsResponse,
   ListPackagesResponse,
@@ -18,6 +19,7 @@ import type {
   ManifestDetail,
   Member,
   MemberRole,
+  MavenArtifactDetail,
   NpmPackageDetail,
   NugetPackageDetail,
   Problem,
@@ -193,6 +195,14 @@ export const api = {
   getPypiPackage: (project: string, repo: string, name: string): Promise<PyPIPackageDetail> =>
     request<PyPIPackageDetail>(
       `/registry/${encodeURIComponent(project)}/pypi-package${query({ repo, name })}`,
+    ),
+
+  // Maven artifact browser
+  listMavens: (): Promise<ListMavensResponse> => request<ListMavensResponse>(`/registry/maven-artifacts`),
+
+  getMavenArtifact: (project: string, repo: string, group: string, artifact: string): Promise<MavenArtifactDetail> =>
+    request<MavenArtifactDetail>(
+      `/registry/${encodeURIComponent(project)}/maven-artifact${query({ repo, group, artifact })}`,
     ),
 
   // Generic file browser

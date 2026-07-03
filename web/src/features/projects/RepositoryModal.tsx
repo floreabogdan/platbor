@@ -8,6 +8,8 @@ const FORMATS: { value: RepoFormat; label: string }[] = [
   { value: 'oci', label: 'Container images (OCI)' },
   { value: 'npm', label: 'npm' },
   { value: 'nuget', label: 'NuGet' },
+  { value: 'pypi', label: 'PyPI' },
+  { value: 'maven', label: 'Maven' },
   { value: 'generic', label: 'Generic files' },
 ];
 

@@ -35,7 +35,7 @@ export interface CreateProjectRequest {
 
 // --- Repositories (the typed, configured containers inside a project) ---
 
-export type RepoFormat = 'oci' | 'npm' | 'nuget' | 'generic';
+export type RepoFormat = 'oci' | 'npm' | 'nuget' | 'generic' | 'pypi' | 'maven';
 export type RepoMode = 'local' | 'proxy';
 
 export interface RepoUpstream {
@@ -245,6 +245,42 @@ export interface PyPIFile {
 export interface PyPIPackageDetail {
   name: string;
   files: PyPIFile[];
+}
+
+// --- Maven artifacts ---
+
+/** MavenArtifact — one Maven artifact (groupId:artifactId) in a repository. */
+export interface MavenArtifact {
+  projectKey: string;
+  projectName: string;
+  repoKey: string;
+  groupId: string;
+  artifactId: string;
+  kind: 'local' | 'proxy';
+  versionCount: number;
+  sizeBytes: number;
+  updatedAt: string;
+}
+
+export interface ListMavensResponse {
+  artifacts: MavenArtifact[];
+}
+
+/** MavenFile — one file of an artifact (a pom, jar, checksum, or metadata). */
+export interface MavenFile {
+  path: string;
+  version: string;
+  filename: string;
+  isMetadata: boolean;
+  sizeBytes: number;
+  sha1?: string;
+}
+
+/** MavenArtifactDetail — an artifact with its files. */
+export interface MavenArtifactDetail {
+  groupId: string;
+  artifactId: string;
+  files: MavenFile[];
 }
 
 // --- Generic files ---

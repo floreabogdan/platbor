@@ -12,6 +12,7 @@ import (
 	"github.com/platbor/platbor/internal/core/project"
 	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry/generic"
+	"github.com/platbor/platbor/internal/registry/maven"
 	"github.com/platbor/platbor/internal/registry/npm"
 	"github.com/platbor/platbor/internal/registry/nuget"
 	"github.com/platbor/platbor/internal/registry/oci"
@@ -31,6 +32,7 @@ type registryHandler struct {
 	nugets    *nuget.Browser
 	generics  *generic.Browser
 	pypis     *pypi.Browser
+	mavens    *maven.Browser
 	manager   *oci.Manager
 	collector *oci.Collector
 	retention *RetentionService
@@ -45,6 +47,7 @@ func (h registryHandler) mount(r chi.Router) {
 	r.Get("/packages", h.listPackages)          // npm packages
 	r.Get("/nuget-packages", h.listNugets)      // NuGet packages
 	r.Get("/pypi-packages", h.listPypis)        // PyPI packages
+	r.Get("/maven-artifacts", h.listMavens)     // Maven artifacts
 	r.Get("/generic-files", h.listGenericFiles) // generic files
 	// Garbage collection is instance-wide and destructive: admins only.
 	r.With(requireAdmin).Post("/gc", h.runGC) // ?dryRun=true|false
@@ -60,6 +63,7 @@ func (h registryHandler) mount(r chi.Router) {
 		r.Get("/package", h.getPackage)          // ?repo=<repo>&name=<pkg> (npm detail)
 		r.Get("/nuget-package", h.getNuget)      // ?repo=<repo>&id=<id> (NuGet detail)
 		r.Get("/pypi-package", h.getPypi)        // ?repo=<repo>&name=<pkg> (PyPI detail)
+		r.Get("/maven-artifact", h.getMaven)     // ?repo=<repo>&group=<g>&artifact=<a> (Maven detail)
 	})
 }
 
@@ -420,6 +424,94 @@ func (h registryHandler) getPypi(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, h.log, http.StatusOK, pypiDetailResponse{Name: detail.Name, Files: files})
+}
+
+// --- Maven ---
+
+type mavenResponse struct {
+	ProjectKey   string    `json:"projectKey"`
+	ProjectName  string    `json:"projectName"`
+	RepoKey      string    `json:"repoKey"`
+	GroupID      string    `json:"groupId"`
+	ArtifactID   string    `json:"artifactId"`
+	Kind         string    `json:"kind"`
+	VersionCount int       `json:"versionCount"`
+	SizeBytes    int64     `json:"sizeBytes"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type listMavensResponse struct {
+	Artifacts []mavenResponse `json:"artifacts"`
+}
+
+// listMavens returns every Maven artifact across all projects.
+func (h registryHandler) listMavens(w http.ResponseWriter, r *http.Request) {
+	arts, err := h.mavens.Artifacts(r.Context())
+	if err != nil {
+		h.log.Error("listing maven artifacts", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	items := make([]mavenResponse, 0, len(arts))
+	for _, a := range arts {
+		items = append(items, mavenResponse{
+			ProjectKey:   a.ProjectKey,
+			ProjectName:  a.ProjectName,
+			RepoKey:      a.RepoKey,
+			GroupID:      a.GroupID,
+			ArtifactID:   a.ArtifactID,
+			Kind:         repoKind(a.IsProxy),
+			VersionCount: a.VersionCount,
+			SizeBytes:    a.SizeBytes,
+			UpdatedAt:    a.UpdatedAt,
+		})
+	}
+	writeJSON(w, h.log, http.StatusOK, listMavensResponse{Artifacts: items})
+}
+
+type mavenFileResponse struct {
+	Path       string `json:"path"`
+	Version    string `json:"version"`
+	Filename   string `json:"filename"`
+	IsMetadata bool   `json:"isMetadata"`
+	SizeBytes  int64  `json:"sizeBytes"`
+	SHA1       string `json:"sha1,omitempty"`
+}
+
+type mavenDetailResponse struct {
+	GroupID    string              `json:"groupId"`
+	ArtifactID string              `json:"artifactId"`
+	Files      []mavenFileResponse `json:"files"`
+}
+
+// getMaven returns one Maven artifact's files for the detail page.
+func (h registryHandler) getMaven(w http.ResponseWriter, r *http.Request) {
+	projectKey := chi.URLParam(r, "project")
+	repoKey := r.URL.Query().Get("repo")
+	group := r.URL.Query().Get("group")
+	artifact := r.URL.Query().Get("artifact")
+	if repoKey == "" || group == "" || artifact == "" {
+		writeProblem(w, http.StatusBadRequest, "Missing parameter", "repo, group and artifact are required")
+		return
+	}
+	detail, err := h.mavens.Artifact(r.Context(), projectKey, repoKey, group, artifact)
+	if err != nil {
+		if errors.Is(err, maven.ErrArtifactNotFound) {
+			writeProblem(w, http.StatusNotFound, "Artifact not found", "no such artifact in that project")
+			return
+		}
+		h.log.Error("getting maven artifact", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	files := make([]mavenFileResponse, 0, len(detail.Files))
+	for _, f := range detail.Files {
+		files = append(files, mavenFileResponse{
+			Path: f.Path, Version: f.Version, Filename: f.Filename,
+			IsMetadata: f.IsMetadata, SizeBytes: f.SizeBytes, SHA1: f.SHA1,
+		})
+	}
+	writeJSON(w, h.log, http.StatusOK, mavenDetailResponse{GroupID: detail.GroupID, ArtifactID: detail.ArtifactID, Files: files})
 }
 
 // --- generic ---

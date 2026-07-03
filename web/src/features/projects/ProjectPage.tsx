@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, ApiError } from '../../lib/api';
 import { Breadcrumb, Button, Card, EmptyState, Modal, PageHeader } from '../../components/ui';
-import { FileIcon, NugetIcon, PackageIcon, ProjectsIcon, RegistryIcon, TrashIcon } from '../../components/icons';
+import { FileIcon, MavenIcon, NugetIcon, PackageIcon, ProjectsIcon, PypiIcon, RegistryIcon, TrashIcon } from '../../components/icons';
 import { useAuth } from '../../lib/auth';
 import { cx } from '../../lib/cx';
 import { formatDate } from '../../lib/format';
@@ -17,6 +17,8 @@ const FORMAT_GLYPH: Record<RepoFormat, { label: string; icon: ReactNode }> = {
   oci: { label: 'Container images', icon: <RegistryIcon className="h-4 w-4" /> },
   npm: { label: 'npm', icon: <PackageIcon className="h-4 w-4" /> },
   nuget: { label: 'NuGet', icon: <NugetIcon className="h-4 w-4" /> },
+  pypi: { label: 'PyPI', icon: <PypiIcon className="h-4 w-4" /> },
+  maven: { label: 'Maven', icon: <MavenIcon className="h-4 w-4" /> },
   generic: { label: 'Generic files', icon: <FileIcon className="h-4 w-4" /> },
 };
 

@@ -32,6 +32,18 @@ export function pypiHref(projectKey: string, repoKey: string, name: string): str
   return `/registry/${encodeURIComponent(projectKey)}/-pypi-/${encodeURIComponent(repoKey)}/${encodeURIComponent(name)}`;
 }
 
+// The Maven artifact detail route uses a distinct "-maven-" sentinel segment. The
+// splat carries <repo>/<groupId>:<artifactId>; a Maven groupId is dot-separated
+// and neither coordinate contains a slash.
+//
+//   /registry/<project>/-maven-/<repo>/<groupId>:<artifactId>
+
+/** mavenHref builds the link to a Maven artifact's detail page. */
+export function mavenHref(projectKey: string, repoKey: string, groupId: string, artifactId: string): string {
+  const coord = `${groupId}:${artifactId}`;
+  return `/registry/${encodeURIComponent(projectKey)}/-maven-/${encodeURIComponent(repoKey)}/${encodeURIComponent(coord)}`;
+}
+
 /** ociHref builds the link to an OCI image's detail page: the bare splat carries
  *  <repo>/<image>. */
 export function ociHref(projectKey: string, repoKey: string, image: string): string {

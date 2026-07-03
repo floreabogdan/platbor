@@ -3,6 +3,8 @@ import { api } from '../../lib/api';
 import type {
   GenericFile,
   ManifestDetail,
+  MavenArtifact,
+  MavenArtifactDetail,
   NpmPackage,
   NpmPackageDetail,
   NugetPackage,
@@ -160,6 +162,56 @@ export function usePypiDetail(project: string, repo: string, name: string) {
       setState('error');
     }
   }, [project, repo, name]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { detail, state, error, reload };
+}
+
+/** useMavens loads the global, project-grouped Maven artifact index. */
+export function useMavens() {
+  const [artifacts, setArtifacts] = useState<MavenArtifact[]>([]);
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.listMavens();
+      setArtifacts(res.artifacts);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load Maven artifacts');
+      setState('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { artifacts, state, error, reload };
+}
+
+/** useMavenDetail loads one Maven artifact's files. */
+export function useMavenDetail(project: string, repo: string, group: string, artifact: string) {
+  const [detail, setDetail] = useState<MavenArtifactDetail>();
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.getMavenArtifact(project, repo, group, artifact);
+      setDetail(res);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load artifact');
+      setState('error');
+    }
+  }, [project, repo, group, artifact]);
 
   useEffect(() => {
     void reload();

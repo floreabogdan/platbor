@@ -68,6 +68,19 @@ export function NugetIcon(props: IconProps) {
   );
 }
 
+export function MavenIcon(props: IconProps) {
+  // A feather over a stack — Maven's build-and-package identity, rendered as a
+  // simple mark distinct from the other format glyphs.
+  return (
+    <Icon {...props}>
+      <path d="M4 17h16" />
+      <path d="M6 17V9l6-4 6 4v8" />
+      <path d="M12 5v12" />
+      <path d="M9 11l3-2 3 2" />
+    </Icon>
+  );
+}
+
 export function PypiIcon(props: IconProps) {
   // Two interlocking snake-tiles evoking Python's twin serpents, distinct from
   // the other format glyphs.

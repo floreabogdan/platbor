@@ -74,7 +74,7 @@ Goal: the Backstage-killer features, informed by real usage.
 - [ ] API catalog: OpenAPI/proto specs as versioned, browsable artifacts
 - [ ] TechDocs-style rendering of docs from synced repos
 - [ ] OIDC login
-- [~] More formats by demand — **PyPI done** (PEP 503 simple index for `pip`, legacy upload for `twine`, pull-through proxy of pypi.org; verified against real `twine`/`pip` incl. installing `six` through the proxy). Remaining: Maven, Go modules, Cargo, Terraform, RubyGems. (Helm rides OCI — already supported.)
+- [~] More formats by demand — **PyPI done** (PEP 503 simple index for `pip`, legacy upload for `twine`, pull-through proxy of pypi.org; verified against real `twine`/`pip` incl. installing `six` through the proxy). **Maven done** (plain-HTTP repository layout: `mvn deploy` PUTs the pom/jar/checksums/maven-metadata.xml verbatim, `GET` resolves them, and a pull-through proxy mirrors repo1.maven.org — immutable artifacts cached, maven-metadata.xml streamed fresh; SNAPSHOT timestamped builds and version-level metadata handled. Verified against the real `mvn` (3.9.9): release deploy + `dependency:get` from a clean repo, a `-SNAPSHOT` deploy + resolve, and pulling `commons-lang3` through the Central proxy byte-identical). Remaining: Go modules, Cargo, Terraform, RubyGems. (Helm rides OCI — already supported.)
 
 ## Sequencing rationale
 

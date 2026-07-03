@@ -42,6 +42,24 @@ type GenericFile struct {
 	UpdatedAt    string `json:"updated_at"`
 }
 
+type MavenFile struct {
+	ID           string `json:"id"`
+	RepositoryID string `json:"repository_id"`
+	Path         string `json:"path"`
+	GroupID      string `json:"group_id"`
+	ArtifactID   string `json:"artifact_id"`
+	Version      string `json:"version"`
+	Filename     string `json:"filename"`
+	IsMetadata   int64  `json:"is_metadata"`
+	BlobDigest   string `json:"blob_digest"`
+	Size         int64  `json:"size"`
+	Sha1         string `json:"sha1"`
+	Md5          string `json:"md5"`
+	UpstreamUrl  string `json:"upstream_url"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
 type NpmDistTag struct {
 	PackageID string `json:"package_id"`
 	Tag       string `json:"tag"`
