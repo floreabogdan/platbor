@@ -35,10 +35,11 @@ func (a *Adapter) Key() string { return "npm" }
 // scoped names and encoded separators.
 func (a *Adapter) Mount(r chi.Router, deps registry.Deps) {
 	h := &handler{
-		blobs: deps.Blobs,
-		auth:  deps.Auth,
-		store: newPackageStore(deps.DB),
-		log:   deps.Log,
+		blobs:    deps.Blobs,
+		auth:     deps.Auth,
+		store:    newPackageStore(deps.DB),
+		upstream: newUpstreamClient(),
+		log:      deps.Log,
 	}
 	r.Route("/{project}/{repo}", func(sub chi.Router) {
 		sub.Handle("/*", http.HandlerFunc(h.serve))
@@ -46,10 +47,11 @@ func (a *Adapter) Mount(r chi.Router, deps registry.Deps) {
 }
 
 type handler struct {
-	blobs blob.Store
-	auth  *auth.Service
-	store *packageStore
-	log   *slog.Logger
+	blobs    blob.Store
+	auth     *auth.Service
+	store    *packageStore
+	upstream *upstreamClient
+	log      *slog.Logger
 }
 
 // serve resolves the operation and dispatches it. Login is the one route that

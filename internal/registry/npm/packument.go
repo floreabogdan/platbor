@@ -3,20 +3,25 @@ package npm
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
-
-	"github.com/platbor/platbor/internal/core/blob"
 )
 
-// getPackument answers `npm install`'s metadata request: the package document
-// with every version and the current dist-tags. Each version's dist.tarball is
-// rewritten to point at this server, and dist.shasum/integrity are stamped with
-// the authoritative digests computed at publish time.
+// getPackument answers `npm install`'s metadata request. For a proxy project it
+// fetches fresh from the upstream (falling back to cache when offline); for a
+// local project it rebuilds the packument from stored versions and dist-tags.
 func (h *handler) getPackument(w http.ResponseWriter, r *http.Request, project, repo, pkg string) {
 	projectID, ok := h.resolveProject(w, r, project)
 	if !ok {
+		return
+	}
+	up, isProxy, err := h.proxyUpstreamFor(r.Context(), projectID)
+	if err != nil {
+		h.internalError(w, "checking proxy", err)
+		return
+	}
+	if isProxy {
+		h.proxyPackument(w, r, up, projectID, project, repo, pkg)
 		return
 	}
 
@@ -29,7 +34,13 @@ func (h *handler) getPackument(w http.ResponseWriter, r *http.Request, project, 
 		h.internalError(w, "reading packument", err)
 		return
 	}
+	h.writePackument(w, r, project, repo, pkg, versions, distTags)
+}
 
+// writePackument assembles and writes a package document from stored versions,
+// stamping each version's dist with this registry's tarball URL and the
+// authoritative digests computed at publish time.
+func (h *handler) writePackument(w http.ResponseWriter, r *http.Request, project, repo, pkg string, versions []storedVersion, distTags map[string]string) {
 	base := registryBase(r, project, repo)
 	versionMap := make(map[string]json.RawMessage, len(versions))
 	for _, v := range versions {
@@ -40,7 +51,6 @@ func (h *handler) getPackument(w http.ResponseWriter, r *http.Request, project, 
 		}
 		versionMap[v.Version] = patched
 	}
-
 	doc := map[string]any{
 		"_id":       pkg,
 		"name":      pkg,
@@ -81,18 +91,28 @@ func patchVersion(v storedVersion, base, pkg string) (json.RawMessage, error) {
 	return json.Marshal(obj)
 }
 
-// getTarball streams a published version's tarball from the blob store.
+// getTarball serves a version's tarball. For a proxy project it fills the cache
+// from the upstream on a miss; for a local project it streams from the store.
 func (h *handler) getTarball(w http.ResponseWriter, r *http.Request, project, repo, pkg, filename string) {
 	projectID, ok := h.resolveProject(w, r, project)
 	if !ok {
 		return
 	}
+	up, isProxy, err := h.proxyUpstreamFor(r.Context(), projectID)
+	if err != nil {
+		h.internalError(w, "checking proxy", err)
+		return
+	}
+	if isProxy {
+		h.proxyTarball(w, r, up, projectID, repo, pkg, filename)
+		return
+	}
+
 	version, ok := versionFromFilename(pkg, filename)
 	if !ok {
 		writeError(w, h.log, http.StatusNotFound, "not found")
 		return
 	}
-
 	digest, size, err := h.store.tarball(r.Context(), projectID, repo, pkg, version)
 	if err != nil {
 		if errors.Is(err, ErrPackageNotFound) {
@@ -102,27 +122,7 @@ func (h *handler) getTarball(w http.ResponseWriter, r *http.Request, project, re
 		h.internalError(w, "resolving tarball", err)
 		return
 	}
-
-	rc, err := h.blobs.Open(r.Context(), digest)
-	if err != nil {
-		if errors.Is(err, blob.ErrNotFound) {
-			writeError(w, h.log, http.StatusNotFound, "not found")
-			return
-		}
-		h.internalError(w, "opening tarball", err)
-		return
-	}
-	defer func() { _ = rc.Close() }()
-
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-	if r.Method == http.MethodHead {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	if _, err := io.Copy(w, rc); err != nil {
-		h.log.Error("streaming tarball", "error", err.Error())
-	}
+	h.streamBlob(w, r, digest, size)
 }
 
 // tarballURL builds the canonical download URL for a version:
@@ -140,3 +140,5 @@ func jsonString(s string) json.RawMessage {
 	b, _ := json.Marshal(s)
 	return b
 }
+
+func itoa(n int64) string { return strconv.FormatInt(n, 10) }

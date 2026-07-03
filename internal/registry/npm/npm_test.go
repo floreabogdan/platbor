@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -334,6 +335,106 @@ func TestIntegrityMismatchRejected(t *testing.T) {
 	rr := h.do(t, http.MethodPut, base+"/pkg", tampered, tok)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("tampered publish: status = %d, want 400", rr.Code)
+	}
+}
+
+// fakeUpstream is a stand-in npm registry: it serves one package's packument
+// and tarball, counts tarball hits (to prove caching), and can be switched
+// offline to exercise the cache fallback.
+type fakeUpstream struct {
+	server      *httptest.Server
+	tarball     []byte
+	tarballHits int
+	offline     bool
+}
+
+func newFakeUpstream(t *testing.T, name, version string, tarball []byte) *fakeUpstream {
+	t.Helper()
+	f := &fakeUpstream{tarball: tarball}
+	filename := name + "-" + version + ".tgz"
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		filename = name[i+1:] + "-" + version + ".tgz"
+	}
+	mux := http.NewServeMux()
+	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if f.offline {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
+	mux.HandleFunc("/"+name+"/-/"+filename, func(w http.ResponseWriter, _ *http.Request) {
+		f.tarballHits++
+		_, _ = w.Write(f.tarball)
+	})
+	mux.HandleFunc("/"+name, func(w http.ResponseWriter, _ *http.Request) {
+		doc := map[string]any{
+			"name":      name,
+			"dist-tags": map[string]string{"latest": version},
+			"versions": map[string]any{
+				version: map[string]any{
+					"name": name, "version": version,
+					"dist": map[string]any{"tarball": f.server.URL + "/" + name + "/-/" + filename},
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(doc)
+	})
+	t.Cleanup(f.server.Close)
+	return f
+}
+
+func TestProxyPullThrough(t *testing.T) {
+	h := newHarness(t)
+	tok := h.token(t)
+	tarball := []byte("upstream-tarball-content")
+	up := newFakeUpstream(t, "left-pad", "1.0.0", tarball)
+
+	// A proxy project mirroring the fake upstream.
+	if _, err := project.NewService(h.db).Create(context.Background(), project.CreateInput{
+		Key: "up", Name: "Upstream", Actor: "admin",
+		Upstream: &project.Upstream{URL: up.server.URL},
+	}); err != nil {
+		t.Fatalf("create proxy: %v", err)
+	}
+
+	// Packument is fetched fresh and its tarball URL rewritten to us.
+	pk := h.do(t, http.MethodGet, "/npm/up/cache/left-pad", nil, tok)
+	if pk.Code != http.StatusOK {
+		t.Fatalf("proxy packument: status = %d (%s)", pk.Code, pk.Body.String())
+	}
+	var doc struct {
+		Versions map[string]struct {
+			Dist struct {
+				Tarball string `json:"tarball"`
+			} `json:"dist"`
+		} `json:"versions"`
+	}
+	_ = json.Unmarshal(pk.Body.Bytes(), &doc)
+	want := "http://localhost:8099/npm/up/cache/left-pad/-/left-pad-1.0.0.tgz"
+	if got := doc.Versions["1.0.0"].Dist.Tarball; got != want {
+		t.Errorf("rewritten tarball URL = %q, want %q", got, want)
+	}
+
+	// First tarball GET fills the cache from upstream; second is a local hit.
+	for i := 0; i < 2; i++ {
+		dl := h.do(t, http.MethodGet, "/npm/up/cache/left-pad/-/left-pad-1.0.0.tgz", nil, tok)
+		if dl.Code != http.StatusOK || !bytes.Equal(dl.Body.Bytes(), tarball) {
+			t.Fatalf("tarball GET #%d: status=%d match=%v", i, dl.Code, bytes.Equal(dl.Body.Bytes(), tarball))
+		}
+	}
+	if up.tarballHits != 1 {
+		t.Errorf("upstream tarball fetched %d times; want 1 (cached after first)", up.tarballHits)
+	}
+
+	// Offline: the packument falls back to the cached version.
+	up.offline = true
+	off := h.do(t, http.MethodGet, "/npm/up/cache/left-pad", nil, tok)
+	if off.Code != http.StatusOK {
+		t.Fatalf("offline packument: status = %d, want cached 200", off.Code)
+	}
+	if !bytes.Contains(off.Body.Bytes(), []byte("1.0.0")) {
+		t.Errorf("offline packument missing cached version: %s", off.Body.String())
 	}
 }
 

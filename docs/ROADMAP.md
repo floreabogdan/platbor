@@ -34,7 +34,7 @@ Goal: a real container registry. This is the hardest protocol and the anchor fea
 
 Goal: npm, NuGet, generic — each with local + proxy repos.
 
-- [~] npm: publish, install, dist-tags, scoped packages, `npm login` token flow all done and verified against the real `npm` CLI (v10) under `/npm/<project>/<repo>`; tarballs share the content-addressable blob store (GC generalized to mark them across formats). Pull-through proxy of registry.npmjs.org still pending.
+- [x] npm: publish, install, dist-tags, scoped packages, `npm login` token flow, and a pull-through proxy of registry.npmjs.org — all under `/npm/<project>/<repo>`, verified against the real `npm` CLI (v10) including `npm install` through the proxy against live npmjs. Tarballs share the content-addressable blob store (GC generalized to mark them across formats); the proxy fetches the packument fresh (falling back to cache when the upstream is offline) and caches immutable tarballs lazily on first pull.
 - [ ] NuGet: v3 service index, push, search, package metadata; proxy of api.nuget.org
 - [ ] Generic: PUT/GET versioned files, checksums
 - [ ] Retention policies: keep-last-N, untagged cleanup (shared policy engine, per-repo config)

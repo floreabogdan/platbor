@@ -59,14 +59,65 @@ func (s *packageStore) resolveProject(ctx context.Context, key string) (string, 
 // isProxy reports whether a project is a pull-through mirror, used to reject
 // writes (a proxy is read-only).
 func (s *packageStore) isProxy(ctx context.Context, projectID string) (bool, error) {
-	_, err := s.q.GetProxyByProjectID(ctx, projectID)
+	_, _, err := s.proxyUpstream(ctx, projectID)
+	if errors.Is(err, errNotProxy) {
+		return false, nil
+	}
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
-		}
-		return false, fmt.Errorf("loading proxy config: %w", err)
+		return false, err
 	}
 	return true, nil
+}
+
+// errNotProxy is an internal sentinel: the project is an ordinary local project,
+// not a proxy. Callers translate it to "no upstream".
+var errNotProxy = errors.New("not a proxy project")
+
+// proxyUpstream returns the upstream a project mirrors, or errNotProxy when the
+// project is an ordinary local project.
+func (s *packageStore) proxyUpstream(ctx context.Context, projectID string) (upstream, bool, error) {
+	row, err := s.q.GetProxyByProjectID(ctx, projectID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return upstream{}, false, errNotProxy
+		}
+		return upstream{}, false, fmt.Errorf("loading proxy config: %w", err)
+	}
+	return upstream{BaseURL: row.UpstreamUrl, Username: row.Username, Password: row.Password}, true, nil
+}
+
+// cacheVersion stores a proxied version and its tarball digest, deduping if it
+// already exists. A cache fill is not a user mutation, so it writes no audit
+// entry (unlike publish).
+func (s *packageStore) cacheVersion(ctx context.Context, in versionInput, projectID, repo, name string) error {
+	ts := s.now().Format(time.RFC3339Nano)
+	return s.inTx(ctx, func(qtx *db.Queries) error {
+		pkgID, err := qtx.UpsertNpmPackage(ctx, db.UpsertNpmPackageParams{
+			ID:         id.New("npmpkg"),
+			ProjectID:  projectID,
+			Repository: repo,
+			Name:       name,
+			CreatedAt:  ts,
+			UpdatedAt:  ts,
+		})
+		if err != nil {
+			return fmt.Errorf("upserting package: %w", err)
+		}
+		if err := qtx.InsertNpmVersion(ctx, db.InsertNpmVersionParams{
+			ID:            id.New("npmver"),
+			PackageID:     pkgID,
+			Version:       in.Version,
+			Manifest:      in.Manifest,
+			TarballDigest: in.TarballDigest,
+			TarballSize:   in.TarballSize,
+			Shasum:        in.Shasum,
+			Integrity:     in.Integrity,
+			CreatedAt:     ts,
+		}); err != nil {
+			return fmt.Errorf("caching version: %w", err)
+		}
+		return nil
+	})
 }
 
 // versionInput is one published version: its metadata document (stored verbatim)
