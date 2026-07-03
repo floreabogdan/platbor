@@ -11,6 +11,7 @@ import (
 
 	"github.com/platbor/platbor/internal/core/audit"
 	"github.com/platbor/platbor/internal/registry"
+	"github.com/platbor/platbor/internal/registry/generic"
 	"github.com/platbor/platbor/internal/registry/npm"
 	"github.com/platbor/platbor/internal/registry/oci"
 )
@@ -53,7 +54,7 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 				browser:   oci.NewBrowser(api.DB),
 				packages:  npm.NewBrowser(api.DB),
 				manager:   oci.NewManager(api.DB),
-				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB)),
+				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB), generic.NewReferencer(api.DB)),
 				projects:  api.Projects,
 				log:       log,
 			}.mount)
@@ -74,6 +75,9 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 	})
 	r.Route("/npm", func(sub chi.Router) {
 		npm.New().Mount(sub, deps)
+	})
+	r.Route("/generic", func(sub chi.Router) {
+		generic.New().Mount(sub, deps)
 	})
 
 	// Everything else falls through to the embedded SPA.

@@ -29,6 +29,20 @@ type AuditLog struct {
 	CreatedAt  string         `json:"created_at"`
 }
 
+type GenericFile struct {
+	ID         string `json:"id"`
+	ProjectID  string `json:"project_id"`
+	Repository string `json:"repository"`
+	Path       string `json:"path"`
+	BlobDigest string `json:"blob_digest"`
+	Size       int64  `json:"size"`
+	Sha256     string `json:"sha256"`
+	Sha1       string `json:"sha1"`
+	Md5        string `json:"md5"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
 type NpmDistTag struct {
 	PackageID string `json:"package_id"`
 	Tag       string `json:"tag"`

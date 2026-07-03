@@ -21,12 +21,14 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, expiresAt string) error
+	DeleteGenericFile(ctx context.Context, arg DeleteGenericFileParams) (int64, error)
 	DeleteManifest(ctx context.Context, arg DeleteManifestParams) (int64, error)
 	DeleteNpmDistTag(ctx context.Context, arg DeleteNpmDistTagParams) (int64, error)
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash string) error
 	DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error)
 	DeleteTagsForDigest(ctx context.Context, arg DeleteTagsForDigestParams) error
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (GetAPITokenByHashRow, error)
+	GetGenericFile(ctx context.Context, arg GetGenericFileParams) (GenericFile, error)
 	GetManifest(ctx context.Context, arg GetManifestParams) (OciManifest, error)
 	GetNpmPackage(ctx context.Context, arg GetNpmPackageParams) (NpmPackage, error)
 	// The blob digest and size for one package version's tarball, to serve it.
@@ -43,6 +45,9 @@ type Querier interface {
 	// the handler) is a no-op rather than a transaction error.
 	InsertNpmVersion(ctx context.Context, arg InsertNpmVersionParams) error
 	ListAPITokensByUser(ctx context.Context, userID string) ([]ApiToken, error)
+	// Every generic file across all projects, with a proxy flag, for the registry
+	// browser's generic index. is_proxy is 1 when the file's project is a mirror.
+	ListAllGenericFiles(ctx context.Context) ([]ListAllGenericFilesRow, error)
 	// Every npm package across all projects, with version count, total tarball size,
 	// and a proxy flag, for the registry browser's package index. is_proxy is 1 when
 	// the package's project is a pull-through mirror.
@@ -54,6 +59,9 @@ type Querier interface {
 	// it Local vs Proxy without a second query.
 	ListAllRepositories(ctx context.Context) ([]ListAllRepositoriesRow, error)
 	ListAuditByProject(ctx context.Context, arg ListAuditByProjectParams) ([]AuditLog, error)
+	// Distinct blob digests every generic file references, for garbage collection to
+	// mark them alongside OCI manifests and npm tarballs (shared CAS across formats).
+	ListGenericBlobDigests(ctx context.Context) ([]string, error)
 	// Every manifest's raw bytes, for garbage collection to mark the config and
 	// layer blobs each one references. Blobs are a global CAS, so this spans all
 	// projects.
@@ -91,6 +99,9 @@ type Querier interface {
 	// Whether a specific version is already published. npm forbids overwriting a
 	// published version, so the handler rejects a re-publish before inserting.
 	NpmVersionExists(ctx context.Context, arg NpmVersionExistsParams) (int64, error)
+	// Store a file at a path, replacing any existing file there (generic paths are
+	// mutable: a re-upload overwrites). created_at is preserved on overwrite.
+	UpsertGenericFile(ctx context.Context, arg UpsertGenericFileParams) error
 	// Store a manifest by digest. Re-pushing identical content is a no-op, so an
 	// image can be tagged repeatedly without duplicating the payload. subject and
 	// artifact_type are denormalized from the payload for the referrers API.
