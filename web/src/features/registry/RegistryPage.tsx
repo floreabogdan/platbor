@@ -283,18 +283,24 @@ function GroupedTable({
                 }}
                 className="cursor-pointer border-b border-slate-200/70 bg-slate-50/60 transition-colors hover:bg-slate-100/70"
               >
-                <td colSpan={6} className="px-4 py-2.5">
+                {/* Name + count on the left; the group's total size aligns under
+                    the Size column, directly above the per-repo sizes. */}
+                <td colSpan={4} className="px-4 py-2.5">
                   <div className="flex items-center gap-2">
                     <span className="text-slate-400">{open ? '▾' : '▸'}</span>
                     <span className="font-semibold text-slate-900">{g.name}</span>
                     <span className="rounded-md bg-slate-200/70 px-1.5 py-0.5 font-mono text-xs text-slate-600">
                       {g.key}
                     </span>
-                    <span className="ml-auto font-mono text-xs text-slate-400">
-                      {g.repos.length} {g.repos.length === 1 ? 'repo' : 'repos'} · {formatBytes(g.sizeBytes)}
+                    <span className="font-mono text-xs text-slate-400">
+                      {g.repos.length} {g.repos.length === 1 ? 'repo' : 'repos'}
                     </span>
                   </div>
                 </td>
+                <td className="px-4 py-2.5 text-right font-mono text-xs tabular-nums text-slate-500">
+                  {formatBytes(g.sizeBytes)}
+                </td>
+                <td className="px-4 py-2.5" />
               </tr>
               {open
                 ? g.repos.map((repo) => (
