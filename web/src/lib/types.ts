@@ -154,6 +154,23 @@ export interface NpmPackageVersion {
   publishedAt: string;
 }
 
+/** MemberRole — a user's role within a project, in increasing privilege. */
+export type MemberRole = 'reader' | 'maintainer' | 'admin';
+
+/** Member — a user with a role in a project. */
+export interface Member {
+  username: string;
+  email: string;
+  role: MemberRole;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** ListMembersResponse — a project's members. */
+export interface ListMembersResponse {
+  members: Member[];
+}
+
 /** NpmPackageDetail — a package with its versions (newest first) and dist-tags. */
 export interface NpmPackageDetail {
   name: string;

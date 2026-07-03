@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/platbor/platbor/internal/core/auth"
 	"github.com/platbor/platbor/internal/core/project"
 	"github.com/platbor/platbor/internal/core/repository"
 )
@@ -17,15 +18,19 @@ import (
 type repositoriesHandler struct {
 	repos    *repository.Service
 	projects *project.Service
+	auth     *auth.Service
 	log      *slog.Logger
 }
 
 func (h repositoriesHandler) mount(r chi.Router) {
+	// Reads are open to any authenticated user (single-org visibility); only
+	// configuration requires the project admin role.
+	manage := requireProjectManage(h.projects, h.auth)
 	r.Get("/", h.list)
-	r.With(requireAdmin).Post("/", h.create)
+	r.With(manage).Post("/", h.create)
 	r.Get("/{repo}", h.get)
-	r.With(requireAdmin).Put("/{repo}", h.update)
-	r.With(requireAdmin).Delete("/{repo}", h.delete)
+	r.With(manage).Put("/{repo}", h.update)
+	r.With(manage).Delete("/{repo}", h.delete)
 }
 
 // --- wire shapes ---

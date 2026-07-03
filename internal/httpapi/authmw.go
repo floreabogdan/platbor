@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/platbor/platbor/internal/core/auth"
+	"github.com/platbor/platbor/internal/core/project"
 )
 
 // authenticate attaches the user to the request context using either an
@@ -87,4 +90,34 @@ func requireAdmin(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// requireProjectManage authorizes the caller to configure the project named by
+// the {project} URL param: an instance admin, or a project admin. It answers 401
+// for anonymous requests, 404 for an unknown project, and 403 for a member who
+// lacks the admin role.
+func requireProjectManage(projects *project.Service, authz *auth.Service) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user, ok := userFromContext(r.Context())
+			if !ok {
+				writeProblem(w, http.StatusUnauthorized, "Not authenticated", "a valid session is required")
+				return
+			}
+			proj, err := projects.GetByKey(r.Context(), chi.URLParam(r, "project"))
+			if err != nil {
+				if errors.Is(err, project.ErrNotFound) {
+					writeProblem(w, http.StatusNotFound, "Project not found", "no such project")
+					return
+				}
+				writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+				return
+			}
+			if err := authz.Authorize(r.Context(), user, proj.ID, auth.ActionManage); err != nil {
+				writeProblem(w, http.StatusForbidden, "Forbidden", "project admin role required")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

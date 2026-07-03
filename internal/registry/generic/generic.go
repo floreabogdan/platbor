@@ -117,6 +117,9 @@ func (h *handler) resolveRepo(w http.ResponseWriter, r *http.Request, project, r
 		h.internalError(w, "resolving project", err)
 		return repository.Repository{}, false
 	}
+	if !h.authorize(w, r, projectID, write) {
+		return repository.Repository{}, false
+	}
 	var repo repository.Repository
 	if write {
 		repo, err = h.repos.ResolveOrCreate(r.Context(), projectID, repoKey, repository.FormatGeneric, actorFrom(r), allowAutoCreate)
@@ -136,6 +139,21 @@ func (h *handler) resolveRepo(w http.ResponseWriter, r *http.Request, project, r
 		h.internalError(w, "resolving repository", err)
 	}
 	return repository.Repository{}, false
+}
+
+// authorize enforces the caller's project role: reads need reader, writes need
+// maintainer (instance admins bypass). It writes a 403 and returns false on deny.
+func (h *handler) authorize(w http.ResponseWriter, r *http.Request, projectID string, write bool) bool {
+	action := auth.ActionRead
+	if write {
+		action = auth.ActionWrite
+	}
+	user, _ := userFromContext(r.Context())
+	if err := h.auth.Authorize(r.Context(), user, projectID, action); err != nil {
+		writeError(w, http.StatusForbidden, "insufficient permissions for this project")
+		return false
+	}
+	return true
 }
 
 // upload streams the request body into the blob store while computing its

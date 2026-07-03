@@ -9,14 +9,16 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/platbor/platbor/internal/core/auth"
 	"github.com/platbor/platbor/internal/core/project"
 )
 
 // projectsHandler serves the /api/v1/projects endpoints. It stays thin: decode,
 // call the service, encode — mapping domain errors to status codes.
 type projectsHandler struct {
-	svc *project.Service
-	log *slog.Logger
+	svc  *project.Service
+	auth *auth.Service
+	log  *slog.Logger
 }
 
 func (h projectsHandler) mount(r chi.Router) {
@@ -112,6 +114,15 @@ func (h projectsHandler) create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeCreateError(w, err)
 		return
+	}
+
+	// The creator owns the project: enroll them as its admin so a non-instance
+	// admin can manage what they just created. Best-effort — instance admins
+	// retain access regardless, so a failure here is logged, not fatal.
+	if user, ok := userFromContext(r.Context()); ok {
+		if err := h.auth.SetMember(r.Context(), created.ID, user.ID, auth.RoleAdmin); err != nil {
+			h.log.Error("enrolling project creator as admin", slog.String("error", err.Error()))
+		}
 	}
 
 	w.Header().Set("Location", "/api/v1/projects/"+created.Key)

@@ -494,6 +494,70 @@ func TestBrowse(t *testing.T) {
 	}
 }
 
+// TestRBACEnforced proves project roles gate the protocol: a reader may pull but
+// not publish, a maintainer may publish, and a non-member is denied entirely.
+// Instance admins bypass roles (the harness's admin seeds the package).
+func TestRBACEnforced(t *testing.T) {
+	h := newHarness(t)
+	admin := h.token(t)
+	const repoBase = "/npm/npm-local/lib"
+	pid := rbacProjectID(t, h, "npm-local")
+
+	// Seed a package as the instance admin.
+	if rr := h.do(t, http.MethodPut, repoBase+"/rbac-pkg", publishBody("rbac-pkg", "1.0.0", []byte("x")), admin); rr.Code != http.StatusCreated {
+		t.Fatalf("seed publish: %d (%s)", rr.Code, rr.Body.String())
+	}
+
+	reader := rbacUserToken(t, h, "reader1", auth.RoleReader, pid)
+	maintainer := rbacUserToken(t, h, "maint1", auth.RoleMaintainer, pid)
+	stranger := rbacUserToken(t, h, "stranger1", "", pid) // no membership
+
+	// Reader can read the package.
+	if rr := h.do(t, http.MethodGet, repoBase+"/rbac-pkg", nil, reader); rr.Code != http.StatusOK {
+		t.Errorf("reader GET: %d, want 200", rr.Code)
+	}
+	// Reader cannot publish.
+	if rr := h.do(t, http.MethodPut, repoBase+"/reader-pkg", publishBody("reader-pkg", "1.0.0", []byte("y")), reader); rr.Code != http.StatusForbidden {
+		t.Errorf("reader publish: %d, want 403", rr.Code)
+	}
+	// Maintainer can publish.
+	if rr := h.do(t, http.MethodPut, repoBase+"/maint-pkg", publishBody("maint-pkg", "1.0.0", []byte("z")), maintainer); rr.Code != http.StatusCreated {
+		t.Errorf("maintainer publish: %d, want 201 (%s)", rr.Code, rr.Body.String())
+	}
+	// A non-member is denied even reads.
+	if rr := h.do(t, http.MethodGet, repoBase+"/rbac-pkg", nil, stranger); rr.Code != http.StatusForbidden {
+		t.Errorf("non-member GET: %d, want 403", rr.Code)
+	}
+}
+
+func rbacUserToken(t *testing.T, h *harness, username string, role auth.Role, projectID string) string {
+	t.Helper()
+	ctx := context.Background()
+	u, err := h.auth.CreateUser(ctx, username, "", "pw", false)
+	if err != nil {
+		t.Fatalf("CreateUser %s: %v", username, err)
+	}
+	if role != "" {
+		if err := h.auth.SetMember(ctx, projectID, u.ID, role); err != nil {
+			t.Fatalf("SetMember %s: %v", username, err)
+		}
+	}
+	raw, _, err := h.auth.CreateToken(ctx, u.ID, username, "test", 0)
+	if err != nil {
+		t.Fatalf("CreateToken %s: %v", username, err)
+	}
+	return raw
+}
+
+func rbacProjectID(t *testing.T, h *harness, key string) string {
+	t.Helper()
+	p, err := project.NewService(h.db).GetByKey(context.Background(), key)
+	if err != nil {
+		t.Fatalf("GetByKey %s: %v", key, err)
+	}
+	return p.ID
+}
+
 // TestGCKeepsNpmTarballs proves the collector marks npm tarball blobs so a sweep
 // never deletes live package content — the cross-format GC guarantee.
 func TestGCKeepsNpmTarballs(t *testing.T) {

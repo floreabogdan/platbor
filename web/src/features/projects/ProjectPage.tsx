@@ -8,6 +8,7 @@ import { useAuth } from '../../lib/auth';
 import { cx } from '../../lib/cx';
 import { formatDate } from '../../lib/format';
 import type { Repo, RepoFormat } from '../../lib/types';
+import { MembersPanel } from './MembersPanel';
 import { RepositoryModal } from './RepositoryModal';
 import { useProjects } from './useProjects';
 import { useRepositories } from './useRepositories';
@@ -105,6 +106,8 @@ export function ProjectPage() {
           </table>
         </Card>
       ) : null}
+
+      <MembersPanel projectKey={key} />
 
       {creating ? (
         <RepositoryModal projectKey={key} onClose={() => setCreating(false)} onSaved={() => void reload()} />

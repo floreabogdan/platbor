@@ -26,6 +26,7 @@ type Querier interface {
 	DeleteNpmDistTag(ctx context.Context, arg DeleteNpmDistTagParams) (int64, error)
 	DeleteNpmVersion(ctx context.Context, arg DeleteNpmVersionParams) (int64, error)
 	DeleteNugetVersion(ctx context.Context, arg DeleteNugetVersionParams) (int64, error)
+	DeleteProjectMember(ctx context.Context, arg DeleteProjectMemberParams) (int64, error)
 	DeleteRepository(ctx context.Context, arg DeleteRepositoryParams) (int64, error)
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash string) error
 	DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error)
@@ -41,6 +42,8 @@ type Querier interface {
 	GetNugetPackage(ctx context.Context, arg GetNugetPackageParams) (NugetPackage, error)
 	GetProjectByID(ctx context.Context, id string) (Project, error)
 	GetProjectByKey(ctx context.Context, key string) (Project, error)
+	// The user's role in a project; no row means no membership (no access).
+	GetProjectMemberRole(ctx context.Context, arg GetProjectMemberRoleParams) (string, error)
 	GetRepository(ctx context.Context, arg GetRepositoryParams) (Repository, error)
 	GetRepositoryByID(ctx context.Context, id string) (Repository, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (GetSessionByTokenHashRow, error)
@@ -102,6 +105,8 @@ type Querier interface {
 	// Every version in a repository, grouped by package and newest first, for
 	// keep-last-N pruning.
 	ListNugetVersionsForRetention(ctx context.Context, repositoryID string) ([]ListNugetVersionsForRetentionRow, error)
+	// Every member of a project with their account, ordered by username.
+	ListProjectMembers(ctx context.Context, projectID string) ([]ListProjectMembersRow, error)
 	// Keyset pagination on the unique `key` column. The first page passes the empty
 	// string, which sorts before any valid key, so a single query serves both the
 	// first page and subsequent pages.
@@ -152,6 +157,8 @@ type Querier interface {
 	// Ensure the package row for (repository, id_lower) exists, returning its id.
 	// Pushing a new version of an existing package bumps updated_at.
 	UpsertNugetPackage(ctx context.Context, arg UpsertNugetPackageParams) (string, error)
+	// Grant a user a role in a project, or change their existing role.
+	UpsertProjectMember(ctx context.Context, arg UpsertProjectMemberParams) error
 	UpsertTag(ctx context.Context, arg UpsertTagParams) error
 }
 

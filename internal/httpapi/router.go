@@ -51,9 +51,15 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(requireUser)
 			r.Route("/tokens", tokensHandler{svc: api.Auth, log: log}.mount)
-			r.Route("/projects", projectsHandler{svc: api.Projects, log: log}.mount)
+			r.Route("/projects", projectsHandler{svc: api.Projects, auth: api.Auth, log: log}.mount)
 			r.Route("/projects/{project}/repositories", repositoriesHandler{
 				repos:    repository.NewService(api.DB),
+				projects: api.Projects,
+				auth:     api.Auth,
+				log:      log,
+			}.mount)
+			r.Route("/projects/{project}/members", membersHandler{
+				auth:     api.Auth,
 				projects: api.Projects,
 				log:      log,
 			}.mount)

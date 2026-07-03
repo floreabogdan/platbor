@@ -6,6 +6,7 @@ import type {
   DashboardResponse,
   GCResult,
   ListGenericFilesResponse,
+  ListMembersResponse,
   ListNugetsResponse,
   ListPackagesResponse,
   ListProjectsResponse,
@@ -14,6 +15,8 @@ import type {
   ListRepositoriesResponse,
   ListTagsResponse,
   ManifestDetail,
+  Member,
+  MemberRole,
   NpmPackageDetail,
   NugetPackageDetail,
   Problem,
@@ -110,6 +113,21 @@ export const api = {
 
   deleteRepo: (project: string, repo: string): Promise<void> =>
     request<undefined>(`/projects/${encodeURIComponent(project)}/repositories/${encodeURIComponent(repo)}`, {
+      method: 'DELETE',
+    }),
+
+  // Members (project RBAC: reader | maintainer | admin)
+  listMembers: (project: string): Promise<ListMembersResponse> =>
+    request<ListMembersResponse>(`/projects/${encodeURIComponent(project)}/members`),
+
+  setMember: (project: string, username: string, role: MemberRole): Promise<Member> =>
+    request<Member>(`/projects/${encodeURIComponent(project)}/members/${encodeURIComponent(username)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    }),
+
+  removeMember: (project: string, username: string): Promise<void> =>
+    request<undefined>(`/projects/${encodeURIComponent(project)}/members/${encodeURIComponent(username)}`, {
       method: 'DELETE',
     }),
 

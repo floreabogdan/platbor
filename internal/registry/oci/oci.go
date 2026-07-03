@@ -70,6 +70,13 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce the caller's project role before dispatching: GET/HEAD read, every
+	// other method writes. This is the one authorization choke point for /v2,
+	// covering the blob path (which resolves repos itself for proxy behaviour).
+	if !h.authorizeName(w, r, p.name, r.Method != http.MethodGet && r.Method != http.MethodHead) {
+		return
+	}
+
 	switch p.kind {
 	case opBlobUpload:
 		h.serveUpload(w, r, p)
@@ -145,6 +152,31 @@ func (h *handler) lookupRepo(ctx context.Context, name string) (repository.Repos
 		return repository.Repository{}, "", false
 	}
 	return repo, image, true
+}
+
+// authorizeName enforces the caller's project role for an OCI name. A malformed
+// name or unknown project is left to the dispatched handler to answer (so a
+// permission check never leaks which projects exist); only a real membership
+// denial short-circuits with 403.
+func (h *handler) authorizeName(w http.ResponseWriter, r *http.Request, name string, write bool) bool {
+	project, _, _, ok := splitName(name)
+	if !ok {
+		return true
+	}
+	projectID, _, err := h.manifests.resolveProject(r.Context(), project)
+	if err != nil {
+		return true // unknown project → defer to the handler's 404
+	}
+	action := auth.ActionRead
+	if write {
+		action = auth.ActionWrite
+	}
+	user, _ := userFromContext(r.Context())
+	if err := h.auth.Authorize(r.Context(), user, projectID, action); err != nil {
+		writeError(w, h.log, http.StatusForbidden, codeDenied, "insufficient permissions for this repository")
+		return false
+	}
+	return true
 }
 
 // requireAuth enforces HTTP Basic auth on every /v2 route, challenging

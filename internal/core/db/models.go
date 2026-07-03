@@ -120,6 +120,14 @@ type Project struct {
 	AllowAutoCreate int64  `json:"allow_auto_create"`
 }
 
+type ProjectMember struct {
+	ProjectID string `json:"project_id"`
+	UserID    string `json:"user_id"`
+	Role      string `json:"role"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
 type Repository struct {
 	ID               string `json:"id"`
 	ProjectID        string `json:"project_id"`

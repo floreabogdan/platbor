@@ -106,6 +106,21 @@ func (h *handler) authenticate(r *http.Request) (auth.User, bool) {
 	return auth.User{}, false
 }
 
+// authorize enforces the caller's project role: reads need reader, writes need
+// maintainer (instance admins bypass). It writes a 403 and returns false on deny.
+func (h *handler) authorize(w http.ResponseWriter, r *http.Request, projectID string, write bool) bool {
+	action := auth.ActionRead
+	if write {
+		action = auth.ActionWrite
+	}
+	user, _ := r.Context().Value(userContextKey).(auth.User)
+	if err := h.auth.Authorize(r.Context(), user, projectID, action); err != nil {
+		writeError(w, http.StatusForbidden, "insufficient permissions for this project")
+		return false
+	}
+	return true
+}
+
 // resolveRepo resolves the {project}/{repo} params to a NuGet repository. On a
 // write it auto-creates a local repo when the project allows it; on a read a
 // missing repo is 404. A format mismatch is rejected.
@@ -119,6 +134,9 @@ func (h *handler) resolveRepo(w http.ResponseWriter, r *http.Request, write bool
 			return repository.Repository{}, false
 		}
 		h.internalError(w, "resolving project", err)
+		return repository.Repository{}, false
+	}
+	if !h.authorize(w, r, projectID, write) {
 		return repository.Repository{}, false
 	}
 	var repo repository.Repository
