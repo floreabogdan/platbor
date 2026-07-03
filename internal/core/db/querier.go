@@ -33,6 +33,9 @@ type Querier interface {
 	GetNpmPackage(ctx context.Context, arg GetNpmPackageParams) (NpmPackage, error)
 	// The blob digest and size for one package version's tarball, to serve it.
 	GetNpmTarball(ctx context.Context, arg GetNpmTarballParams) (GetNpmTarballRow, error)
+	// The blob digest and size for one version's .nupkg, to serve it.
+	GetNugetNupkg(ctx context.Context, arg GetNugetNupkgParams) (GetNugetNupkgRow, error)
+	GetNugetPackage(ctx context.Context, arg GetNugetPackageParams) (NugetPackage, error)
 	GetProjectByID(ctx context.Context, id string) (Project, error)
 	GetProjectByKey(ctx context.Context, key string) (Project, error)
 	GetProxyByProjectID(ctx context.Context, projectID string) (RegistryProxy, error)
@@ -44,6 +47,7 @@ type Querier interface {
 	// Store a published version. First-writer-wins: a duplicate (already rejected at
 	// the handler) is a no-op rather than a transaction error.
 	InsertNpmVersion(ctx context.Context, arg InsertNpmVersionParams) error
+	InsertNugetVersion(ctx context.Context, arg InsertNugetVersionParams) error
 	ListAPITokensByUser(ctx context.Context, userID string) ([]ApiToken, error)
 	// Every generic file across all projects, with a proxy flag, for the registry
 	// browser's generic index. is_proxy is 1 when the file's project is a mirror.
@@ -52,6 +56,9 @@ type Querier interface {
 	// and a proxy flag, for the registry browser's package index. is_proxy is 1 when
 	// the package's project is a pull-through mirror.
 	ListAllNpmPackages(ctx context.Context) ([]ListAllNpmPackagesRow, error)
+	// Every NuGet package across all projects, with version count, total nupkg size,
+	// and a proxy flag, for the registry browser's package index.
+	ListAllNugetPackages(ctx context.Context) ([]ListAllNugetPackagesRow, error)
 	// Every repository across all projects, with tag and manifest counts, for the
 	// registry browser's project-grouped index. A repository exists once it has at
 	// least one manifest. is_proxy is 1 when the repository's project is a
@@ -78,6 +85,12 @@ type Querier interface {
 	// Every published version of a package, oldest first, with the verbatim version
 	// metadata and its tarball's digests, so the packument can be rebuilt.
 	ListNpmVersions(ctx context.Context, arg ListNpmVersionsParams) ([]ListNpmVersionsRow, error)
+	// Distinct nupkg digests every version references, for garbage collection to
+	// mark them alongside the other formats (shared CAS).
+	ListNugetBlobDigests(ctx context.Context) ([]string, error)
+	// Every version of a package, oldest first, with the nuspec and nupkg pointer,
+	// for the flat-container index, registration, and downloads.
+	ListNugetVersions(ctx context.Context, arg ListNugetVersionsParams) ([]ListNugetVersionsRow, error)
 	// Keyset pagination on the unique `key` column. The first page passes the empty
 	// string, which sorts before any valid key, so a single query serves both the
 	// first page and subsequent pages.
@@ -99,6 +112,12 @@ type Querier interface {
 	// Whether a specific version is already published. npm forbids overwriting a
 	// published version, so the handler rejects a re-publish before inserting.
 	NpmVersionExists(ctx context.Context, arg NpmVersionExistsParams) (int64, error)
+	// Whether a specific version is already pushed. NuGet forbids overwriting a
+	// published version, so the handler rejects a re-push before inserting.
+	NugetVersionExists(ctx context.Context, arg NugetVersionExistsParams) (int64, error)
+	// Packages in a project whose id contains the (lowercased) query, newest first,
+	// for the search resource. An empty query matches all.
+	SearchNugetPackages(ctx context.Context, arg SearchNugetPackagesParams) ([]SearchNugetPackagesRow, error)
 	// Store a file at a path, replacing any existing file there (generic paths are
 	// mutable: a re-upload overwrites).
 	UpsertGenericFile(ctx context.Context, arg UpsertGenericFileParams) error
@@ -110,6 +129,9 @@ type Querier interface {
 	// Ensure the package row for (project, name) exists, returning its id.
 	// Publishing a new version of an existing package just bumps updated_at.
 	UpsertNpmPackage(ctx context.Context, arg UpsertNpmPackageParams) (string, error)
+	// Ensure the package row for (project, id_lower) exists, returning its id.
+	// Pushing a new version of an existing package bumps updated_at.
+	UpsertNugetPackage(ctx context.Context, arg UpsertNugetPackageParams) (string, error)
 	UpsertTag(ctx context.Context, arg UpsertTagParams) error
 }
 

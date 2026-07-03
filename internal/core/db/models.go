@@ -69,6 +69,26 @@ type NpmVersion struct {
 	CreatedAt     string `json:"created_at"`
 }
 
+type NugetPackage struct {
+	ID         string `json:"id"`
+	ProjectID  string `json:"project_id"`
+	IDLower    string `json:"id_lower"`
+	IDOriginal string `json:"id_original"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
+type NugetVersion struct {
+	ID           string `json:"id"`
+	PackageID    string `json:"package_id"`
+	Version      string `json:"version"`
+	VersionLower string `json:"version_lower"`
+	NupkgDigest  string `json:"nupkg_digest"`
+	NupkgSize    int64  `json:"nupkg_size"`
+	Nuspec       []byte `json:"nuspec"`
+	CreatedAt    string `json:"created_at"`
+}
+
 type OciManifest struct {
 	ID           string `json:"id"`
 	ProjectID    string `json:"project_id"`
