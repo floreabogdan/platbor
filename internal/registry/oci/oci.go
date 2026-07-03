@@ -14,6 +14,7 @@ import (
 	"github.com/platbor/platbor/internal/core/auth"
 	"github.com/platbor/platbor/internal/core/blob"
 	"github.com/platbor/platbor/internal/registry"
+	"github.com/platbor/platbor/internal/registry/proxy"
 )
 
 const apiVersionHeader = "Docker-Distribution-API-Version"
@@ -33,6 +34,7 @@ func (a *Adapter) Mount(r chi.Router, deps registry.Deps) {
 		blobs:     deps.Blobs,
 		auth:      deps.Auth,
 		manifests: newManifestStore(deps.DB),
+		upstream:  proxy.New(),
 		log:       deps.Log,
 	}
 	r.Use(h.requireAuth)
@@ -44,6 +46,7 @@ type handler struct {
 	blobs     blob.Store
 	auth      *auth.Service
 	manifests *manifestStore
+	upstream  *proxy.Client
 	log       *slog.Logger
 }
 

@@ -1,6 +1,7 @@
 package oci
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -15,9 +16,9 @@ import (
 func (h *handler) serveBlob(w http.ResponseWriter, r *http.Request, p parsedPath) {
 	switch r.Method {
 	case http.MethodHead:
-		h.statBlob(w, r, p.ref, false)
+		h.statBlob(w, r, p, false)
 	case http.MethodGet:
-		h.statBlob(w, r, p.ref, true)
+		h.statBlob(w, r, p, true)
 	case http.MethodDelete:
 		// Inline deletion is unsafe for a shared content-addressable store;
 		// removal is the job of garbage collection.
@@ -28,12 +29,17 @@ func (h *handler) serveBlob(w http.ResponseWriter, r *http.Request, p parsedPath
 }
 
 // statBlob answers HEAD (metadata only) and GET (metadata + content) for a blob.
-func (h *handler) statBlob(w http.ResponseWriter, r *http.Request, digest string, body bool) {
+// On a miss it gives a proxy project a chance to fetch the blob from upstream.
+func (h *handler) statBlob(w http.ResponseWriter, r *http.Request, p parsedPath, body bool) {
+	digest := p.ref
 	if err := blob.ValidateDigest(digest); err != nil {
 		writeError(w, h.log, http.StatusBadRequest, codeDigestInvalid, "invalid digest")
 		return
 	}
 	desc, err := h.blobs.Stat(r.Context(), digest)
+	if errors.Is(err, blob.ErrNotFound) && h.maybeCacheBlob(r.Context(), p.name, digest) {
+		desc, err = h.blobs.Stat(r.Context(), digest)
+	}
 	if err != nil {
 		if errors.Is(err, blob.ErrNotFound) {
 			writeError(w, h.log, http.StatusNotFound, codeBlobUnknown, "blob unknown")
@@ -73,6 +79,12 @@ func (h *handler) statBlob(w http.ResponseWriter, r *http.Request, digest string
 // serveUpload handles the resumable upload endpoints under
 // /v2/<name>/blobs/uploads[/<id>].
 func (h *handler) serveUpload(w http.ResponseWriter, r *http.Request, p parsedPath) {
+	switch r.Method {
+	case http.MethodPost, http.MethodPatch, http.MethodPut:
+		if h.denyProxyWriteByName(w, r, p.name) {
+			return
+		}
+	}
 	if p.ref == "" {
 		if r.Method == http.MethodPost {
 			h.startUpload(w, r, p)
@@ -237,6 +249,44 @@ func (h *handler) setUploadHeaders(w http.ResponseWriter, name, id string, size 
 	w.Header().Set("Location", "/v2/"+name+"/blobs/uploads/"+id)
 	w.Header().Set("Docker-Upload-UUID", id)
 	w.Header().Set("Range", "0-"+strconv.FormatInt(end, 10))
+}
+
+// maybeCacheBlob fetches a missing blob from the upstream when the name belongs
+// to a proxy project, returning whether the blob is now present locally. It is
+// consulted only on a cache miss, so local pulls resolve nothing extra.
+func (h *handler) maybeCacheBlob(ctx context.Context, name, digest string) bool {
+	key, repo, ok := splitName(name)
+	if !ok {
+		return false
+	}
+	projectID, err := h.manifests.resolveProject(ctx, key)
+	if err != nil {
+		return false
+	}
+	up, isProxy, err := h.manifests.proxyUpstream(ctx, projectID)
+	if err != nil || !isProxy {
+		return false
+	}
+	if err := h.cacheBlob(ctx, up, repo, digest); err != nil {
+		h.log.Warn("proxy blob fetch failed",
+			slog.String("repo", repo), slog.String("digest", digest), slog.String("error", err.Error()))
+		return false
+	}
+	return true
+}
+
+// denyProxyWriteByName rejects a write when the name's project exists and is a
+// proxy. A non-existent project falls through to the normal flow.
+func (h *handler) denyProxyWriteByName(w http.ResponseWriter, r *http.Request, name string) bool {
+	key, _, ok := splitName(name)
+	if !ok {
+		return false
+	}
+	projectID, err := h.manifests.resolveProject(r.Context(), key)
+	if err != nil {
+		return false
+	}
+	return h.denyProxyWrite(w, r, projectID)
 }
 
 func (h *handler) uploadLookupError(w http.ResponseWriter, err error) {

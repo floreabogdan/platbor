@@ -118,16 +118,38 @@ func (h *handler) serveManifest(w http.ResponseWriter, r *http.Request, p parsed
 	}
 	switch r.Method {
 	case http.MethodPut:
+		if h.denyProxyWrite(w, r, projectID) {
+			return
+		}
 		h.putManifest(w, r, projectID, repo, p)
 	case http.MethodGet:
 		h.getManifest(w, r, projectID, repo, p, true)
 	case http.MethodHead:
 		h.getManifest(w, r, projectID, repo, p, false)
 	case http.MethodDelete:
+		if h.denyProxyWrite(w, r, projectID) {
+			return
+		}
 		h.deleteManifest(w, r, projectID, repo, p)
 	default:
 		writeError(w, h.log, http.StatusMethodNotAllowed, codeUnsupported, "method not allowed")
 	}
+}
+
+// denyProxyWrite rejects a mutation targeting a pull-through proxy project: a
+// proxy is a read-only mirror, so pushes and deletes are denied. It returns true
+// when it has written the rejection (the caller must stop).
+func (h *handler) denyProxyWrite(w http.ResponseWriter, r *http.Request, projectID string) bool {
+	isProxy, err := h.manifests.isProxy(r.Context(), projectID)
+	if err != nil {
+		h.internalError(w, "checking proxy status", err)
+		return true
+	}
+	if isProxy {
+		writeError(w, h.log, http.StatusMethodNotAllowed, codeDenied, "this project is a pull-through proxy and is read-only")
+		return true
+	}
+	return false
 }
 
 // putManifest stores an uploaded manifest, verifying its digest and that every
@@ -217,29 +239,18 @@ func (h *handler) putManifest(w http.ResponseWriter, r *http.Request, projectID,
 	w.WriteHeader(http.StatusCreated)
 }
 
-// getManifest answers GET (metadata + body) and HEAD (metadata only), resolving
-// a tag to its digest first when the reference is not itself a digest.
+// getManifest answers GET (metadata + body) and HEAD (metadata only). It
+// resolves a tag to its digest and, for a proxy project, fills the cache from
+// the upstream on a miss (see loadManifest).
 func (h *handler) getManifest(w http.ResponseWriter, r *http.Request, projectID, repo string, p parsedPath, body bool) {
-	digest := p.ref
 	if isDigestRef(p.ref) {
 		if err := blob.ValidateDigest(p.ref); err != nil {
 			writeError(w, h.log, http.StatusBadRequest, codeDigestInvalid, "invalid digest")
 			return
 		}
-	} else {
-		resolved, err := h.manifests.resolveTag(r.Context(), projectID, repo, p.ref)
-		if err != nil {
-			if errors.Is(err, ErrManifestNotFound) {
-				writeError(w, h.log, http.StatusNotFound, codeManifestUnknown, "manifest unknown")
-				return
-			}
-			h.internalError(w, "resolving tag", err)
-			return
-		}
-		digest = resolved
 	}
 
-	m, err := h.manifests.getManifest(r.Context(), projectID, repo, digest)
+	m, err := h.loadManifest(r.Context(), projectID, repo, p.ref)
 	if err != nil {
 		if errors.Is(err, ErrManifestNotFound) {
 			writeError(w, h.log, http.StatusNotFound, codeManifestUnknown, "manifest unknown")

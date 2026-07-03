@@ -10,6 +10,7 @@ import (
 
 	"github.com/platbor/platbor/internal/core/db"
 	"github.com/platbor/platbor/internal/core/id"
+	"github.com/platbor/platbor/internal/registry/proxy"
 )
 
 // Store-level sentinels. Handlers translate these into spec error envelopes;
@@ -52,6 +53,31 @@ func (s *manifestStore) resolveProject(ctx context.Context, key string) (string,
 		return "", fmt.Errorf("resolving project %q: %w", key, err)
 	}
 	return row.ID, nil
+}
+
+// proxyUpstream returns the upstream a project mirrors, or ok=false when the
+// project is an ordinary local project. It is consulted only on a cache miss, so
+// local pulls pay nothing for it.
+func (s *manifestStore) proxyUpstream(ctx context.Context, projectID string) (proxy.Upstream, bool, error) {
+	row, err := s.q.GetProxyByProjectID(ctx, projectID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return proxy.Upstream{}, false, nil
+		}
+		return proxy.Upstream{}, false, fmt.Errorf("loading proxy config: %w", err)
+	}
+	return proxy.Upstream{
+		BaseURL:  row.UpstreamUrl,
+		Username: row.Username,
+		Password: row.Password,
+	}, true, nil
+}
+
+// isProxy reports whether a project is a pull-through proxy, used to reject
+// writes (a proxy is a read-only mirror).
+func (s *manifestStore) isProxy(ctx context.Context, projectID string) (bool, error) {
+	_, ok, err := s.proxyUpstream(ctx, projectID)
+	return ok, err
 }
 
 // storedManifest is a manifest read back for serving: its exact bytes plus the
