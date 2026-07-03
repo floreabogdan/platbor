@@ -92,21 +92,32 @@ type Adapter interface {
 
 `Deps` provides the blob store, a metadata service scoped to the repository, and the auth checker. The **proxy** repository type wraps any adapter: on cache miss it fetches from the configured upstream (Docker Hub, registry.npmjs.org, api.nuget.org), stores blobs + metadata, then serves locally. Virtual/group repositories (one URL aggregating local + proxy) are deferred to Phase 4 but the URL scheme reserves space for them.
 
-### Repository URL scheme
+### Projects, repositories, and the URL scheme
 
-The **project is the registry**: each format's artifacts are named directly
-under a project, with no intermediate "repository" container. The artifact's own
-identifier — an OCI repository name, an npm package name, a generic file path —
-follows the project. (An earlier draft nested a redundant `<repo>` segment under
-the project; it was dropped because the artifact already carries its own name.)
+A **project** is the tenant boundary (RBAC, grouping). Inside it live **typed
+repositories** — the configured containers that actually hold artifacts of one
+format. A repository has a `format` (oci, npm, nuget, generic), a `mode` (local,
+or a pull-through `proxy` of an upstream), and its own retention policy. You can
+create and configure a repository *before* pushing, or — when the project's
+`allowAutoCreate` is on (the default) — a push to a new repo path auto-creates a
+local repository of that format. Pushing a second format into an existing
+repository is rejected; a project with `allowAutoCreate` off requires every
+repository to be created explicitly.
+
+Artifacts are addressed as `/<format>/<project>/<repo>/<artifact>`:
 
 ```
-/v2/<project>/<name>/...          OCI (the OCI repository name, possibly slashed, under the project)
-/npm/<project>/<pkg>              npm (project is the registry; packages by name, incl. @scope/name)
-/nuget/<project>/v3/...           NuGet (project is the feed)
-/generic/<project>/<path>         generic (files by path under the project)
-/api/v1/...                       UI + automation API
+/v2/<project>/<repo>/<image>/...      OCI (image name may contain slashes)
+/npm/<project>/<repo>/<pkg>           npm (incl. @scope/name)
+/nuget/<project>/<repo>/v3/...        NuGet (the repo is the feed)
+/generic/<project>/<repo>/<path>      generic (a "bucket" of files)
+/api/v1/...                           UI + automation API
 ```
+
+(An earlier draft made the project itself the registry with no `<repo>` segment;
+it was reintroduced as a first-class, typed, configured entity once repositories
+gained per-repo format/mode/retention — the redundant *empty* level became a
+meaningful one.)
 
 ### Auth
 
