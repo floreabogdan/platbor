@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from '../lib/auth';
 import { LoginPage } from '../features/auth/LoginPage';
 import { DashboardPage } from '../features/dashboard/DashboardPage';
 import { ProjectsPage } from '../features/projects/ProjectsPage';
+import { ProjectPage } from '../features/projects/ProjectPage';
 import { ProfilePage } from '../features/profile/ProfilePage';
 import { RegistryPage } from '../features/registry/RegistryPage';
 import { RepositoryPage } from '../features/registry/RepositoryPage';
@@ -43,6 +44,7 @@ function Gate() {
       <Route element={<Layout />}>
         <Route index element={<DashboardPage />} />
         <Route path="projects" element={<ProjectsPage />} />
+        <Route path="projects/:key" element={<ProjectPage />} />
         <Route path="registry" element={<RegistryPage />} />
         {/* npm and NuGet package detail — reserved sentinel segments ("-" and
             "-nuget-", which an OCI repo name can never start with) keep these

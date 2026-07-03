@@ -15,13 +15,15 @@ export interface DeleteTarget {
 // callers only supply the target and react to completion.
 export function DeleteDialog({
   project,
-  repository,
+  repo,
+  image,
   target,
   onClose,
   onDeleted,
 }: {
   project: string;
-  repository: string;
+  repo: string;
+  image: string;
   target: DeleteTarget;
   onClose: () => void;
   onDeleted: () => void;
@@ -33,7 +35,7 @@ export function DeleteDialog({
     setBusy(true);
     setError(undefined);
     try {
-      await api.deleteManifest(project, repository, target.reference);
+      await api.deleteManifest(project, repo, image, target.reference);
       onDeleted();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Delete failed');
@@ -49,7 +51,7 @@ export function DeleteDialog({
             Delete the tag{' '}
             <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-slate-800">{target.label}</code> from{' '}
             <span className="font-mono text-slate-700">
-              {project}/{repository}
+              {project}/{repo}/{image}
             </span>
             ? The image itself stays if other tags point to it.
           </>
@@ -59,7 +61,7 @@ export function DeleteDialog({
             <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-slate-800">{target.label}</code> and its{' '}
             {target.affectedTags ?? 0} {target.affectedTags === 1 ? 'tag' : 'tags'} from{' '}
             <span className="font-mono text-slate-700">
-              {project}/{repository}
+              {project}/{repo}/{image}
             </span>
             ? This cannot be undone.
           </>

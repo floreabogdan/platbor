@@ -21,7 +21,8 @@ describe('DeleteDialog', () => {
     render(
       <DeleteDialog
         project="library"
-        repository="alpine"
+        repo="images"
+        image="alpine"
         target={{ mode: 'tag', label: 'v1.0', reference: 'v1.0' }}
         onClose={() => {}}
         onDeleted={onDeleted}
@@ -34,14 +35,15 @@ describe('DeleteDialog', () => {
     await waitFor(() => {
       expect(onDeleted).toHaveBeenCalled();
     });
-    expect(deleteManifest).toHaveBeenCalledWith('library', 'alpine', 'v1.0');
+    expect(deleteManifest).toHaveBeenCalledWith('library', 'images', 'alpine', 'v1.0');
   });
 
   it('warns that a manifest delete removes its tags', () => {
     render(
       <DeleteDialog
         project="library"
-        repository="alpine"
+        repo="images"
+        image="alpine"
         target={{ mode: 'manifest', label: 'abc123def456', reference: 'sha256:abc', affectedTags: 2 }}
         onClose={() => {}}
         onDeleted={() => {}}
@@ -58,7 +60,8 @@ describe('DeleteDialog', () => {
     render(
       <DeleteDialog
         project="library"
-        repository="alpine"
+        repo="images"
+        image="alpine"
         target={{ mode: 'tag', label: 'v1.0', reference: 'v1.0' }}
         onClose={() => {}}
         onDeleted={onDeleted}

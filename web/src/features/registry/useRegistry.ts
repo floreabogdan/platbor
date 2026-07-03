@@ -92,7 +92,7 @@ export function useNugets() {
 }
 
 /** useNugetDetail loads one NuGet package's versions. */
-export function useNugetDetail(project: string, id: string) {
+export function useNugetDetail(project: string, repo: string, id: string) {
   const [detail, setDetail] = useState<NugetPackageDetail>();
   const [state, setState] = useState<LoadState>('loading');
   const [error, setError] = useState<string>();
@@ -100,14 +100,14 @@ export function useNugetDetail(project: string, id: string) {
   const reload = useCallback(async () => {
     setState('loading');
     try {
-      const res = await api.getNugetPackage(project, id);
+      const res = await api.getNugetPackage(project, repo, id);
       setDetail(res);
       setState('ready');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load package');
       setState('error');
     }
-  }, [project, id]);
+  }, [project, repo, id]);
 
   useEffect(() => {
     void reload();
@@ -142,7 +142,7 @@ export function useGenericFiles() {
 }
 
 /** usePackageDetail loads one npm package's versions and dist-tags. */
-export function usePackageDetail(project: string, name: string) {
+export function usePackageDetail(project: string, repo: string, name: string) {
   const [detail, setDetail] = useState<NpmPackageDetail>();
   const [state, setState] = useState<LoadState>('loading');
   const [error, setError] = useState<string>();
@@ -150,14 +150,14 @@ export function usePackageDetail(project: string, name: string) {
   const reload = useCallback(async () => {
     setState('loading');
     try {
-      const res = await api.getPackage(project, name);
+      const res = await api.getPackage(project, repo, name);
       setDetail(res);
       setState('ready');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load package');
       setState('error');
     }
-  }, [project, name]);
+  }, [project, repo, name]);
 
   useEffect(() => {
     void reload();
@@ -166,8 +166,8 @@ export function usePackageDetail(project: string, name: string) {
   return { detail, state, error, reload };
 }
 
-/** useRepoTags loads one repository's tags (with per-tag manifest summary). */
-export function useRepoTags(project: string, repository: string) {
+/** useRepoTags loads one image's tags (with per-tag manifest summary). */
+export function useRepoTags(project: string, repo: string, image: string) {
   const [tags, setTags] = useState<TagSummary[]>([]);
   const [state, setState] = useState<LoadState>('loading');
   const [error, setError] = useState<string>();
@@ -175,14 +175,14 @@ export function useRepoTags(project: string, repository: string) {
   const reload = useCallback(async () => {
     setState('loading');
     try {
-      const res = await api.listRepoTags(project, repository);
+      const res = await api.listRepoTags(project, repo, image);
       setTags(res.tags);
       setState('ready');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tags');
       setState('error');
     }
-  }, [project, repository]);
+  }, [project, repo, image]);
 
   useEffect(() => {
     void reload();
@@ -193,7 +193,12 @@ export function useRepoTags(project: string, repository: string) {
 
 /** useManifest loads the detail for the selected reference. With no reference it
  *  stays idle (ready, empty) so the panel can prompt for a selection. */
-export function useManifest(project: string, repository: string, reference: string | undefined) {
+export function useManifest(
+  project: string,
+  repo: string,
+  image: string,
+  reference: string | undefined,
+) {
   const [manifest, setManifest] = useState<ManifestDetail>();
   const [state, setState] = useState<LoadState>('ready');
   const [error, setError] = useState<string>();
@@ -208,7 +213,7 @@ export function useManifest(project: string, repository: string, reference: stri
     setState('loading');
     setError(undefined);
     api
-      .getManifest(project, repository, reference)
+      .getManifest(project, repo, image, reference)
       .then((m) => {
         if (active) {
           setManifest(m);
@@ -224,14 +229,19 @@ export function useManifest(project: string, repository: string, reference: stri
     return () => {
       active = false;
     };
-  }, [project, repository, reference]);
+  }, [project, repo, image, reference]);
 
   return { manifest, state, error };
 }
 
 /** useReferrers loads the artifacts (signatures, SBOMs) attached to a manifest.
  *  With no subject it stays idle so the panel simply shows nothing. */
-export function useReferrers(project: string, repository: string, subject: string | undefined) {
+export function useReferrers(
+  project: string,
+  repo: string,
+  image: string,
+  subject: string | undefined,
+) {
   const [referrers, setReferrers] = useState<Referrer[]>([]);
 
   useEffect(() => {
@@ -241,7 +251,7 @@ export function useReferrers(project: string, repository: string, subject: strin
     }
     let active = true;
     api
-      .listReferrers(project, repository, subject)
+      .listReferrers(project, repo, image, subject)
       .then((res) => {
         if (active) {
           setReferrers(res.referrers);
@@ -255,7 +265,7 @@ export function useReferrers(project: string, repository: string, subject: strin
     return () => {
       active = false;
     };
-  }, [project, repository, subject]);
+  }, [project, repo, image, subject]);
 
   return referrers;
 }

@@ -9,18 +9,14 @@ export interface User {
   createdAt: string;
 }
 
-export interface ProjectUpstream {
-  url: string;
-  username?: string;
-}
-
 export interface Project {
   id: string;
   key: string;
   name: string;
   description: string;
-  kind: 'local' | 'proxy';
-  upstream?: ProjectUpstream;
+  // When true (default), a push to an unknown repo path auto-creates a local
+  // repository of that format; when false, repos must be created before pushing.
+  allowAutoCreate: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -34,11 +30,53 @@ export interface CreateProjectRequest {
   key: string;
   name: string;
   description?: string;
-  upstream?: {
-    url: string;
-    username?: string;
-    password?: string;
-  };
+  allowAutoCreate?: boolean;
+}
+
+// --- Repositories (the typed, configured containers inside a project) ---
+
+export type RepoFormat = 'oci' | 'npm' | 'nuget' | 'generic';
+export type RepoMode = 'local' | 'proxy';
+
+export interface RepoUpstream {
+  url: string;
+  username?: string;
+}
+
+export interface RepoRetention {
+  keepLast: number;
+  deleteUntagged: boolean;
+}
+
+/** Repo — a typed artifact repository inside a project. */
+export interface Repo {
+  key: string;
+  name: string;
+  format: RepoFormat;
+  mode: RepoMode;
+  upstream?: RepoUpstream; // set for proxy repos; password is never returned
+  retention: RepoRetention;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListReposResponse {
+  repositories: Repo[];
+}
+
+export interface CreateRepoRequest {
+  key: string;
+  name: string;
+  format: RepoFormat;
+  mode: RepoMode;
+  upstream?: { url: string; username?: string; password?: string };
+  retention: RepoRetention;
+}
+
+export interface UpdateRepoRequest {
+  name: string;
+  upstream?: { url: string; username?: string; password?: string };
+  retention: RepoRetention;
 }
 
 export interface Token {
@@ -76,8 +114,9 @@ export type ManifestKind = 'image' | 'index';
 export interface Repository {
   projectKey: string;
   projectName: string;
-  repository: string;
-  kind: 'local' | 'proxy'; // proxy = the project mirrors an upstream registry
+  repoKey: string; // the typed repository the image lives in
+  repository: string; // the OCI image name within the repo
+  kind: 'local' | 'proxy'; // proxy = a pull-through mirror of an upstream registry
   tagCount: number;
   manifestCount: number;
   sizeBytes: number;
@@ -94,6 +133,7 @@ export interface ListRepositoriesResponse {
 export interface NpmPackage {
   projectKey: string;
   projectName: string;
+  repoKey: string;
   name: string; // package name, incl. @scope/ prefix
   kind: 'local' | 'proxy';
   versionCount: number;
@@ -127,6 +167,7 @@ export interface NpmPackageDetail {
 export interface NugetPackage {
   projectKey: string;
   projectName: string;
+  repoKey: string;
   id: string;
   kind: 'local' | 'proxy';
   versionCount: number;
@@ -157,6 +198,7 @@ export interface NugetPackageDetail {
 export interface GenericFile {
   projectKey: string;
   projectName: string;
+  repoKey: string;
   path: string;
   kind: 'local' | 'proxy';
   sizeBytes: number;

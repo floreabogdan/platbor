@@ -44,6 +44,7 @@ afterEach(() => {
 const repo = (over: Partial<Repository>): Repository => ({
   projectKey: 'library',
   projectName: 'Library',
+  repoKey: 'images',
   repository: 'alpine',
   kind: 'local',
   tagCount: 1,
@@ -56,6 +57,7 @@ const repo = (over: Partial<Repository>): Repository => ({
 const pkg = (over: Partial<NpmPackage>): NpmPackage => ({
   projectKey: 'library',
   projectName: 'Library',
+  repoKey: 'npm',
   name: 'left-pad',
   kind: 'local',
   versionCount: 1,
@@ -67,6 +69,7 @@ const pkg = (over: Partial<NpmPackage>): NpmPackage => ({
 const nug = (over: Partial<NugetPackage>): NugetPackage => ({
   projectKey: 'library',
   projectName: 'Library',
+  repoKey: 'nuget',
   id: 'Newtonsoft.Json',
   kind: 'local',
   versionCount: 1,
@@ -78,6 +81,7 @@ const nug = (over: Partial<NugetPackage>): NugetPackage => ({
 const gen = (over: Partial<GenericFile>): GenericFile => ({
   projectKey: 'library',
   projectName: 'Library',
+  repoKey: 'files',
   path: 'installers/tool-1.0.0.bin',
   kind: 'local',
   sizeBytes: 0,
@@ -109,18 +113,21 @@ describe('RegistryPage', () => {
 
     // Each format links into its own detail route.
     const alpine = await screen.findByRole('link', { name: 'alpine' });
-    expect(alpine).toHaveAttribute('href', '/registry/library/alpine');
+    expect(alpine).toHaveAttribute('href', '/registry/library/images/alpine');
     const leftPad = screen.getByRole('link', { name: 'left-pad' });
-    expect(leftPad).toHaveAttribute('href', '/registry/library/-/left-pad');
+    expect(leftPad).toHaveAttribute('href', '/registry/library/-/npm/left-pad');
 
     // A per-row format icon distinguishes the two formats.
     expect(screen.getByLabelText('Container image')).toBeInTheDocument();
     expect(screen.getAllByLabelText('npm package').length).toBe(2);
 
-    // Grouped by project (project is a group header, not a per-row column).
+    // Grouped by project (project is a group header, not a per-row column) and
+    // sub-grouped by the repository each artifact lives in.
     const table = within(screen.getByRole('table'));
     expect(table.getByText('Library')).toBeInTheDocument();
     expect(table.getByText('Platform')).toBeInTheDocument();
+    expect(table.getByText('images')).toBeInTheDocument(); // repo sub-header
+    expect(table.getAllByText('npm').length).toBeGreaterThan(0); // repo sub-header
 
     // Rows carry format-appropriate "contents" and a size.
     expect(within(alpine.closest('tr') as HTMLElement).getByText('3 tags')).toBeInTheDocument();
@@ -160,7 +167,7 @@ describe('RegistryPage', () => {
 
     // The NuGet package links into its detail route (the "-nuget-" sentinel).
     const nuget = await screen.findByRole('link', { name: 'Newtonsoft.Json' });
-    expect(nuget).toHaveAttribute('href', '/registry/library/-nuget-/Newtonsoft.Json');
+    expect(nuget).toHaveAttribute('href', '/registry/library/-nuget-/nuget/Newtonsoft.Json');
     expect(screen.getByLabelText('NuGet package')).toBeInTheDocument();
     expect(within(nuget.closest('tr') as HTMLElement).getByText('3 versions')).toBeInTheDocument();
 
@@ -197,7 +204,7 @@ describe('RegistryPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'flat' }));
 
     const cells = within(screen.getByRole('link', { name: 'alpine' }).closest('tr') as HTMLElement);
-    expect(cells.getByText('library')).toBeInTheDocument();
+    expect(cells.getByText('library/images')).toBeInTheDocument();
     expect(screen.getByText('1 artifact')).toBeInTheDocument();
   });
 

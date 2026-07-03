@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button, Card, EmptyState, PageHeader } from '../../components/ui';
-import { ProjectsIcon } from '../../components/icons';
+import { ChevronRightIcon, ProjectsIcon } from '../../components/icons';
 import { formatDate } from '../../lib/format';
 import type { Project } from '../../lib/types';
 import { useProjects } from './useProjects';
@@ -53,32 +54,30 @@ export function ProjectsPage() {
 }
 
 function ProjectCard({ project }: { project: Project }) {
-  const isProxy = project.kind === 'proxy';
   return (
-    <Card className="p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="truncate font-semibold text-slate-900">{project.name}</h3>
-          <span className="mt-1 inline-block rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">
-            {project.key}
-          </span>
+    <Link
+      to={`/projects/${encodeURIComponent(project.key)}`}
+      className="group block rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40"
+    >
+      <Card className="p-5 transition-colors group-hover:border-slate-300">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="truncate font-semibold text-slate-900">{project.name}</h3>
+            <span className="mt-1 inline-block rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600">
+              {project.key}
+            </span>
+          </div>
+          <ChevronRightIcon className="h-4 w-4 shrink-0 text-slate-300 transition-colors group-hover:text-slate-400" />
         </div>
-        {isProxy ? (
-          <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20">
-            Proxy
-          </span>
+        {project.description ? (
+          <p className="mt-3 line-clamp-2 text-sm text-slate-500">{project.description}</p>
         ) : null}
-      </div>
-      {project.description ? (
-        <p className="mt-3 line-clamp-2 text-sm text-slate-500">{project.description}</p>
-      ) : null}
-      {isProxy && project.upstream ? (
-        <p className="mt-3 truncate font-mono text-xs text-slate-500" title={project.upstream.url}>
-          ↳ {project.upstream.url}
-        </p>
-      ) : null}
-      <p className="mt-4 text-xs text-slate-400">Created {formatDate(project.createdAt)}</p>
-    </Card>
+        {!project.allowAutoCreate ? (
+          <p className="mt-3 text-xs text-slate-500">Repositories must be created before pushing.</p>
+        ) : null}
+        <p className="mt-4 text-xs text-slate-400">Created {formatDate(project.createdAt)}</p>
+      </Card>
+    </Link>
   );
 }
 

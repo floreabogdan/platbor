@@ -5,20 +5,21 @@ import { LayersIcon, RegistryIcon } from '../../components/icons';
 import { cx } from '../../lib/cx';
 import { formatBytes, formatDate } from '../../lib/format';
 import type { NpmPackageVersion } from '../../lib/types';
+import { splitRepoAndRest } from './packageRoute';
 import { usePackageDetail } from './useRegistry';
 
 // npm package detail: the versions of a package plus its dist-tags and the
-// registry config + install command a consumer needs. The project is the npm
-// registry, so a package is identified by (project, name); the scoped name
-// arrives as the route splat.
+// registry config + install command a consumer needs. A package lives in a
+// typed repository, so it is identified by (project, repo, name); the route
+// splat carries "<repo>/<name>" (the scoped name keeps its slash).
 export function PackagePage() {
   const params = useParams();
   const project = params.project ?? '';
-  const name = params['*'] ?? '';
+  const { repo, rest: name } = splitRepoAndRest(params['*'] ?? '');
 
-  const { detail, state, error } = usePackageDetail(project, name);
+  const { detail, state, error } = usePackageDetail(project, repo, name);
 
-  if (!project || !name) {
+  if (!project || !repo || !name) {
     return <EmptyState message="No package selected." />;
   }
 
@@ -27,11 +28,11 @@ export function PackagePage() {
       <Breadcrumb
         items={[
           { label: 'Registry', to: '/registry' },
-          { label: project, to: '/registry' },
+          { label: `${project}/${repo}`, to: '/registry' },
           { label: name },
         ]}
       />
-      <PageHeader title={name} subtitle={`npm package in ${project}.`} />
+      <PageHeader title={name} subtitle={`npm package in ${project}/${repo}.`} />
 
       {state === 'loading' ? <Card className="h-40 animate-pulse bg-slate-50" /> : null}
       {state === 'error' ? (
@@ -45,7 +46,7 @@ export function PackagePage() {
           <EmptyState icon={<RegistryIcon className="h-8 w-8" />} message="This package has no versions yet." />
         ) : (
           <div className="space-y-5">
-            <InstallSnippet project={project} name={name} />
+            <InstallSnippet project={project} repo={repo} name={name} />
             {Object.keys(detail.distTags).length > 0 ? <DistTags distTags={detail.distTags} /> : null}
             <VersionsTable versions={detail.versions} distTags={detail.distTags} />
           </div>
@@ -58,8 +59,8 @@ export function PackagePage() {
 // InstallSnippet gives the two commands a consumer needs: point npm at this
 // project's registry, then install. Scoped packages configure a per-scope
 // registry so only that scope resolves here; unscoped packages set the default.
-function InstallSnippet({ project, name }: { project: string; name: string }) {
-  const registry = `${window.location.origin}/npm/${project}/`;
+function InstallSnippet({ project, repo, name }: { project: string; repo: string; name: string }) {
+  const registry = `${window.location.origin}/npm/${project}/${repo}/`;
   const scope = name.startsWith('@') ? name.slice(0, name.indexOf('/')) : '';
   const configCommand = scope
     ? `npm config set ${scope}:registry ${registry}`

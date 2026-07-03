@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button, Card, EmptyState, PageHeader } from '../../components/ui';
@@ -6,7 +6,7 @@ import { FileIcon, NugetIcon, PackageIcon, RegistryIcon, SearchIcon } from '../.
 import { cx } from '../../lib/cx';
 import { formatBytes, formatRelativeTime } from '../../lib/format';
 import type { GenericFile, NpmPackage, NugetPackage, Repository } from '../../lib/types';
-import { nugetHref, packageHref } from './packageRoute';
+import { nugetHref, ociHref, packageHref } from './packageRoute';
 import { useGenericFiles, useNugets, usePackages, useRepositories } from './useRegistry';
 
 // The registry index. It lists every artifact — OCI container images, npm and
@@ -111,7 +111,8 @@ interface Artifact {
   format: Format;
   projectKey: string;
   projectName: string;
-  name: string; // oci: repository; npm/nuget: package name; generic: file path
+  repoKey: string; // the typed repository the artifact lives in
+  name: string; // oci: image; npm/nuget: package name; generic: file path
   kind: 'local' | 'proxy';
   contents: string;
   sizeBytes: number;
@@ -125,13 +126,14 @@ function fromRepository(r: Repository): Artifact {
     format: 'oci',
     projectKey: r.projectKey,
     projectName: r.projectName,
+    repoKey: r.repoKey,
     name: r.repository,
     kind: r.kind,
     contents: `${String(r.tagCount)} ${r.tagCount === 1 ? 'tag' : 'tags'}`,
     sizeBytes: r.sizeBytes,
     updatedAt: r.updatedAt,
-    href: `/registry/${encodeURIComponent(r.projectKey)}/${r.repository}`,
-    key: `oci:${r.projectKey}/${r.repository}`,
+    href: ociHref(r.projectKey, r.repoKey, r.repository),
+    key: `oci:${r.projectKey}/${r.repoKey}/${r.repository}`,
   };
 }
 
@@ -140,13 +142,14 @@ function fromPackage(p: NpmPackage): Artifact {
     format: 'npm',
     projectKey: p.projectKey,
     projectName: p.projectName,
+    repoKey: p.repoKey,
     name: p.name,
     kind: p.kind,
     contents: `${String(p.versionCount)} ${p.versionCount === 1 ? 'version' : 'versions'}`,
     sizeBytes: p.sizeBytes,
     updatedAt: p.updatedAt,
-    href: packageHref(p.projectKey, p.name),
-    key: `npm:${p.projectKey}/${p.name}`,
+    href: packageHref(p.projectKey, p.repoKey, p.name),
+    key: `npm:${p.projectKey}/${p.repoKey}/${p.name}`,
   };
 }
 
@@ -155,13 +158,14 @@ function fromNuget(p: NugetPackage): Artifact {
     format: 'nuget',
     projectKey: p.projectKey,
     projectName: p.projectName,
+    repoKey: p.repoKey,
     name: p.id,
     kind: p.kind,
     contents: `${String(p.versionCount)} ${p.versionCount === 1 ? 'version' : 'versions'}`,
     sizeBytes: p.sizeBytes,
     updatedAt: p.updatedAt,
-    href: nugetHref(p.projectKey, p.id),
-    key: `nuget:${p.projectKey}/${p.id}`,
+    href: nugetHref(p.projectKey, p.repoKey, p.id),
+    key: `nuget:${p.projectKey}/${p.repoKey}/${p.id}`,
   };
 }
 
@@ -170,6 +174,7 @@ function fromGeneric(f: GenericFile): Artifact {
     format: 'generic',
     projectKey: f.projectKey,
     projectName: f.projectName,
+    repoKey: f.repoKey,
     name: f.path,
     kind: f.kind,
     // A generic file is a single file, not a container of versions/tags.
@@ -177,7 +182,7 @@ function fromGeneric(f: GenericFile): Artifact {
     sizeBytes: f.sizeBytes,
     updatedAt: f.updatedAt,
     href: '', // generic files have no detail page — display only
-    key: `generic:${f.projectKey}/${f.path}`,
+    key: `generic:${f.projectKey}/${f.repoKey}/${f.path}`,
   };
 }
 
@@ -219,10 +224,17 @@ function sortArtifacts(list: Artifact[], sort: Sort): Artifact[] {
 type View = 'grouped' | 'flat';
 type FormatFilter = '' | Format;
 
+interface RepoSubGroup {
+  key: string; // repository key
+  artifacts: Artifact[];
+  sizeBytes: number;
+}
+
 interface ProjectGroup {
   key: string;
   name: string;
-  artifacts: Artifact[];
+  repos: RepoSubGroup[];
+  count: number; // total artifacts across the project's repos
   sizeBytes: number;
 }
 
@@ -268,20 +280,37 @@ function ArtifactBrowser({ artifacts }: { artifacts: Artifact[] }) {
 
   const sorted = useMemo(() => sortArtifacts(filtered, sort), [filtered, sort]);
 
-  // Grouped view: bucket the sorted rows by project (so within-group order still
-  // follows the active sort), with project sections in stable key order.
+  // Grouped view: bucket the sorted rows by project, then by the repository they
+  // live in (so within-group order still follows the active sort). Project and
+  // repository sections are in stable key order.
   const groups = useMemo<ProjectGroup[]>(() => {
-    const byKey = new Map<string, ProjectGroup>();
+    const byProject = new Map<string, { name: string; repos: Map<string, RepoSubGroup> }>();
     for (const a of sorted) {
-      let g = byKey.get(a.projectKey);
-      if (!g) {
-        g = { key: a.projectKey, name: a.projectName, artifacts: [], sizeBytes: 0 };
-        byKey.set(a.projectKey, g);
+      let p = byProject.get(a.projectKey);
+      if (!p) {
+        p = { name: a.projectName, repos: new Map() };
+        byProject.set(a.projectKey, p);
       }
-      g.artifacts.push(a);
-      g.sizeBytes += a.sizeBytes;
+      let r = p.repos.get(a.repoKey);
+      if (!r) {
+        r = { key: a.repoKey, artifacts: [], sizeBytes: 0 };
+        p.repos.set(a.repoKey, r);
+      }
+      r.artifacts.push(a);
+      r.sizeBytes += a.sizeBytes;
     }
-    return [...byKey.values()].sort((a, b) => a.key.localeCompare(b.key));
+    return [...byProject.entries()]
+      .map(([key, p]) => {
+        const repos = [...p.repos.values()].sort((a, b) => a.key.localeCompare(b.key));
+        return {
+          key,
+          name: p.name,
+          repos,
+          count: repos.reduce((n, r) => n + r.artifacts.length, 0),
+          sizeBytes: repos.reduce((n, r) => n + r.sizeBytes, 0),
+        };
+      })
+      .sort((a, b) => a.key.localeCompare(b.key));
   }, [sorted]);
 
   function toggleSort(key: SortKey) {
@@ -405,14 +434,14 @@ function GroupedTable({
           const open = !collapsed.has(g.key);
           return (
             <tbody key={g.key}>
+              {/* Project header: name + rollup on the left; the project's total
+                  size aligns under the Size column, above the per-artifact sizes. */}
               <tr
                 onClick={() => {
                   onToggle(g.key);
                 }}
                 className="cursor-pointer border-b border-slate-200/70 bg-slate-50/60 transition-colors hover:bg-slate-100/70"
               >
-                {/* Name + count on the left; the group's total size aligns under
-                    the Size column, directly above the per-artifact sizes. */}
                 <td colSpan={3} className="py-2.5 pl-4 pr-3">
                   <div className="flex items-center">
                     <span className="w-5 shrink-0 text-slate-400">{open ? '▾' : '▸'}</span>
@@ -421,7 +450,8 @@ function GroupedTable({
                       {g.key}
                     </span>
                     <span className="ml-2 font-mono text-xs text-slate-400">
-                      {g.artifacts.length} {g.artifacts.length === 1 ? 'artifact' : 'artifacts'}
+                      {g.repos.length} {g.repos.length === 1 ? 'repo' : 'repos'} · {g.count}{' '}
+                      {g.count === 1 ? 'artifact' : 'artifacts'}
                     </span>
                   </div>
                 </td>
@@ -431,8 +461,28 @@ function GroupedTable({
                 <td className="px-4 py-2.5" />
               </tr>
               {open
-                ? g.artifacts.map((a) => (
-                    <ArtifactRow key={a.key} artifact={a} showProject={false} navigate={navigate} />
+                ? g.repos.map((repo) => (
+                    <Fragment key={repo.key}>
+                      {/* Repository sub-header: the typed repo the rows below live
+                          in, indented under its project. */}
+                      <tr className="border-b border-slate-100 bg-white">
+                        <td colSpan={3} className="py-1.5 pl-9 pr-3">
+                          <div className="flex items-center">
+                            <span className="font-mono text-xs font-medium text-slate-700">{repo.key}</span>
+                            <span className="ml-2 font-mono text-[11px] text-slate-400">
+                              {repo.artifacts.length}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-1.5 text-right font-mono text-[11px] tabular-nums text-slate-400">
+                          {formatBytes(repo.sizeBytes)}
+                        </td>
+                        <td className="px-4 py-1.5" />
+                      </tr>
+                      {repo.artifacts.map((a) => (
+                        <ArtifactRow key={a.key} artifact={a} showProject={false} indent navigate={navigate} />
+                      ))}
+                    </Fragment>
                   ))
                 : null}
             </tbody>
@@ -450,10 +500,12 @@ type NavigateFn = ReturnType<typeof useNavigate>;
 function ArtifactRow({
   artifact,
   showProject,
+  indent = false,
   navigate,
 }: {
   artifact: Artifact;
   showProject: boolean;
+  indent?: boolean;
   navigate: NavigateFn;
 }) {
   const { href } = artifact;
@@ -474,10 +526,10 @@ function ArtifactRow({
         clickable ? 'cursor-pointer hover:bg-slate-50' : '',
       )}
     >
-      {/* The format glyph sits in a fixed gutter (the same width as the group
-          caret), so a row's name aligns under its project header and the icon
-          makes the format scannable at a glance. */}
-      <td className="py-2.5 pl-4 pr-3">
+      {/* The format glyph sits in a fixed gutter so the icon makes the format
+          scannable; in the grouped view rows indent to sit under their repo
+          sub-header. */}
+      <td className={cx('py-2.5 pr-3', indent ? 'pl-9' : 'pl-4')}>
         <div className="flex items-center">
           <FormatGlyph format={artifact.format} />
           {clickable ? (
@@ -499,7 +551,7 @@ function ArtifactRow({
             className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-600"
             title={artifact.projectName}
           >
-            {artifact.projectKey}
+            {artifact.projectKey}/{artifact.repoKey}
           </span>
         </Td>
       ) : null}

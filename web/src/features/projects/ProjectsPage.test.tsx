@@ -32,29 +32,15 @@ describe('ProjectsPage', () => {
     });
   });
 
-  it('renders projects returned by the API', async () => {
-    listProjects.mockResolvedValue({
-      projects: [
-        { id: 'proj_1', key: 'acme', name: 'Acme Corp', description: '', kind: 'local', createdAt: '2026-07-02T10:00:00Z', updatedAt: '2026-07-02T10:00:00Z' },
-      ],
-    });
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText('Acme Corp')).toBeInTheDocument();
-    });
-    expect(screen.getByText('acme')).toBeInTheDocument();
-  });
-
-  it('badges a proxy project and shows its upstream', async () => {
+  it('renders projects returned by the API, linking to their detail page', async () => {
     listProjects.mockResolvedValue({
       projects: [
         {
-          id: 'proj_2',
-          key: 'dockerhub',
-          name: 'Docker Hub Mirror',
+          id: 'proj_1',
+          key: 'acme',
+          name: 'Acme Corp',
           description: '',
-          kind: 'proxy',
-          upstream: { url: 'https://registry-1.docker.io' },
+          allowAutoCreate: true,
           createdAt: '2026-07-02T10:00:00Z',
           updatedAt: '2026-07-02T10:00:00Z',
         },
@@ -62,10 +48,31 @@ describe('ProjectsPage', () => {
     });
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText('Docker Hub Mirror')).toBeInTheDocument();
+      expect(screen.getByText('Acme Corp')).toBeInTheDocument();
     });
-    expect(screen.getByText('Proxy')).toBeInTheDocument();
-    expect(screen.getByText(/registry-1\.docker\.io/)).toBeInTheDocument();
+    expect(screen.getByText('acme')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Acme Corp/ })).toHaveAttribute('href', '/projects/acme');
+  });
+
+  it('notes when a project requires repositories to be pre-created', async () => {
+    listProjects.mockResolvedValue({
+      projects: [
+        {
+          id: 'proj_2',
+          key: 'governed',
+          name: 'Governed',
+          description: '',
+          allowAutoCreate: false,
+          createdAt: '2026-07-02T10:00:00Z',
+          updatedAt: '2026-07-02T10:00:00Z',
+        },
+      ],
+    });
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText('Governed')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/must be created before pushing/i)).toBeInTheDocument();
   });
 
   it('shows an error state and a retry when loading fails', async () => {

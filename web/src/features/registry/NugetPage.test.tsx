@@ -40,17 +40,19 @@ const detail = (over: Partial<NugetPackageDetail>): NugetPackageDetail => ({
 describe('NugetPage', () => {
   it('renders versions and the dotnet install snippet', async () => {
     getNugetPackage.mockResolvedValue(detail({}));
-    renderAt('/registry/library/-nuget-/Newtonsoft.Json');
+    renderAt('/registry/library/-nuget-/nuget-local/Newtonsoft.Json');
 
-    // Requests the right (project, id) pair.
+    // Requests the right (project, repo, id) triple.
     await waitFor(() => {
-      expect(getNugetPackage).toHaveBeenCalledWith('library', 'Newtonsoft.Json');
+      expect(getNugetPackage).toHaveBeenCalledWith('library', 'nuget-local', 'Newtonsoft.Json');
     });
 
     // Install snippet: add the feed source, then add the package.
     expect(await screen.findByText('dotnet add package Newtonsoft.Json')).toBeInTheDocument();
     expect(
-      screen.getByText(/dotnet nuget add source .*\/nuget\/library\/v3\/index\.json --name library/),
+      screen.getByText(
+        /dotnet nuget add source .*\/nuget\/library\/nuget-local\/v3\/index\.json --name library-nuget-local/,
+      ),
     ).toBeInTheDocument();
 
     // Versions with their sizes, newest first.
@@ -61,7 +63,7 @@ describe('NugetPage', () => {
 
   it('shows an error state when loading fails', async () => {
     getNugetPackage.mockRejectedValue(new Error('nuget boom'));
-    renderAt('/registry/library/-nuget-/Newtonsoft.Json');
+    renderAt('/registry/library/-nuget-/nuget-local/Newtonsoft.Json');
     await waitFor(() => {
       expect(screen.getByText('nuget boom')).toBeInTheDocument();
     });

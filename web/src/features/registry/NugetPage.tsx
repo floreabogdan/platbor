@@ -5,19 +5,20 @@ import { LayersIcon, RegistryIcon } from '../../components/icons';
 import { cx } from '../../lib/cx';
 import { formatBytes, formatDate } from '../../lib/format';
 import type { NugetPackageVersion } from '../../lib/types';
+import { splitRepoAndRest } from './packageRoute';
 import { useNugetDetail } from './useRegistry';
 
 // NuGet package detail: the versions of a package plus the feed-config and
-// install commands a consumer needs. The project is the NuGet feed, so a package
-// is identified by (project, id); the id arrives as the route splat.
+// install commands a consumer needs. A package lives in a typed repository, so
+// it is identified by (project, repo, id); the route splat carries "<repo>/<id>".
 export function NugetPage() {
   const params = useParams();
   const project = params.project ?? '';
-  const id = params['*'] ?? '';
+  const { repo, rest: id } = splitRepoAndRest(params['*'] ?? '');
 
-  const { detail, state, error } = useNugetDetail(project, id);
+  const { detail, state, error } = useNugetDetail(project, repo, id);
 
-  if (!project || !id) {
+  if (!project || !repo || !id) {
     return <EmptyState message="No package selected." />;
   }
 
@@ -26,11 +27,11 @@ export function NugetPage() {
       <Breadcrumb
         items={[
           { label: 'Registry', to: '/registry' },
-          { label: project, to: '/registry' },
+          { label: `${project}/${repo}`, to: '/registry' },
           { label: id },
         ]}
       />
-      <PageHeader title={id} subtitle={`NuGet package in ${project}.`} />
+      <PageHeader title={id} subtitle={`NuGet package in ${project}/${repo}.`} />
 
       {state === 'loading' ? <Card className="h-40 animate-pulse bg-slate-50" /> : null}
       {state === 'error' ? (
@@ -44,7 +45,7 @@ export function NugetPage() {
           <EmptyState icon={<RegistryIcon className="h-8 w-8" />} message="This package has no versions yet." />
         ) : (
           <div className="space-y-5">
-            <InstallSnippet project={project} id={id} />
+            <InstallSnippet project={project} repo={repo} id={id} />
             <VersionsTable versions={detail.versions} />
           </div>
         )
@@ -53,11 +54,11 @@ export function NugetPage() {
   );
 }
 
-// InstallSnippet gives the two commands a consumer needs: register this project's
-// feed as a NuGet source, then add the package.
-function InstallSnippet({ project, id }: { project: string; id: string }) {
-  const index = `${window.location.origin}/nuget/${project}/v3/index.json`;
-  const sourceCommand = `dotnet nuget add source ${index} --name ${project}`;
+// InstallSnippet gives the two commands a consumer needs: register this
+// repository's feed as a NuGet source, then add the package.
+function InstallSnippet({ project, repo, id }: { project: string; repo: string; id: string }) {
+  const index = `${window.location.origin}/nuget/${project}/${repo}/v3/index.json`;
+  const sourceCommand = `dotnet nuget add source ${index} --name ${project}-${repo}`;
   const addCommand = `dotnet add package ${id}`;
 
   return (

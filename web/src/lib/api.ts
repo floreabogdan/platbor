@@ -1,5 +1,6 @@
 import type {
   CreateProjectRequest,
+  CreateRepoRequest,
   CreateTokenRequest,
   CreateTokenResponse,
   DashboardResponse,
@@ -9,6 +10,7 @@ import type {
   ListPackagesResponse,
   ListProjectsResponse,
   ListReferrersResponse,
+  ListReposResponse,
   ListRepositoriesResponse,
   ListTagsResponse,
   ManifestDetail,
@@ -16,7 +18,9 @@ import type {
   NugetPackageDetail,
   Problem,
   Project,
+  Repo,
   Token,
+  UpdateRepoRequest,
   User,
 } from './types';
 
@@ -85,6 +89,30 @@ export const api = {
   createProject: (body: CreateProjectRequest): Promise<Project> =>
     request<Project>(`/projects`, { method: 'POST', body: JSON.stringify(body) }),
 
+  // Repositories (typed containers inside a project)
+  listRepos: (project: string): Promise<ListReposResponse> =>
+    request<ListReposResponse>(`/projects/${encodeURIComponent(project)}/repositories`),
+
+  createRepo: (project: string, body: CreateRepoRequest): Promise<Repo> =>
+    request<Repo>(`/projects/${encodeURIComponent(project)}/repositories`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getRepo: (project: string, repo: string): Promise<Repo> =>
+    request<Repo>(`/projects/${encodeURIComponent(project)}/repositories/${encodeURIComponent(repo)}`),
+
+  updateRepo: (project: string, repo: string, body: UpdateRepoRequest): Promise<Repo> =>
+    request<Repo>(`/projects/${encodeURIComponent(project)}/repositories/${encodeURIComponent(repo)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  deleteRepo: (project: string, repo: string): Promise<void> =>
+    request<undefined>(`/projects/${encodeURIComponent(project)}/repositories/${encodeURIComponent(repo)}`, {
+      method: 'DELETE',
+    }),
+
   // Tokens
   listTokens: (): Promise<{ tokens: Token[] }> => request<{ tokens: Token[] }>(`/tokens`),
 
@@ -98,43 +126,45 @@ export const api = {
   listRepositories: (): Promise<ListRepositoriesResponse> =>
     request<ListRepositoriesResponse>(`/registry/repositories`),
 
-  listRepoTags: (project: string, repository: string): Promise<ListTagsResponse> =>
-    request<ListTagsResponse>(`/registry/${encodeURIComponent(project)}/tags${query({ repository })}`),
+  // Repositories are keyed by (project, repo, image); the OCI image name is the
+  // artifact within the typed repository.
+  listRepoTags: (project: string, repo: string, image: string): Promise<ListTagsResponse> =>
+    request<ListTagsResponse>(`/registry/${encodeURIComponent(project)}/tags${query({ repo, image })}`),
 
-  getManifest: (project: string, repository: string, reference: string): Promise<ManifestDetail> =>
+  getManifest: (project: string, repo: string, image: string, reference: string): Promise<ManifestDetail> =>
     request<ManifestDetail>(
-      `/registry/${encodeURIComponent(project)}/manifests${query({ repository, reference })}`,
+      `/registry/${encodeURIComponent(project)}/manifests${query({ repo, image, reference })}`,
     ),
 
   // Delete a tag (reference is a tag) or a whole manifest and its tags
   // (reference is a digest).
-  deleteManifest: (project: string, repository: string, reference: string): Promise<void> =>
+  deleteManifest: (project: string, repo: string, image: string, reference: string): Promise<void> =>
     request<undefined>(
-      `/registry/${encodeURIComponent(project)}/manifests${query({ repository, reference })}`,
+      `/registry/${encodeURIComponent(project)}/manifests${query({ repo, image, reference })}`,
       { method: 'DELETE' },
     ),
 
-  listReferrers: (project: string, repository: string, subject: string): Promise<ListReferrersResponse> =>
+  listReferrers: (project: string, repo: string, image: string, subject: string): Promise<ListReferrersResponse> =>
     request<ListReferrersResponse>(
-      `/registry/${encodeURIComponent(project)}/referrers${query({ repository, subject })}`,
+      `/registry/${encodeURIComponent(project)}/referrers${query({ repo, image, subject })}`,
     ),
 
   // npm package browser
   listPackages: (): Promise<ListPackagesResponse> =>
     request<ListPackagesResponse>(`/registry/packages`),
 
-  getPackage: (project: string, name: string): Promise<NpmPackageDetail> =>
+  getPackage: (project: string, repo: string, name: string): Promise<NpmPackageDetail> =>
     request<NpmPackageDetail>(
-      `/registry/${encodeURIComponent(project)}/package${query({ name })}`,
+      `/registry/${encodeURIComponent(project)}/package${query({ repo, name })}`,
     ),
 
   // NuGet package browser
   listNugets: (): Promise<ListNugetsResponse> =>
     request<ListNugetsResponse>(`/registry/nuget-packages`),
 
-  getNugetPackage: (project: string, id: string): Promise<NugetPackageDetail> =>
+  getNugetPackage: (project: string, repo: string, id: string): Promise<NugetPackageDetail> =>
     request<NugetPackageDetail>(
-      `/registry/${encodeURIComponent(project)}/nuget-package${query({ id })}`,
+      `/registry/${encodeURIComponent(project)}/nuget-package${query({ repo, id })}`,
     ),
 
   // Generic file browser

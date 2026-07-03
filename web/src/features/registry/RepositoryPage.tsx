@@ -7,21 +7,24 @@ import { cx } from '../../lib/cx';
 import { formatBytes, formatDate, shortDigest } from '../../lib/format';
 import type { IndexEntry, Layer, ManifestDetail, ManifestKind, Referrer, TagSummary } from '../../lib/types';
 import { DeleteDialog, type DeleteTarget } from './DeleteDialog';
+import { splitRepoAndRest } from './packageRoute';
 import { useManifest, useReferrers, useRepoTags } from './useRegistry';
 
-// Repository detail: the tags in a repository and, for the selected tag, the
-// manifest it points at — media type, layers, sizes, and a copy-paste pull
-// command. The selected tag lives in the URL (?ref=) so views are shareable.
+// Image detail: the tags of an OCI image inside a repository and, for the
+// selected tag, the manifest it points at — media type, layers, sizes, and a
+// copy-paste pull command. The image lives in a typed repository, so it is
+// identified by (project, repo, image); the route splat carries "<repo>/<image>".
+// The selected tag lives in the URL (?ref=) so views are shareable.
 export function RepositoryPage() {
   const params = useParams();
   const project = params.project ?? '';
-  const repository = params['*'] ?? '';
+  const { repo, rest: image } = splitRepoAndRest(params['*'] ?? '');
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const { tags, state, error, reload } = useRepoTags(project, repository);
+  const { tags, state, error, reload } = useRepoTags(project, repo, image);
 
   const selected = searchParams.get('ref') ?? tags[0]?.tag;
-  const { manifest, state: manifestState } = useManifest(project, repository, selected);
+  const { manifest, state: manifestState } = useManifest(project, repo, image, selected);
 
   const [pendingDelete, setPendingDelete] = useState<DeleteTarget | null>(null);
 
@@ -52,8 +55,8 @@ export function RepositoryPage() {
     void reload();
   }
 
-  if (!project || !repository) {
-    return <EmptyState message="No repository selected." />;
+  if (!project || !repo || !image) {
+    return <EmptyState message="No image selected." />;
   }
 
   return (
@@ -61,11 +64,11 @@ export function RepositoryPage() {
       <Breadcrumb
         items={[
           { label: 'Registry', to: '/registry' },
-          { label: project, to: '/registry' },
-          { label: repository },
+          { label: `${project}/${repo}`, to: '/registry' },
+          { label: image },
         ]}
       />
-      <PageHeader title={`${project}/${repository}`} subtitle="Tags and manifests in this repository." />
+      <PageHeader title={`${project}/${repo}/${image}`} subtitle="Tags and manifests for this image." />
 
       {state === 'loading' ? <Card className="h-40 animate-pulse bg-slate-50" /> : null}
       {state === 'error' ? (
@@ -86,7 +89,8 @@ export function RepositoryPage() {
           <TagsTable tags={tags} selected={selected} onSelect={select} onDelete={requestDeleteTag} />
           <ManifestPanel
             project={project}
-            repository={repository}
+            repo={repo}
+            image={image}
             reference={selected}
             manifest={manifest}
             loading={manifestState === 'loading'}
@@ -98,7 +102,8 @@ export function RepositoryPage() {
       {pendingDelete ? (
         <DeleteDialog
           project={project}
-          repository={repository}
+          repo={repo}
+          image={image}
           target={pendingDelete}
           onClose={() => setPendingDelete(null)}
           onDeleted={afterDeleted}
@@ -192,14 +197,16 @@ function TagsTable({
 
 function ManifestPanel({
   project,
-  repository,
+  repo,
+  image,
   reference,
   manifest,
   loading,
   onDelete,
 }: {
   project: string;
-  repository: string;
+  repo: string;
+  image: string;
   reference?: string;
   manifest?: ManifestDetail;
   loading: boolean;
@@ -207,7 +214,7 @@ function ManifestPanel({
 }) {
   // Hooks run before any early return (rules of hooks); an absent digest keeps
   // this idle.
-  const referrers = useReferrers(project, repository, manifest?.digest);
+  const referrers = useReferrers(project, repo, image, manifest?.digest);
 
   if (loading) {
     return <Card className="h-48 animate-pulse bg-slate-50" />;
@@ -255,7 +262,7 @@ function ManifestPanel({
         </Field>
       </dl>
 
-      <PullCommand project={project} repository={repository} reference={reference} />
+      <PullCommand project={project} repo={repo} image={image} reference={reference} />
 
       {manifest.kind === 'image' ? (
         <LayersTable config={manifest.config} layers={manifest.layers} />
@@ -333,16 +340,18 @@ function ReferrersSection({ referrers }: { referrers: Referrer[] }) {
 
 function PullCommand({
   project,
-  repository,
+  repo,
+  image,
   reference,
 }: {
   project: string;
-  repository: string;
+  repo: string;
+  image: string;
   reference: string;
 }) {
   const host = window.location.host;
   const sep = reference.includes(':') ? '@' : ':';
-  const command = `docker pull ${host}/${project}/${repository}${sep}${reference}`;
+  const command = `docker pull ${host}/${project}/${repo}/${image}${sep}${reference}`;
 
   return (
     <div className="mt-5">

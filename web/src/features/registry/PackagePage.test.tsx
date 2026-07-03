@@ -41,16 +41,16 @@ const detail = (over: Partial<NpmPackageDetail>): NpmPackageDetail => ({
 describe('PackagePage', () => {
   it('renders versions, dist-tags, and the install snippet', async () => {
     getPackage.mockResolvedValue(detail({}));
-    renderAt('/registry/library/-/left-pad');
+    renderAt('/registry/library/-/npm/left-pad');
 
-    // Requests the right (project, name) pair.
+    // Requests the right (project, repo, name) triple.
     await waitFor(() => {
-      expect(getPackage).toHaveBeenCalledWith('library', 'left-pad');
+      expect(getPackage).toHaveBeenCalledWith('library', 'npm', 'left-pad');
     });
 
-    // Install snippet: default-registry config + install command.
+    // Install snippet: repository-registry config + install command.
     expect(await screen.findByText('npm install left-pad')).toBeInTheDocument();
-    expect(screen.getByText(/npm config set registry .*\/npm\/library\//)).toBeInTheDocument();
+    expect(screen.getByText(/npm config set registry .*\/npm\/library\/npm\//)).toBeInTheDocument();
 
     // Versions with their sizes. Version numbers can appear twice (a version row
     // plus a dist-tag value), so tolerate duplicates.
@@ -67,18 +67,18 @@ describe('PackagePage', () => {
     getPackage.mockResolvedValue(
       detail({ name: '@acme/widgets', versions: [{ version: '2.0.0', sizeBytes: 2048, shasum: 'c', integrity: 'sha512-z', publishedAt: '2026-07-02T10:00:00Z' }], distTags: { latest: '2.0.0' } }),
     );
-    renderAt('/registry/library/-/@acme/widgets');
+    renderAt('/registry/library/-/npm/@acme/widgets');
 
     await waitFor(() => {
-      expect(getPackage).toHaveBeenCalledWith('library', '@acme/widgets');
+      expect(getPackage).toHaveBeenCalledWith('library', 'npm', '@acme/widgets');
     });
-    expect(screen.getByText(/npm config set @acme:registry .*\/npm\/library\//)).toBeInTheDocument();
+    expect(screen.getByText(/npm config set @acme:registry .*\/npm\/library\/npm\//)).toBeInTheDocument();
     expect(screen.getByText('npm install @acme/widgets')).toBeInTheDocument();
   });
 
   it('shows an error state when loading fails', async () => {
     getPackage.mockRejectedValue(new Error('package boom'));
-    renderAt('/registry/library/-/left-pad');
+    renderAt('/registry/library/-/npm/left-pad');
     await waitFor(() => {
       expect(screen.getByText('package boom')).toBeInTheDocument();
     });
