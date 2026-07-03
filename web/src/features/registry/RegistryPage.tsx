@@ -79,7 +79,6 @@ interface Artifact {
   format: Format;
   projectKey: string;
   projectName: string;
-  repository: string; // npm: the <repo> namespace; oci: same as name
   name: string; // oci: repository; npm: package name
   kind: 'local' | 'proxy';
   contents: string;
@@ -94,7 +93,6 @@ function fromRepository(r: Repository): Artifact {
     format: 'oci',
     projectKey: r.projectKey,
     projectName: r.projectName,
-    repository: r.repository,
     name: r.repository,
     kind: r.kind,
     contents: `${String(r.tagCount)} ${r.tagCount === 1 ? 'tag' : 'tags'}`,
@@ -110,14 +108,13 @@ function fromPackage(p: NpmPackage): Artifact {
     format: 'npm',
     projectKey: p.projectKey,
     projectName: p.projectName,
-    repository: p.repository,
     name: p.name,
     kind: p.kind,
     contents: `${String(p.versionCount)} ${p.versionCount === 1 ? 'version' : 'versions'}`,
     sizeBytes: p.sizeBytes,
     updatedAt: p.updatedAt,
-    href: packageHref(p.projectKey, p.repository, p.name),
-    key: `npm:${p.projectKey}/${p.repository}/${p.name}`,
+    href: packageHref(p.projectKey, p.name),
+    key: `npm:${p.projectKey}/${p.name}`,
   };
 }
 
@@ -200,7 +197,6 @@ function ArtifactBrowser({ artifacts }: { artifacts: Artifact[] }) {
       }
       return (
         a.name.toLowerCase().includes(q) ||
-        a.repository.toLowerCase().includes(q) ||
         a.projectKey.toLowerCase().includes(q) ||
         a.projectName.toLowerCase().includes(q)
       );
@@ -418,14 +414,6 @@ function ArtifactRow({
           >
             {artifact.name}
           </Link>
-          {artifact.format === 'npm' ? (
-            <span
-              className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-500"
-              title={`Repository ${artifact.repository}`}
-            >
-              {artifact.repository}
-            </span>
-          ) : null}
         </div>
       </td>
       {showProject ? (

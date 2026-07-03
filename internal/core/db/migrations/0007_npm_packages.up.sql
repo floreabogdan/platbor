@@ -1,22 +1,21 @@
--- npm packages, their versions, and dist-tags, scoped to a project and a
--- repository (the <repo> segment of /npm/<project>/<repo>). One npm registry
--- endpoint is a (project, repository) pair; packages live inside it by name.
+-- npm packages, their versions, and dist-tags, scoped to a project. The project
+-- IS the npm registry: clients point npm at /npm/<project>/ and packages live
+-- directly under it by name (there is no intermediate repository level -- the
+-- package name, which may be scoped @scope/name, is the identifier).
 --
--- A package is the named unit clients install (e.g. "lodash" or the scoped
--- "@acme/widgets"). Each published version carries the exact version metadata
--- object npm sent (stored verbatim as JSON so the packument round-trips) plus a
--- pointer to its tarball in the shared content-addressable blob store. The
--- tarball is keyed there by sha256; npm's own dist.shasum (sha1) and
--- dist.integrity (sha512 SRI) are recomputed at publish and stored so the
--- packument reports authoritative values.
+-- A package is the named unit clients install. Each published version carries
+-- the exact version metadata object npm sent (stored verbatim as JSON so the
+-- packument round-trips) plus a pointer to its tarball in the shared
+-- content-addressable blob store. The tarball is keyed there by sha256; npm's
+-- own dist.shasum (sha1) and dist.integrity (sha512 SRI) are recomputed at
+-- publish and stored so the packument reports authoritative values.
 CREATE TABLE npm_packages (
     id         TEXT PRIMARY KEY,
     project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
-    repository TEXT NOT NULL,             -- the <repo> path segment
     name       TEXT NOT NULL,             -- package name, incl. @scope/ prefix
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    UNIQUE (project_id, repository, name)
+    UNIQUE (project_id, name)
 );
 
 CREATE TABLE npm_versions (

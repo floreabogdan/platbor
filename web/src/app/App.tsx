@@ -45,7 +45,7 @@ function Gate() {
         <Route path="registry" element={<RegistryPage />} />
         {/* npm package detail — the reserved "-" segment (which an OCI repo name
             can never start with) keeps this distinct from the OCI repo route. */}
-        <Route path="registry/:project/-/:repository/*" element={<PackagePage />} />
+        <Route path="registry/:project/-/*" element={<PackagePage />} />
         <Route path="registry/:project/*" element={<RepositoryPage />} />
         <Route
           path="catalog"

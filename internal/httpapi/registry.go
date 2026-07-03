@@ -149,7 +149,6 @@ func repoKind(isProxy bool) string {
 type packageResponse struct {
 	ProjectKey   string    `json:"projectKey"`
 	ProjectName  string    `json:"projectName"`
-	Repository   string    `json:"repository"`
 	Name         string    `json:"name"`
 	Kind         string    `json:"kind"` // "local" or "proxy"
 	VersionCount int       `json:"versionCount"`
@@ -175,7 +174,6 @@ func (h registryHandler) listPackages(w http.ResponseWriter, r *http.Request) {
 		items = append(items, packageResponse{
 			ProjectKey:   p.ProjectKey,
 			ProjectName:  p.ProjectName,
-			Repository:   p.Repository,
 			Name:         p.Name,
 			Kind:         repoKind(p.IsProxy),
 			VersionCount: p.VersionCount,
@@ -195,27 +193,25 @@ type packageVersionResponse struct {
 }
 
 type packageDetailResponse struct {
-	Name       string                   `json:"name"`
-	Repository string                   `json:"repository"`
-	DistTags   map[string]string        `json:"distTags"`
-	Versions   []packageVersionResponse `json:"versions"`
+	Name     string                   `json:"name"`
+	DistTags map[string]string        `json:"distTags"`
+	Versions []packageVersionResponse `json:"versions"`
 }
 
 // getPackage returns one npm package's versions and dist-tags for the detail
-// page. The project comes from the path; repository and name are query params.
+// page. The project comes from the path; the package name is a query param.
 func (h registryHandler) getPackage(w http.ResponseWriter, r *http.Request) {
 	projectKey := chi.URLParam(r, "project")
-	repo := r.URL.Query().Get("repository")
 	name := r.URL.Query().Get("name")
-	if repo == "" || name == "" {
-		writeProblem(w, http.StatusBadRequest, "Missing parameter", "repository and name are required")
+	if name == "" {
+		writeProblem(w, http.StatusBadRequest, "Missing parameter", "name is required")
 		return
 	}
 
-	detail, err := h.packages.Package(r.Context(), projectKey, repo, name)
+	detail, err := h.packages.Package(r.Context(), projectKey, name)
 	if err != nil {
 		if errors.Is(err, npm.ErrPackageNotFound) {
-			writeProblem(w, http.StatusNotFound, "Package not found", "no such package in that repository")
+			writeProblem(w, http.StatusNotFound, "Package not found", "no such package in that project")
 			return
 		}
 		h.log.Error("getting package", slog.String("error", err.Error()))
@@ -234,10 +230,9 @@ func (h registryHandler) getPackage(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, h.log, http.StatusOK, packageDetailResponse{
-		Name:       detail.Name,
-		Repository: repo,
-		DistTags:   detail.DistTags,
-		Versions:   versions,
+		Name:     detail.Name,
+		DistTags: detail.DistTags,
+		Versions: versions,
 	})
 }
 

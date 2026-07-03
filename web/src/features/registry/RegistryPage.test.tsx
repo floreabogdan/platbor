@@ -40,7 +40,6 @@ const repo = (over: Partial<Repository>): Repository => ({
 const pkg = (over: Partial<NpmPackage>): NpmPackage => ({
   projectKey: 'library',
   projectName: 'Library',
-  repository: 'lib',
   name: 'left-pad',
   kind: 'local',
   versionCount: 1,
@@ -65,8 +64,8 @@ describe('RegistryPage', () => {
     });
     listPackages.mockResolvedValue({
       packages: [
-        pkg({ name: 'left-pad', repository: 'lib', versionCount: 2 }),
-        pkg({ name: 'is-odd', projectKey: 'platform', projectName: 'Platform', repository: 'cache', kind: 'proxy' }),
+        pkg({ name: 'left-pad', versionCount: 2 }),
+        pkg({ name: 'is-odd', projectKey: 'platform', projectName: 'Platform', kind: 'proxy' }),
       ],
     });
     renderPage();
@@ -75,7 +74,7 @@ describe('RegistryPage', () => {
     const alpine = await screen.findByRole('link', { name: 'alpine' });
     expect(alpine).toHaveAttribute('href', '/registry/library/alpine');
     const leftPad = screen.getByRole('link', { name: 'left-pad' });
-    expect(leftPad).toHaveAttribute('href', '/registry/library/-/lib/left-pad');
+    expect(leftPad).toHaveAttribute('href', '/registry/library/-/left-pad');
 
     // A per-row format icon distinguishes the two formats.
     expect(screen.getByLabelText('Container image')).toBeInTheDocument();
@@ -99,7 +98,7 @@ describe('RegistryPage', () => {
 
   it('narrows to one format via the format dropdown', async () => {
     listRepositories.mockResolvedValue({ repositories: [repo({ repository: 'alpine' })] });
-    listPackages.mockResolvedValue({ packages: [pkg({ name: 'left-pad', repository: 'lib' })] });
+    listPackages.mockResolvedValue({ packages: [pkg({ name: 'left-pad' })] });
     renderPage();
 
     await screen.findByRole('link', { name: 'alpine' });

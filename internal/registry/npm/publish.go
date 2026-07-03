@@ -45,7 +45,7 @@ type versionDist struct {
 // publish handles `npm publish`: verify each version's tarball, store it in the
 // content-addressable blob store, then persist the package, versions, and
 // dist-tags atomically. Proxy projects are read-only and reject publishes.
-func (h *handler) publish(w http.ResponseWriter, r *http.Request, project, repo, pkg string) {
+func (h *handler) publish(w http.ResponseWriter, r *http.Request, project, pkg string) {
 	projectID, ok := h.resolveProject(w, r, project)
 	if !ok {
 		return
@@ -54,7 +54,7 @@ func (h *handler) publish(w http.ResponseWriter, r *http.Request, project, repo,
 		h.internalError(w, "checking proxy", err)
 		return
 	} else if proxy {
-		writeError(w, h.log, http.StatusForbidden, "cannot publish to a proxy repository")
+		writeError(w, h.log, http.StatusForbidden, "cannot publish to a proxy project")
 		return
 	}
 
@@ -82,12 +82,11 @@ func (h *handler) publish(w http.ResponseWriter, r *http.Request, project, repo,
 	}
 
 	in := publishInput{
-		ProjectID:  projectID,
-		Repository: repo,
-		Name:       pkg,
-		Versions:   versions,
-		DistTags:   req.DistTags,
-		Actor:      actorFrom(r),
+		ProjectID: projectID,
+		Name:      pkg,
+		Versions:  versions,
+		DistTags:  req.DistTags,
+		Actor:     actorFrom(r),
 	}
 	if err := h.store.publish(r.Context(), in); err != nil {
 		if errors.Is(err, ErrVersionExists) {

@@ -47,7 +47,7 @@ func (a *Adapter) Mount(r chi.Router, deps registry.Deps) {
 		store: newFileStore(deps.DB),
 		log:   deps.Log,
 	}
-	r.Route("/{project}/{repo}", func(sub chi.Router) {
+	r.Route("/{project}", func(sub chi.Router) {
 		sub.Handle("/*", http.HandlerFunc(h.serve))
 	})
 }
@@ -64,7 +64,6 @@ var checksumSuffixes = []string{".sha256", ".sha1", ".md5"}
 
 func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 	project := chi.URLParam(r, "project")
-	repo := chi.URLParam(r, "repo")
 	path := chi.URLParam(r, "*")
 	if dec, err := url.PathUnescape(path); err == nil {
 		path = dec
@@ -95,11 +94,11 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodPut:
-		h.upload(w, r, projectID, repo, path)
+		h.upload(w, r, projectID, path)
 	case http.MethodGet, http.MethodHead:
-		h.download(w, r, projectID, repo, path)
+		h.download(w, r, projectID, path)
 	case http.MethodDelete:
-		h.remove(w, r, projectID, repo, path)
+		h.remove(w, r, projectID, path)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
@@ -107,12 +106,12 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 
 // upload streams the request body into the blob store while computing its
 // checksums, then records the file at its path. Proxy projects are read-only.
-func (h *handler) upload(w http.ResponseWriter, r *http.Request, projectID, repo, path string) {
+func (h *handler) upload(w http.ResponseWriter, r *http.Request, projectID, path string) {
 	if proxy, err := h.store.isProxy(r.Context(), projectID); err != nil {
 		h.internalError(w, "checking proxy", err)
 		return
 	} else if proxy {
-		writeError(w, http.StatusForbidden, "cannot upload to a proxy repository")
+		writeError(w, http.StatusForbidden, "cannot upload to a proxy project")
 		return
 	}
 
@@ -139,7 +138,6 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request, projectID, repo
 
 	if err := h.store.put(r.Context(), filePut{
 		ProjectID:  projectID,
-		Repository: repo,
 		Path:       path,
 		BlobDigest: desc.Digest,
 		Size:       size,
@@ -160,8 +158,8 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request, projectID, repo
 
 // download serves a file, or a checksum when the path is a "<file>.sha256"-style
 // sibling of a stored file (and no real file exists at that exact path).
-func (h *handler) download(w http.ResponseWriter, r *http.Request, projectID, repo, path string) {
-	file, err := h.store.get(r.Context(), projectID, repo, path)
+func (h *handler) download(w http.ResponseWriter, r *http.Request, projectID, path string) {
+	file, err := h.store.get(r.Context(), projectID, path)
 	if err == nil {
 		h.serveFile(w, r, file)
 		return
@@ -174,7 +172,7 @@ func (h *handler) download(w http.ResponseWriter, r *http.Request, projectID, re
 	// Not a real file: maybe a checksum sibling of one.
 	for _, suf := range checksumSuffixes {
 		if base, ok := strings.CutSuffix(path, suf); ok {
-			if sum, ok := h.checksum(r, projectID, repo, base, suf); ok {
+			if sum, ok := h.checksum(r, projectID, base, suf); ok {
 				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 				_, _ = io.WriteString(w, sum+"\n")
 				return
@@ -185,8 +183,8 @@ func (h *handler) download(w http.ResponseWriter, r *http.Request, projectID, re
 }
 
 // checksum returns the stored checksum of base for the given suffix.
-func (h *handler) checksum(r *http.Request, projectID, repo, base, suffix string) (string, bool) {
-	file, err := h.store.get(r.Context(), projectID, repo, base)
+func (h *handler) checksum(r *http.Request, projectID, base, suffix string) (string, bool) {
+	file, err := h.store.get(r.Context(), projectID, base)
 	if err != nil {
 		return "", false
 	}
@@ -229,15 +227,15 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, file storedF
 	}
 }
 
-func (h *handler) remove(w http.ResponseWriter, r *http.Request, projectID, repo, path string) {
+func (h *handler) remove(w http.ResponseWriter, r *http.Request, projectID, path string) {
 	if proxy, err := h.store.isProxy(r.Context(), projectID); err != nil {
 		h.internalError(w, "checking proxy", err)
 		return
 	} else if proxy {
-		writeError(w, http.StatusForbidden, "cannot delete from a proxy repository")
+		writeError(w, http.StatusForbidden, "cannot delete from a proxy project")
 		return
 	}
-	if err := h.store.delete(r.Context(), projectID, repo, path, actorFrom(r)); err != nil {
+	if err := h.store.delete(r.Context(), projectID, path, actorFrom(r)); err != nil {
 		if errors.Is(err, ErrFileNotFound) {
 			writeError(w, http.StatusNotFound, "not found")
 			return

@@ -28,23 +28,21 @@ func (q *Queries) DeleteNpmDistTag(ctx context.Context, arg DeleteNpmDistTagPara
 }
 
 const getNpmPackage = `-- name: GetNpmPackage :one
-SELECT id, project_id, repository, name, created_at, updated_at FROM npm_packages
-WHERE project_id = ? AND repository = ? AND name = ?
+SELECT id, project_id, name, created_at, updated_at FROM npm_packages
+WHERE project_id = ? AND name = ?
 `
 
 type GetNpmPackageParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Name       string `json:"name"`
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
 }
 
 func (q *Queries) GetNpmPackage(ctx context.Context, arg GetNpmPackageParams) (NpmPackage, error) {
-	row := q.db.QueryRowContext(ctx, getNpmPackage, arg.ProjectID, arg.Repository, arg.Name)
+	row := q.db.QueryRowContext(ctx, getNpmPackage, arg.ProjectID, arg.Name)
 	var i NpmPackage
 	err := row.Scan(
 		&i.ID,
 		&i.ProjectID,
-		&i.Repository,
 		&i.Name,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -56,14 +54,13 @@ const getNpmTarball = `-- name: GetNpmTarball :one
 SELECT v.tarball_digest, v.tarball_size
 FROM npm_versions v
 JOIN npm_packages p ON p.id = v.package_id
-WHERE p.project_id = ? AND p.repository = ? AND p.name = ? AND v.version = ?
+WHERE p.project_id = ? AND p.name = ? AND v.version = ?
 `
 
 type GetNpmTarballParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Name       string `json:"name"`
-	Version    string `json:"version"`
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
+	Version   string `json:"version"`
 }
 
 type GetNpmTarballRow struct {
@@ -73,12 +70,7 @@ type GetNpmTarballRow struct {
 
 // The blob digest and size for one package version's tarball, to serve it.
 func (q *Queries) GetNpmTarball(ctx context.Context, arg GetNpmTarballParams) (GetNpmTarballRow, error) {
-	row := q.db.QueryRowContext(ctx, getNpmTarball,
-		arg.ProjectID,
-		arg.Repository,
-		arg.Name,
-		arg.Version,
-	)
+	row := q.db.QueryRowContext(ctx, getNpmTarball, arg.ProjectID, arg.Name, arg.Version)
 	var i GetNpmTarballRow
 	err := row.Scan(&i.TarballDigest, &i.TarballSize)
 	return i, err
@@ -123,7 +115,6 @@ const listAllNpmPackages = `-- name: ListAllNpmPackages :many
 SELECT
     p.key        AS project_key,
     p.name       AS project_name,
-    pkg.repository AS repository,
     pkg.name     AS package_name,
     COUNT(v.id)  AS version_count,
     CAST(COALESCE(SUM(v.tarball_size), 0) AS INTEGER) AS size_bytes,
@@ -140,7 +131,6 @@ ORDER BY p.key ASC, pkg.name ASC
 type ListAllNpmPackagesRow struct {
 	ProjectKey   string `json:"project_key"`
 	ProjectName  string `json:"project_name"`
-	Repository   string `json:"repository"`
 	PackageName  string `json:"package_name"`
 	VersionCount int64  `json:"version_count"`
 	SizeBytes    int64  `json:"size_bytes"`
@@ -163,7 +153,6 @@ func (q *Queries) ListAllNpmPackages(ctx context.Context) ([]ListAllNpmPackagesR
 		if err := rows.Scan(
 			&i.ProjectKey,
 			&i.ProjectName,
-			&i.Repository,
 			&i.PackageName,
 			&i.VersionCount,
 			&i.SizeBytes,
@@ -187,13 +176,12 @@ const listNpmDistTags = `-- name: ListNpmDistTags :many
 SELECT t.tag, t.version
 FROM npm_dist_tags t
 JOIN npm_packages p ON p.id = t.package_id
-WHERE p.project_id = ? AND p.repository = ? AND p.name = ?
+WHERE p.project_id = ? AND p.name = ?
 `
 
 type ListNpmDistTagsParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Name       string `json:"name"`
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
 }
 
 type ListNpmDistTagsRow struct {
@@ -202,7 +190,7 @@ type ListNpmDistTagsRow struct {
 }
 
 func (q *Queries) ListNpmDistTags(ctx context.Context, arg ListNpmDistTagsParams) ([]ListNpmDistTagsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listNpmDistTags, arg.ProjectID, arg.Repository, arg.Name)
+	rows, err := q.db.QueryContext(ctx, listNpmDistTags, arg.ProjectID, arg.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -257,14 +245,13 @@ const listNpmVersions = `-- name: ListNpmVersions :many
 SELECT v.version, v.manifest, v.tarball_digest, v.tarball_size, v.shasum, v.integrity, v.created_at
 FROM npm_versions v
 JOIN npm_packages p ON p.id = v.package_id
-WHERE p.project_id = ? AND p.repository = ? AND p.name = ?
+WHERE p.project_id = ? AND p.name = ?
 ORDER BY v.created_at ASC
 `
 
 type ListNpmVersionsParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Name       string `json:"name"`
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
 }
 
 type ListNpmVersionsRow struct {
@@ -280,7 +267,7 @@ type ListNpmVersionsRow struct {
 // Every published version of a package, oldest first, with the verbatim version
 // metadata and its tarball's digests, so the packument can be rebuilt.
 func (q *Queries) ListNpmVersions(ctx context.Context, arg ListNpmVersionsParams) ([]ListNpmVersionsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listNpmVersions, arg.ProjectID, arg.Repository, arg.Name)
+	rows, err := q.db.QueryContext(ctx, listNpmVersions, arg.ProjectID, arg.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -313,25 +300,19 @@ func (q *Queries) ListNpmVersions(ctx context.Context, arg ListNpmVersionsParams
 const npmVersionExists = `-- name: NpmVersionExists :one
 SELECT COUNT(*) FROM npm_versions v
 JOIN npm_packages p ON p.id = v.package_id
-WHERE p.project_id = ? AND p.repository = ? AND p.name = ? AND v.version = ?
+WHERE p.project_id = ? AND p.name = ? AND v.version = ?
 `
 
 type NpmVersionExistsParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Name       string `json:"name"`
-	Version    string `json:"version"`
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
+	Version   string `json:"version"`
 }
 
 // Whether a specific version is already published. npm forbids overwriting a
 // published version, so the handler rejects a re-publish before inserting.
 func (q *Queries) NpmVersionExists(ctx context.Context, arg NpmVersionExistsParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, npmVersionExists,
-		arg.ProjectID,
-		arg.Repository,
-		arg.Name,
-		arg.Version,
-	)
+	row := q.db.QueryRowContext(ctx, npmVersionExists, arg.ProjectID, arg.Name, arg.Version)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -362,29 +343,27 @@ func (q *Queries) UpsertNpmDistTag(ctx context.Context, arg UpsertNpmDistTagPara
 }
 
 const upsertNpmPackage = `-- name: UpsertNpmPackage :one
-INSERT INTO npm_packages (id, project_id, repository, name, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
-ON CONFLICT (project_id, repository, name)
+INSERT INTO npm_packages (id, project_id, name, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (project_id, name)
 DO UPDATE SET updated_at = excluded.updated_at
 RETURNING id
 `
 
 type UpsertNpmPackageParams struct {
-	ID         string `json:"id"`
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Name       string `json:"name"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
-// Ensure the package row for (project, repository, name) exists, returning its
-// id. Publishing a new version of an existing package just bumps updated_at.
+// Ensure the package row for (project, name) exists, returning its id.
+// Publishing a new version of an existing package just bumps updated_at.
 func (q *Queries) UpsertNpmPackage(ctx context.Context, arg UpsertNpmPackageParams) (string, error) {
 	row := q.db.QueryRowContext(ctx, upsertNpmPackage,
 		arg.ID,
 		arg.ProjectID,
-		arg.Repository,
 		arg.Name,
 		arg.CreatedAt,
 		arg.UpdatedAt,

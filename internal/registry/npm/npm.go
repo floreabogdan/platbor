@@ -41,7 +41,7 @@ func (a *Adapter) Mount(r chi.Router, deps registry.Deps) {
 		upstream: newUpstreamClient(),
 		log:      deps.Log,
 	}
-	r.Route("/{project}/{repo}", func(sub chi.Router) {
+	r.Route("/{project}", func(sub chi.Router) {
 		sub.Handle("/*", http.HandlerFunc(h.serve))
 	})
 }
@@ -59,7 +59,6 @@ type handler struct {
 // valid bearer token or Basic credentials.
 func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 	project := chi.URLParam(r, "project")
-	repo := chi.URLParam(r, "repo")
 
 	tail := chi.URLParam(r, "*")
 	// The package name may arrive percent-encoded (scoped names as @scope%2fname).
@@ -92,9 +91,9 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 	case opPackage:
 		switch r.Method {
 		case http.MethodGet:
-			h.getPackument(w, r, project, repo, op.pkg)
+			h.getPackument(w, r, project, op.pkg)
 		case http.MethodPut:
-			h.publish(w, r, project, repo, op.pkg)
+			h.publish(w, r, project, op.pkg)
 		default:
 			writeError(w, h.log, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -103,9 +102,9 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 			writeError(w, h.log, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		h.getTarball(w, r, project, repo, op.pkg, op.ref)
+		h.getTarball(w, r, project, op.pkg, op.ref)
 	case opDistTags:
-		h.serveDistTags(w, r, project, repo, op)
+		h.serveDistTags(w, r, project, op)
 	default:
 		writeError(w, h.log, http.StatusNotFound, "not found")
 	}
@@ -161,15 +160,16 @@ func (h *handler) resolveProject(w http.ResponseWriter, r *http.Request, key str
 	return projectID, true
 }
 
-// registryBase reconstructs the absolute base URL of this npm repository
-// (scheme://host/npm/<project>/<repo>) so packument tarball URLs point back at
-// us regardless of how the client addressed the server.
-func registryBase(r *http.Request, project, repo string) string {
+// registryBase reconstructs the absolute base URL of this npm registry
+// (scheme://host/npm/<project>) so packument tarball URLs point back at us
+// regardless of how the client addressed the server. The project is the
+// registry: packages live directly under it.
+func registryBase(r *http.Request, project string) string {
 	scheme := "http"
 	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		scheme = "https"
 	}
-	return scheme + "://" + r.Host + "/npm/" + project + "/" + repo
+	return scheme + "://" + r.Host + "/npm/" + project
 }
 
 // writeError emits npm's JSON error envelope: clients surface the "error" field.

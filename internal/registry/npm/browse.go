@@ -24,7 +24,6 @@ func NewBrowser(sqlDB *sql.DB) *Browser { return &Browser{q: db.New(sqlDB)} }
 type PackageSummary struct {
 	ProjectKey   string
 	ProjectName  string
-	Repository   string
 	Name         string
 	VersionCount int
 	SizeBytes    int64
@@ -64,7 +63,6 @@ func (b *Browser) Packages(ctx context.Context) ([]PackageSummary, error) {
 		out = append(out, PackageSummary{
 			ProjectKey:   r.ProjectKey,
 			ProjectName:  r.ProjectName,
-			Repository:   r.Repository,
 			Name:         r.PackageName,
 			VersionCount: int(r.VersionCount),
 			SizeBytes:    r.SizeBytes,
@@ -76,8 +74,8 @@ func (b *Browser) Packages(ctx context.Context) ([]PackageSummary, error) {
 }
 
 // Package returns a single package's versions (newest first) and dist-tags, or
-// ErrPackageNotFound when it has no versions in the repository.
-func (b *Browser) Package(ctx context.Context, projectKey, repo, name string) (PackageDetail, error) {
+// ErrPackageNotFound when it has no versions in the project.
+func (b *Browser) Package(ctx context.Context, projectKey, name string) (PackageDetail, error) {
 	proj, err := b.q.GetProjectByKey(ctx, projectKey)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -86,7 +84,7 @@ func (b *Browser) Package(ctx context.Context, projectKey, repo, name string) (P
 		return PackageDetail{}, fmt.Errorf("resolving project: %w", err)
 	}
 
-	rows, err := b.q.ListNpmVersions(ctx, db.ListNpmVersionsParams{ProjectID: proj.ID, Repository: repo, Name: name})
+	rows, err := b.q.ListNpmVersions(ctx, db.ListNpmVersionsParams{ProjectID: proj.ID, Name: name})
 	if err != nil {
 		return PackageDetail{}, fmt.Errorf("listing versions: %w", err)
 	}
@@ -106,7 +104,7 @@ func (b *Browser) Package(ctx context.Context, projectKey, repo, name string) (P
 		})
 	}
 
-	tagRows, err := b.q.ListNpmDistTags(ctx, db.ListNpmDistTagsParams{ProjectID: proj.ID, Repository: repo, Name: name})
+	tagRows, err := b.q.ListNpmDistTags(ctx, db.ListNpmDistTagsParams{ProjectID: proj.ID, Name: name})
 	if err != nil {
 		return PackageDetail{}, fmt.Errorf("listing dist-tags: %w", err)
 	}

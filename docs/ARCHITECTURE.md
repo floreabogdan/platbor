@@ -94,11 +94,17 @@ type Adapter interface {
 
 ### Repository URL scheme
 
+The **project is the registry**: each format's artifacts are named directly
+under a project, with no intermediate "repository" container. The artifact's own
+identifier — an OCI repository name, an npm package name, a generic file path —
+follows the project. (An earlier draft nested a redundant `<repo>` segment under
+the project; it was dropped because the artifact already carries its own name.)
+
 ```
-/v2/<project>/<repo>/...          OCI (project/repo path inside the OCI name)
-/npm/<project>/<repo>/...         npm
-/nuget/<project>/<repo>/v3/...    NuGet
-/generic/<project>/<repo>/<path>  generic
+/v2/<project>/<name>/...          OCI (the OCI repository name, possibly slashed, under the project)
+/npm/<project>/<pkg>              npm (project is the registry; packages by name, incl. @scope/name)
+/nuget/<project>/v3/...           NuGet (project is the feed)
+/generic/<project>/<path>         generic (files by path under the project)
 /api/v1/...                       UI + automation API
 ```
 

@@ -90,11 +90,10 @@ export interface ListRepositoriesResponse {
 
 // --- npm packages ---
 
-/** NpmPackage — one npm package in a project's repository (package index). */
+/** NpmPackage — one npm package in a project (the project is the npm registry). */
 export interface NpmPackage {
   projectKey: string;
   projectName: string;
-  repository: string; // the <repo> segment of /npm/<project>/<repo>
   name: string; // package name, incl. @scope/ prefix
   kind: 'local' | 'proxy';
   versionCount: number;
@@ -118,7 +117,6 @@ export interface NpmPackageVersion {
 /** NpmPackageDetail — a package with its versions (newest first) and dist-tags. */
 export interface NpmPackageDetail {
   name: string;
-  repository: string;
   distTags: Record<string, string>;
   versions: NpmPackageVersion[];
 }

@@ -1,22 +1,22 @@
 -- name: UpsertNpmPackage :one
--- Ensure the package row for (project, repository, name) exists, returning its
--- id. Publishing a new version of an existing package just bumps updated_at.
-INSERT INTO npm_packages (id, project_id, repository, name, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
-ON CONFLICT (project_id, repository, name)
+-- Ensure the package row for (project, name) exists, returning its id.
+-- Publishing a new version of an existing package just bumps updated_at.
+INSERT INTO npm_packages (id, project_id, name, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (project_id, name)
 DO UPDATE SET updated_at = excluded.updated_at
 RETURNING id;
 
 -- name: GetNpmPackage :one
 SELECT * FROM npm_packages
-WHERE project_id = ? AND repository = ? AND name = ?;
+WHERE project_id = ? AND name = ?;
 
 -- name: NpmVersionExists :one
 -- Whether a specific version is already published. npm forbids overwriting a
 -- published version, so the handler rejects a re-publish before inserting.
 SELECT COUNT(*) FROM npm_versions v
 JOIN npm_packages p ON p.id = v.package_id
-WHERE p.project_id = ? AND p.repository = ? AND p.name = ? AND v.version = ?;
+WHERE p.project_id = ? AND p.name = ? AND v.version = ?;
 
 -- name: InsertNpmVersion :exec
 -- Store a published version. First-writer-wins: a duplicate (already rejected at
@@ -31,7 +31,7 @@ ON CONFLICT (package_id, version) DO NOTHING;
 SELECT v.version, v.manifest, v.tarball_digest, v.tarball_size, v.shasum, v.integrity, v.created_at
 FROM npm_versions v
 JOIN npm_packages p ON p.id = v.package_id
-WHERE p.project_id = ? AND p.repository = ? AND p.name = ?
+WHERE p.project_id = ? AND p.name = ?
 ORDER BY v.created_at ASC;
 
 -- name: GetNpmTarball :one
@@ -39,13 +39,13 @@ ORDER BY v.created_at ASC;
 SELECT v.tarball_digest, v.tarball_size
 FROM npm_versions v
 JOIN npm_packages p ON p.id = v.package_id
-WHERE p.project_id = ? AND p.repository = ? AND p.name = ? AND v.version = ?;
+WHERE p.project_id = ? AND p.name = ? AND v.version = ?;
 
 -- name: ListNpmDistTags :many
 SELECT t.tag, t.version
 FROM npm_dist_tags t
 JOIN npm_packages p ON p.id = t.package_id
-WHERE p.project_id = ? AND p.repository = ? AND p.name = ?;
+WHERE p.project_id = ? AND p.name = ?;
 
 -- name: UpsertNpmDistTag :exec
 INSERT INTO npm_dist_tags (package_id, tag, version, updated_at)
@@ -69,7 +69,6 @@ SELECT DISTINCT tarball_digest FROM npm_versions;
 SELECT
     p.key        AS project_key,
     p.name       AS project_name,
-    pkg.repository AS repository,
     pkg.name     AS package_name,
     COUNT(v.id)  AS version_count,
     CAST(COALESCE(SUM(v.tarball_size), 0) AS INTEGER) AS size_bytes,

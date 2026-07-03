@@ -100,15 +100,15 @@ type Querier interface {
 	// published version, so the handler rejects a re-publish before inserting.
 	NpmVersionExists(ctx context.Context, arg NpmVersionExistsParams) (int64, error)
 	// Store a file at a path, replacing any existing file there (generic paths are
-	// mutable: a re-upload overwrites). created_at is preserved on overwrite.
+	// mutable: a re-upload overwrites).
 	UpsertGenericFile(ctx context.Context, arg UpsertGenericFileParams) error
 	// Store a manifest by digest. Re-pushing identical content is a no-op, so an
 	// image can be tagged repeatedly without duplicating the payload. subject and
 	// artifact_type are denormalized from the payload for the referrers API.
 	UpsertManifest(ctx context.Context, arg UpsertManifestParams) error
 	UpsertNpmDistTag(ctx context.Context, arg UpsertNpmDistTagParams) error
-	// Ensure the package row for (project, repository, name) exists, returning its
-	// id. Publishing a new version of an existing package just bumps updated_at.
+	// Ensure the package row for (project, name) exists, returning its id.
+	// Publishing a new version of an existing package just bumps updated_at.
 	UpsertNpmPackage(ctx context.Context, arg UpsertNpmPackageParams) (string, error)
 	UpsertTag(ctx context.Context, arg UpsertTagParams) error
 }

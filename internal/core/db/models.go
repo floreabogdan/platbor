@@ -32,7 +32,6 @@ type AuditLog struct {
 type GenericFile struct {
 	ID         string `json:"id"`
 	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
 	Path       string `json:"path"`
 	BlobDigest string `json:"blob_digest"`
 	Size       int64  `json:"size"`
@@ -51,12 +50,11 @@ type NpmDistTag struct {
 }
 
 type NpmPackage struct {
-	ID         string `json:"id"`
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Name       string `json:"name"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	ID        string `json:"id"`
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 type NpmVersion struct {

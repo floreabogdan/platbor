@@ -144,7 +144,7 @@ func publishBody(name, version string, tarball []byte) []byte {
 	return b
 }
 
-const base = "/npm/npm-local/lib"
+const base = "/npm/npm-local"
 
 func TestLoginIssuesTokenAndWhoami(t *testing.T) {
 	h := newHarness(t)
@@ -218,7 +218,7 @@ func TestPublishInstallRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(doc.Versions["1.0.0"], &v); err != nil {
 		t.Fatalf("version decode: %v", err)
 	}
-	wantURL := "http://localhost:8099/npm/npm-local/lib/platbor-demo/-/platbor-demo-1.0.0.tgz"
+	wantURL := "http://localhost:8099/npm/npm-local/platbor-demo/-/platbor-demo-1.0.0.tgz"
 	if v.Dist.Tarball != wantURL {
 		t.Errorf("tarball URL = %q, want %q", v.Dist.Tarball, wantURL)
 	}
@@ -269,7 +269,7 @@ func TestScopedPackage(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	// The download URL uses the unscoped basename in the filename.
-	wantURL := "http://localhost:8099/npm/npm-local/lib/@acme/widgets/-/widgets-2.0.0.tgz"
+	wantURL := "http://localhost:8099/npm/npm-local/@acme/widgets/-/widgets-2.0.0.tgz"
 	if got := doc.Versions["2.0.0"].Dist.Tarball; got != wantURL {
 		t.Errorf("scoped tarball URL = %q, want %q", got, wantURL)
 	}
@@ -314,7 +314,7 @@ func TestDistTags(t *testing.T) {
 func TestPublishToProxyRejected(t *testing.T) {
 	h := newHarness(t)
 	tok := h.token(t)
-	rr := h.do(t, http.MethodPut, "/npm/npm-proxy/lib/pkg", publishBody("pkg", "1.0.0", []byte("x")), tok)
+	rr := h.do(t, http.MethodPut, "/npm/npm-proxy/pkg", publishBody("pkg", "1.0.0", []byte("x")), tok)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("publish to proxy: status = %d, want 403", rr.Code)
 	}
@@ -399,7 +399,7 @@ func TestProxyPullThrough(t *testing.T) {
 	}
 
 	// Packument is fetched fresh and its tarball URL rewritten to us.
-	pk := h.do(t, http.MethodGet, "/npm/up/cache/left-pad", nil, tok)
+	pk := h.do(t, http.MethodGet, "/npm/up/left-pad", nil, tok)
 	if pk.Code != http.StatusOK {
 		t.Fatalf("proxy packument: status = %d (%s)", pk.Code, pk.Body.String())
 	}
@@ -411,14 +411,14 @@ func TestProxyPullThrough(t *testing.T) {
 		} `json:"versions"`
 	}
 	_ = json.Unmarshal(pk.Body.Bytes(), &doc)
-	want := "http://localhost:8099/npm/up/cache/left-pad/-/left-pad-1.0.0.tgz"
+	want := "http://localhost:8099/npm/up/left-pad/-/left-pad-1.0.0.tgz"
 	if got := doc.Versions["1.0.0"].Dist.Tarball; got != want {
 		t.Errorf("rewritten tarball URL = %q, want %q", got, want)
 	}
 
 	// First tarball GET fills the cache from upstream; second is a local hit.
 	for i := 0; i < 2; i++ {
-		dl := h.do(t, http.MethodGet, "/npm/up/cache/left-pad/-/left-pad-1.0.0.tgz", nil, tok)
+		dl := h.do(t, http.MethodGet, "/npm/up/left-pad/-/left-pad-1.0.0.tgz", nil, tok)
 		if dl.Code != http.StatusOK || !bytes.Equal(dl.Body.Bytes(), tarball) {
 			t.Fatalf("tarball GET #%d: status=%d match=%v", i, dl.Code, bytes.Equal(dl.Body.Bytes(), tarball))
 		}
@@ -429,7 +429,7 @@ func TestProxyPullThrough(t *testing.T) {
 
 	// Offline: the packument falls back to the cached version.
 	up.offline = true
-	off := h.do(t, http.MethodGet, "/npm/up/cache/left-pad", nil, tok)
+	off := h.do(t, http.MethodGet, "/npm/up/left-pad", nil, tok)
 	if off.Code != http.StatusOK {
 		t.Fatalf("offline packument: status = %d, want cached 200", off.Code)
 	}
@@ -458,14 +458,14 @@ func TestBrowse(t *testing.T) {
 	if found == nil {
 		t.Fatalf("browse-pkg not in package index: %+v", pkgs)
 	}
-	if found.VersionCount != 2 || found.ProjectKey != "npm-local" || found.Repository != "lib" {
-		t.Errorf("summary = %+v, want 2 versions in npm-local/lib", *found)
+	if found.VersionCount != 2 || found.ProjectKey != "npm-local" {
+		t.Errorf("summary = %+v, want 2 versions in npm-local", *found)
 	}
 	if found.SizeBytes != int64(len("aa")+len("bbbb")) {
 		t.Errorf("size = %d, want %d", found.SizeBytes, len("aa")+len("bbbb"))
 	}
 
-	detail, err := br.Package(context.Background(), "npm-local", "lib", "browse-pkg")
+	detail, err := br.Package(context.Background(), "npm-local", "browse-pkg")
 	if err != nil {
 		t.Fatalf("Package: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestBrowse(t *testing.T) {
 		t.Errorf("versions = %+v, want newest-first [1.1.0, 1.0.0]", detail.Versions)
 	}
 
-	if _, err := br.Package(context.Background(), "npm-local", "lib", "nope"); err != npm.ErrPackageNotFound {
+	if _, err := br.Package(context.Background(), "npm-local", "nope"); err != npm.ErrPackageNotFound {
 		t.Errorf("missing package: got %v, want ErrPackageNotFound", err)
 	}
 }

@@ -64,7 +64,7 @@ export function usePackages() {
 }
 
 /** usePackageDetail loads one npm package's versions and dist-tags. */
-export function usePackageDetail(project: string, repository: string, name: string) {
+export function usePackageDetail(project: string, name: string) {
   const [detail, setDetail] = useState<NpmPackageDetail>();
   const [state, setState] = useState<LoadState>('loading');
   const [error, setError] = useState<string>();
@@ -72,14 +72,14 @@ export function usePackageDetail(project: string, repository: string, name: stri
   const reload = useCallback(async () => {
     setState('loading');
     try {
-      const res = await api.getPackage(project, repository, name);
+      const res = await api.getPackage(project, name);
       setDetail(res);
       setState('ready');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load package');
       setState('error');
     }
-  }, [project, repository, name]);
+  }, [project, name]);
 
   useEffect(() => {
     void reload();

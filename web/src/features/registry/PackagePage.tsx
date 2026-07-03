@@ -8,17 +8,17 @@ import type { NpmPackageVersion } from '../../lib/types';
 import { usePackageDetail } from './useRegistry';
 
 // npm package detail: the versions of a package plus its dist-tags and the
-// registry config + install command a consumer needs. The package is identified
-// by (project, repository, name); the scoped name arrives as the route splat.
+// registry config + install command a consumer needs. The project is the npm
+// registry, so a package is identified by (project, name); the scoped name
+// arrives as the route splat.
 export function PackagePage() {
   const params = useParams();
   const project = params.project ?? '';
-  const repository = params.repository ?? '';
   const name = params['*'] ?? '';
 
-  const { detail, state, error } = usePackageDetail(project, repository, name);
+  const { detail, state, error } = usePackageDetail(project, name);
 
-  if (!project || !repository || !name) {
+  if (!project || !name) {
     return <EmptyState message="No package selected." />;
   }
 
@@ -31,7 +31,7 @@ export function PackagePage() {
           { label: name },
         ]}
       />
-      <PageHeader title={name} subtitle={`npm package in ${project}/${repository}.`} />
+      <PageHeader title={name} subtitle={`npm package in ${project}.`} />
 
       {state === 'loading' ? <Card className="h-40 animate-pulse bg-slate-50" /> : null}
       {state === 'error' ? (
@@ -45,7 +45,7 @@ export function PackagePage() {
           <EmptyState icon={<RegistryIcon className="h-8 w-8" />} message="This package has no versions yet." />
         ) : (
           <div className="space-y-5">
-            <InstallSnippet project={project} repository={repository} name={name} />
+            <InstallSnippet project={project} name={name} />
             {Object.keys(detail.distTags).length > 0 ? <DistTags distTags={detail.distTags} /> : null}
             <VersionsTable versions={detail.versions} distTags={detail.distTags} />
           </div>
@@ -56,18 +56,10 @@ export function PackagePage() {
 }
 
 // InstallSnippet gives the two commands a consumer needs: point npm at this
-// repository, then install. Scoped packages configure a per-scope registry so
-// only that scope resolves here; unscoped packages set the default registry.
-function InstallSnippet({
-  project,
-  repository,
-  name,
-}: {
-  project: string;
-  repository: string;
-  name: string;
-}) {
-  const registry = `${window.location.origin}/npm/${project}/${repository}/`;
+// project's registry, then install. Scoped packages configure a per-scope
+// registry so only that scope resolves here; unscoped packages set the default.
+function InstallSnippet({ project, name }: { project: string; name: string }) {
+  const registry = `${window.location.origin}/npm/${project}/`;
   const scope = name.startsWith('@') ? name.slice(0, name.indexOf('/')) : '';
   const configCommand = scope
     ? `npm config set ${scope}:registry ${registry}`
@@ -82,8 +74,8 @@ function InstallSnippet({
       </div>
       <p className="mt-1 text-sm text-slate-500">
         {scope
-          ? `Point the ${scope} scope at this repository, then install.`
-          : 'Point npm at this repository, then install.'}
+          ? `Point the ${scope} scope at this project, then install.`
+          : 'Point npm at this project, then install.'}
       </p>
       <div className="mt-4 space-y-2">
         <CommandLine command={configCommand} />

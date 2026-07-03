@@ -72,7 +72,6 @@ type storedFile struct {
 // and the checksums computed while streaming it.
 type filePut struct {
 	ProjectID  string
-	Repository string
 	Path       string
 	BlobDigest string
 	Size       int64
@@ -89,7 +88,6 @@ func (s *fileStore) put(ctx context.Context, in filePut) error {
 		if err := qtx.UpsertGenericFile(ctx, db.UpsertGenericFileParams{
 			ID:         id.New("gen"),
 			ProjectID:  in.ProjectID,
-			Repository: in.Repository,
 			Path:       in.Path,
 			BlobDigest: in.BlobDigest,
 			Size:       in.Size,
@@ -102,12 +100,12 @@ func (s *fileStore) put(ctx context.Context, in filePut) error {
 			return fmt.Errorf("storing file: %w", err)
 		}
 		return s.audit(ctx, qtx, in.ProjectID, in.Actor, "generic.put", "file", in.Path, ts,
-			map[string]string{"repository": in.Repository, "size": fmt.Sprintf("%d", in.Size)})
+			map[string]string{"size": fmt.Sprintf("%d", in.Size)})
 	})
 }
 
-func (s *fileStore) get(ctx context.Context, projectID, repo, path string) (storedFile, error) {
-	row, err := s.q.GetGenericFile(ctx, db.GetGenericFileParams{ProjectID: projectID, Repository: repo, Path: path})
+func (s *fileStore) get(ctx context.Context, projectID, path string) (storedFile, error) {
+	row, err := s.q.GetGenericFile(ctx, db.GetGenericFileParams{ProjectID: projectID, Path: path})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return storedFile{}, ErrFileNotFound
@@ -124,18 +122,17 @@ func (s *fileStore) get(ctx context.Context, projectID, repo, path string) (stor
 }
 
 // delete removes a file's record (the blob is reclaimed by GC), auditing it.
-func (s *fileStore) delete(ctx context.Context, projectID, repo, path, actor string) error {
+func (s *fileStore) delete(ctx context.Context, projectID, path, actor string) error {
 	ts := s.now().Format(time.RFC3339Nano)
 	return s.inTx(ctx, func(qtx *db.Queries) error {
-		n, err := qtx.DeleteGenericFile(ctx, db.DeleteGenericFileParams{ProjectID: projectID, Repository: repo, Path: path})
+		n, err := qtx.DeleteGenericFile(ctx, db.DeleteGenericFileParams{ProjectID: projectID, Path: path})
 		if err != nil {
 			return fmt.Errorf("deleting file: %w", err)
 		}
 		if n == 0 {
 			return ErrFileNotFound
 		}
-		return s.audit(ctx, qtx, projectID, actor, "generic.delete", "file", path, ts,
-			map[string]string{"repository": repo})
+		return s.audit(ctx, qtx, projectID, actor, "generic.delete", "file", path, ts, nil)
 	})
 }
 

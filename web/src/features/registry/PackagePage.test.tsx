@@ -16,13 +16,13 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-// renderAt mounts the package route so useParams resolves project/repository and
-// the scoped-or-plain name splat exactly as the app router does.
+// renderAt mounts the package route so useParams resolves the project and the
+// scoped-or-plain name splat exactly as the app router does.
 function renderAt(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="registry/:project/-/:repository/*" element={<PackagePage />} />
+        <Route path="registry/:project/-/*" element={<PackagePage />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -30,7 +30,6 @@ function renderAt(path: string) {
 
 const detail = (over: Partial<NpmPackageDetail>): NpmPackageDetail => ({
   name: 'left-pad',
-  repository: 'lib',
   distTags: { latest: '1.1.0', beta: '1.0.0' },
   versions: [
     { version: '1.1.0', sizeBytes: 5_242_880, shasum: 'aaa', integrity: 'sha512-x', publishedAt: '2026-07-02T10:00:00Z' },
@@ -42,16 +41,16 @@ const detail = (over: Partial<NpmPackageDetail>): NpmPackageDetail => ({
 describe('PackagePage', () => {
   it('renders versions, dist-tags, and the install snippet', async () => {
     getPackage.mockResolvedValue(detail({}));
-    renderAt('/registry/library/-/lib/left-pad');
+    renderAt('/registry/library/-/left-pad');
 
-    // Requests the right (project, repository, name) triple.
+    // Requests the right (project, name) pair.
     await waitFor(() => {
-      expect(getPackage).toHaveBeenCalledWith('library', 'lib', 'left-pad');
+      expect(getPackage).toHaveBeenCalledWith('library', 'left-pad');
     });
 
     // Install snippet: default-registry config + install command.
     expect(await screen.findByText('npm install left-pad')).toBeInTheDocument();
-    expect(screen.getByText(/npm config set registry .*\/npm\/library\/lib\//)).toBeInTheDocument();
+    expect(screen.getByText(/npm config set registry .*\/npm\/library\//)).toBeInTheDocument();
 
     // Versions with their sizes. Version numbers can appear twice (a version row
     // plus a dist-tag value), so tolerate duplicates.
@@ -68,18 +67,18 @@ describe('PackagePage', () => {
     getPackage.mockResolvedValue(
       detail({ name: '@acme/widgets', versions: [{ version: '2.0.0', sizeBytes: 2048, shasum: 'c', integrity: 'sha512-z', publishedAt: '2026-07-02T10:00:00Z' }], distTags: { latest: '2.0.0' } }),
     );
-    renderAt('/registry/library/-/lib/@acme/widgets');
+    renderAt('/registry/library/-/@acme/widgets');
 
     await waitFor(() => {
-      expect(getPackage).toHaveBeenCalledWith('library', 'lib', '@acme/widgets');
+      expect(getPackage).toHaveBeenCalledWith('library', '@acme/widgets');
     });
-    expect(screen.getByText(/npm config set @acme:registry .*\/npm\/library\/lib\//)).toBeInTheDocument();
+    expect(screen.getByText(/npm config set @acme:registry .*\/npm\/library\//)).toBeInTheDocument();
     expect(screen.getByText('npm install @acme/widgets')).toBeInTheDocument();
   });
 
   it('shows an error state when loading fails', async () => {
     getPackage.mockRejectedValue(new Error('package boom'));
-    renderAt('/registry/library/-/lib/left-pad');
+    renderAt('/registry/library/-/left-pad');
     await waitFor(() => {
       expect(screen.getByText('package boom')).toBeInTheDocument();
     });

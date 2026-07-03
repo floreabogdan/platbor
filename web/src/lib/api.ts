@@ -120,9 +120,9 @@ export const api = {
   listPackages: (): Promise<ListPackagesResponse> =>
     request<ListPackagesResponse>(`/registry/packages`),
 
-  getPackage: (project: string, repository: string, name: string): Promise<NpmPackageDetail> =>
+  getPackage: (project: string, name: string): Promise<NpmPackageDetail> =>
     request<NpmPackageDetail>(
-      `/registry/${encodeURIComponent(project)}/package${query({ repository, name })}`,
+      `/registry/${encodeURIComponent(project)}/package${query({ name })}`,
     ),
 
   // Dashboard
