@@ -30,6 +30,7 @@ const repo = (over: Partial<Repository>): Repository => ({
   repository: 'alpine',
   tagCount: 1,
   manifestCount: 1,
+  sizeBytes: 0,
   updatedAt: '2026-07-02T10:00:00Z',
   ...over,
 });
@@ -46,7 +47,7 @@ describe('RegistryPage', () => {
   it('groups repositories under their project', async () => {
     listRepositories.mockResolvedValue({
       repositories: [
-        repo({ projectKey: 'library', projectName: 'Library', repository: 'alpine', tagCount: 3 }),
+        repo({ projectKey: 'library', projectName: 'Library', repository: 'alpine', tagCount: 3, sizeBytes: 5_242_880 }),
         repo({ projectKey: 'library', projectName: 'Library', repository: 'nginx', tagCount: 5 }),
         repo({ projectKey: 'platform', projectName: 'Platform', repository: 'api-gw', tagCount: 2 }),
       ],
@@ -63,6 +64,7 @@ describe('RegistryPage', () => {
     const alpine = screen.getByRole('link', { name: /alpine/i });
     expect(alpine).toHaveAttribute('href', '/registry/library/alpine');
     expect(within(alpine).getByText(/3 tags/i)).toBeInTheDocument();
+    expect(within(alpine).getByText('5 MB')).toBeInTheDocument();
   });
 
   it('shows an error state when loading fails', async () => {

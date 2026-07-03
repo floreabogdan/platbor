@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, Card, EmptyState, PageHeader } from '../../components/ui';
 import { RegistryIcon, TagIcon } from '../../components/icons';
-import { formatDate } from '../../lib/format';
+import { formatBytes, formatDate } from '../../lib/format';
 import type { Repository } from '../../lib/types';
 import { useRepositories } from './useRegistry';
 
@@ -112,7 +112,10 @@ function RepositoryCard({ repo }: { repo: Repository }) {
           {repo.manifestCount} {repo.manifestCount === 1 ? 'manifest' : 'manifests'}
         </span>
       </div>
-      <p className="mt-4 text-xs text-slate-400">Updated {formatDate(repo.updatedAt)}</p>
+      <div className="mt-4 flex items-center justify-between text-xs text-slate-400">
+        <span>Updated {formatDate(repo.updatedAt)}</span>
+        <span className="font-mono text-slate-500">{formatBytes(repo.sizeBytes)}</span>
+      </div>
     </Link>
   );
 }

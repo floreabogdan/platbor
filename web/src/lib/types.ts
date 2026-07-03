@@ -79,6 +79,7 @@ export interface Repository {
   repository: string;
   tagCount: number;
   manifestCount: number;
+  sizeBytes: number;
   updatedAt: string;
 }
 
