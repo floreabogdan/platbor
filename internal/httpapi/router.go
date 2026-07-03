@@ -12,6 +12,7 @@ import (
 	"github.com/platbor/platbor/internal/core/audit"
 	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry"
+	"github.com/platbor/platbor/internal/registry/cargo"
 	"github.com/platbor/platbor/internal/registry/generic"
 	"github.com/platbor/platbor/internal/registry/goproxy"
 	"github.com/platbor/platbor/internal/registry/maven"
@@ -74,8 +75,9 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 				pypis:     pypi.NewBrowser(api.DB),
 				mavens:    maven.NewBrowser(api.DB),
 				gomods:    goproxy.NewBrowser(api.DB),
+				crates:    cargo.NewBrowser(api.DB),
 				manager:   oci.NewManager(api.DB),
-				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB), generic.NewReferencer(api.DB), nuget.NewReferencer(api.DB), pypi.NewReferencer(api.DB), maven.NewReferencer(api.DB), goproxy.NewReferencer(api.DB)),
+				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB), generic.NewReferencer(api.DB), nuget.NewReferencer(api.DB), pypi.NewReferencer(api.DB), maven.NewReferencer(api.DB), goproxy.NewReferencer(api.DB), cargo.NewReferencer(api.DB)),
 				retention: NewRetentionService(api.DB, map[repository.Format]registry.Pruner{
 					repository.FormatOCI:   oci.NewPruner(api.DB),
 					repository.FormatNPM:   npm.NewPruner(api.DB),
@@ -83,6 +85,7 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 					repository.FormatPyPI:  pypi.NewPruner(api.DB),
 					repository.FormatMaven: maven.NewPruner(api.DB),
 					repository.FormatGo:    goproxy.NewPruner(api.DB),
+					repository.FormatCargo: cargo.NewPruner(api.DB),
 				}),
 				repos:    repository.NewService(api.DB),
 				projects: api.Projects,
@@ -120,6 +123,9 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 	})
 	r.Route("/go", func(sub chi.Router) {
 		goproxy.New().Mount(sub, deps)
+	})
+	r.Route("/cargo", func(sub chi.Router) {
+		cargo.New().Mount(sub, deps)
 	})
 
 	// Everything else falls through to the embedded SPA.

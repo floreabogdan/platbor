@@ -11,6 +11,7 @@ const FORMATS: { value: RepoFormat; label: string }[] = [
   { value: 'pypi', label: 'PyPI' },
   { value: 'maven', label: 'Maven' },
   { value: 'go', label: 'Go modules' },
+  { value: 'cargo', label: 'Cargo' },
   { value: 'generic', label: 'Generic files' },
 ];
 

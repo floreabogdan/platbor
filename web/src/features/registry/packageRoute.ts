@@ -55,6 +55,16 @@ export function goHref(projectKey: string, repoKey: string, module: string): str
   return `/registry/${encodeURIComponent(projectKey)}/-go-/${encodeURIComponent(repoKey)}/${module}`;
 }
 
+// The Cargo crate detail route uses a distinct "-cargo-" sentinel segment. The
+// splat carries <repo>/<crate>; a crate name has no slashes.
+//
+//   /registry/<project>/-cargo-/<repo>/<crate>
+
+/** cargoHref builds the link to a Cargo crate's detail page. */
+export function cargoHref(projectKey: string, repoKey: string, name: string): string {
+  return `/registry/${encodeURIComponent(projectKey)}/-cargo-/${encodeURIComponent(repoKey)}/${encodeURIComponent(name)}`;
+}
+
 /** ociHref builds the link to an OCI image's detail page: the bare splat carries
  *  <repo>/<image>. */
 export function ociHref(projectKey: string, repoKey: string, image: string): string {

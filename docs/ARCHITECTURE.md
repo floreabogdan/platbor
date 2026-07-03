@@ -48,6 +48,7 @@ platbor/
 │   │   ├── pypi/           # Python package index (PEP 503 simple + twine upload)
 │   │   ├── maven/          # Maven repository (plain-HTTP layout; mvn deploy/resolve)
 │   │   ├── goproxy/        # Go module proxy (GOPROXY protocol; proxy-only)
+│   │   ├── cargo/          # Cargo sparse registry (publish + index + proxy)
 │   │   └── proxy/          # pull-through cache decorator for any adapter
 │   ├── catalog/
 │   │   ├── model/          # entities + edges (the graph)
@@ -117,6 +118,7 @@ Artifacts are addressed as `/<format>/<project>/<repo>/<artifact>`:
 /pypi/<project>/<repo>/simple/...     PyPI (simple index; twine posts to the repo root)
 /maven/<project>/<repo>/<path>        Maven (plain-HTTP layout; PUT to deploy, GET to resolve)
 /go/<project>/<repo>/<module>/@v/...  Go module proxy (GOPROXY protocol; proxy-only)
+/cargo/<project>/<repo>/...           Cargo sparse registry (config.json, index, publish, download)
 /api/v1/...                           UI + automation API
 ```
 

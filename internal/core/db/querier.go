@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	CargoVersionExists(ctx context.Context, arg CargoVersionExistsParams) (int64, error)
 	CountProjects(ctx context.Context) (int64, error)
 	// Distinct images across all repositories, for the dashboard summary.
 	CountRepositories(ctx context.Context) (int64, error)
@@ -20,6 +21,7 @@ type Querier interface {
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error)
+	DeleteCargoVersion(ctx context.Context, arg DeleteCargoVersionParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, expiresAt string) error
 	DeleteGenericFile(ctx context.Context, arg DeleteGenericFileParams) (int64, error)
 	DeleteGoFile(ctx context.Context, arg DeleteGoFileParams) (int64, error)
@@ -35,6 +37,8 @@ type Querier interface {
 	DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error)
 	DeleteTagsForDigest(ctx context.Context, arg DeleteTagsForDigestParams) error
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (GetAPITokenByHashRow, error)
+	// Resolve a crate version to its content for download (by lowercased name).
+	GetCargoVersion(ctx context.Context, arg GetCargoVersionParams) (GetCargoVersionRow, error)
 	GetGenericFile(ctx context.Context, arg GetGenericFileParams) (GenericFile, error)
 	GetGoFile(ctx context.Context, arg GetGoFileParams) (GoFile, error)
 	GetManifest(ctx context.Context, arg GetManifestParams) (OciManifest, error)
@@ -58,6 +62,10 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id string) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
 	InsertAuditEntry(ctx context.Context, arg InsertAuditEntryParams) (AuditLog, error)
+	// Record a crate version. On conflict (a proxy re-listing, or a download filling
+	// a cached row) update metadata and only overwrite the blob when a real digest is
+	// supplied, so a fresh index read never clears a cached blob.
+	InsertCargoVersion(ctx context.Context, arg InsertCargoVersionParams) error
 	// Store a published version. First-writer-wins: a duplicate (already rejected at
 	// the handler) is a no-op rather than a transaction error.
 	InsertNpmVersion(ctx context.Context, arg InsertNpmVersionParams) error
@@ -67,6 +75,9 @@ type Querier interface {
 	// new digest is supplied, so a fresh simple-index read never clears a cached blob.
 	InsertPypiFile(ctx context.Context, arg InsertPypiFileParams) error
 	ListAPITokensByUser(ctx context.Context, userID string) ([]ApiToken, error)
+	// Every Cargo crate across all repositories, with version count, total cached
+	// size, and a proxy flag, for the browser's project-grouped index.
+	ListAllCargoCrates(ctx context.Context) ([]ListAllCargoCratesRow, error)
 	// Every generic file across all repositories, joined to its repository and
 	// project, for the registry browser's generic index. is_proxy is 1 for a proxy
 	// repository.
@@ -95,6 +106,16 @@ type Querier interface {
 	// and instance-wide operations (retention, listing).
 	ListAllRepositoryRows(ctx context.Context) ([]ListAllRepositoryRowsRow, error)
 	ListAuditByProject(ctx context.Context, arg ListAuditByProjectParams) ([]AuditLog, error)
+	// Distinct blob digests every cached/published .crate references, for GC.
+	ListCargoBlobDigests(ctx context.Context) ([]string, error)
+	// Every version's index line for a crate (by lowercased name), newest last, for
+	// the sparse index file. yanked is returned so the served line reflects the
+	// current flag without rewriting the stored line on every yank/unyank.
+	ListCargoIndexLines(ctx context.Context, arg ListCargoIndexLinesParams) ([]ListCargoIndexLinesRow, error)
+	// Every version of a crate for its detail page.
+	ListCargoVersionsForCrate(ctx context.Context, arg ListCargoVersionsForCrateParams) ([]ListCargoVersionsForCrateRow, error)
+	// Every version in a repository, grouped by crate and newest first, for pruning.
+	ListCargoVersionsForRetention(ctx context.Context, repositoryID string) ([]ListCargoVersionsForRetentionRow, error)
 	// Distinct blob digests every generic file references, for garbage collection to
 	// mark them alongside OCI manifests and npm tarballs (shared CAS across formats).
 	ListGenericBlobDigests(ctx context.Context) ([]string, error)
@@ -190,10 +211,15 @@ type Querier interface {
 	// Packages in a repository whose id contains the (lowercased) query, newest
 	// first, for the search resource. An empty query matches all.
 	SearchNugetPackages(ctx context.Context, arg SearchNugetPackagesParams) ([]SearchNugetPackagesRow, error)
+	// Fill a proxied version's cached blob after downloading the .crate.
+	SetCargoVersionBlob(ctx context.Context, arg SetCargoVersionBlobParams) error
+	SetCargoYanked(ctx context.Context, arg SetCargoYankedParams) (int64, error)
 	SetProjectAutoCreate(ctx context.Context, arg SetProjectAutoCreateParams) error
 	// Fill a proxied file's cached blob after downloading it from the upstream.
 	SetPypiFileBlob(ctx context.Context, arg SetPypiFileBlobParams) error
 	UpdateRepository(ctx context.Context, arg UpdateRepositoryParams) (Repository, error)
+	// Ensure the crate row for (repository, lowercased name) exists, returning its id.
+	UpsertCargoCrate(ctx context.Context, arg UpsertCargoCrateParams) (string, error)
 	// Store a file at a path in a repository, replacing any existing file there
 	// (generic paths are mutable: a re-upload overwrites).
 	UpsertGenericFile(ctx context.Context, arg UpsertGenericFileParams) error

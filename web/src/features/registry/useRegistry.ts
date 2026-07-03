@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import type {
+  CargoCrate,
+  CargoCrateDetail,
   GenericFile,
   GoModule,
   GoModuleDetail,
@@ -264,6 +266,56 @@ export function useGoDetail(project: string, repo: string, module: string) {
       setState('error');
     }
   }, [project, repo, module]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { detail, state, error, reload };
+}
+
+/** useCargoCrates loads the global, project-grouped Cargo crate index. */
+export function useCargoCrates() {
+  const [crates, setCrates] = useState<CargoCrate[]>([]);
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.listCargoCrates();
+      setCrates(res.crates);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load Cargo crates');
+      setState('error');
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  return { crates, state, error, reload };
+}
+
+/** useCargoDetail loads one Cargo crate's versions. */
+export function useCargoDetail(project: string, repo: string, name: string) {
+  const [detail, setDetail] = useState<CargoCrateDetail>();
+  const [state, setState] = useState<LoadState>('loading');
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(async () => {
+    setState('loading');
+    try {
+      const res = await api.getCargoCrate(project, repo, name);
+      setDetail(res);
+      setState('ready');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load crate');
+      setState('error');
+    }
+  }, [project, repo, name]);
 
   useEffect(() => {
     void reload();

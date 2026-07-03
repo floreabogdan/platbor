@@ -35,7 +35,7 @@ export interface CreateProjectRequest {
 
 // --- Repositories (the typed, configured containers inside a project) ---
 
-export type RepoFormat = 'oci' | 'npm' | 'nuget' | 'generic' | 'pypi' | 'maven' | 'go';
+export type RepoFormat = 'oci' | 'npm' | 'nuget' | 'generic' | 'pypi' | 'maven' | 'go' | 'cargo';
 export type RepoMode = 'local' | 'proxy';
 
 export interface RepoUpstream {
@@ -312,6 +312,38 @@ export interface GoVersion {
 export interface GoModuleDetail {
   module: string;
   versions: GoVersion[];
+}
+
+// --- Cargo crates ---
+
+/** CargoCrate — one Rust crate in a repository (the project is the registry). */
+export interface CargoCrate {
+  projectKey: string;
+  projectName: string;
+  repoKey: string;
+  name: string;
+  kind: 'local' | 'proxy';
+  versionCount: number;
+  sizeBytes: number;
+  updatedAt: string;
+}
+
+export interface ListCargoCratesResponse {
+  crates: CargoCrate[];
+}
+
+/** CargoVersion — one published version of a crate. */
+export interface CargoVersion {
+  version: string;
+  sizeBytes: number;
+  yanked: boolean;
+  cksum?: string;
+}
+
+/** CargoCrateDetail — a crate with its versions (newest first). */
+export interface CargoCrateDetail {
+  name: string;
+  versions: CargoVersion[];
 }
 
 // --- Generic files ---

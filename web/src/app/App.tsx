@@ -14,6 +14,7 @@ import { NugetPage } from '../features/registry/NugetPage';
 import { PypiPage } from '../features/registry/PypiPage';
 import { MavenPage } from '../features/registry/MavenPage';
 import { GoModulePage } from '../features/registry/GoModulePage';
+import { CargoPage } from '../features/registry/CargoPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import { PlaceholderPage } from '../features/placeholder/PlaceholderPage';
 
@@ -59,6 +60,7 @@ function Gate() {
         <Route path="registry/:project/-pypi-/*" element={<PypiPage />} />
         <Route path="registry/:project/-maven-/*" element={<MavenPage />} />
         <Route path="registry/:project/-go-/*" element={<GoModulePage />} />
+        <Route path="registry/:project/-cargo-/*" element={<CargoPage />} />
         <Route path="registry/:project/*" element={<RepositoryPage />} />
         <Route
           path="catalog"

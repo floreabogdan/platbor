@@ -5,6 +5,7 @@ import type {
   CreateTokenResponse,
   DashboardResponse,
   GCResult,
+  ListCargoCratesResponse,
   ListGenericFilesResponse,
   ListGoModulesResponse,
   ListMavensResponse,
@@ -20,6 +21,7 @@ import type {
   ManifestDetail,
   Member,
   MemberRole,
+  CargoCrateDetail,
   GoModuleDetail,
   MavenArtifactDetail,
   NpmPackageDetail,
@@ -213,6 +215,14 @@ export const api = {
   getGoModule: (project: string, repo: string, module: string): Promise<GoModuleDetail> =>
     request<GoModuleDetail>(
       `/registry/${encodeURIComponent(project)}/go-module${query({ repo, module })}`,
+    ),
+
+  // Cargo crate browser
+  listCargoCrates: (): Promise<ListCargoCratesResponse> => request<ListCargoCratesResponse>(`/registry/cargo-crates`),
+
+  getCargoCrate: (project: string, repo: string, name: string): Promise<CargoCrateDetail> =>
+    request<CargoCrateDetail>(
+      `/registry/${encodeURIComponent(project)}/cargo-crate${query({ repo, name })}`,
     ),
 
   // Generic file browser

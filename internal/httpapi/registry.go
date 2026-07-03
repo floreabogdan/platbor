@@ -11,6 +11,7 @@ import (
 
 	"github.com/platbor/platbor/internal/core/project"
 	"github.com/platbor/platbor/internal/core/repository"
+	"github.com/platbor/platbor/internal/registry/cargo"
 	"github.com/platbor/platbor/internal/registry/generic"
 	"github.com/platbor/platbor/internal/registry/goproxy"
 	"github.com/platbor/platbor/internal/registry/maven"
@@ -35,6 +36,7 @@ type registryHandler struct {
 	pypis     *pypi.Browser
 	mavens    *maven.Browser
 	gomods    *goproxy.Browser
+	crates    *cargo.Browser
 	manager   *oci.Manager
 	collector *oci.Collector
 	retention *RetentionService
@@ -51,6 +53,7 @@ func (h registryHandler) mount(r chi.Router) {
 	r.Get("/pypi-packages", h.listPypis)        // PyPI packages
 	r.Get("/maven-artifacts", h.listMavens)     // Maven artifacts
 	r.Get("/go-modules", h.listGoModules)       // Go modules
+	r.Get("/cargo-crates", h.listCrates)        // Cargo crates
 	r.Get("/generic-files", h.listGenericFiles) // generic files
 	// Garbage collection is instance-wide and destructive: admins only.
 	r.With(requireAdmin).Post("/gc", h.runGC) // ?dryRun=true|false
@@ -68,6 +71,7 @@ func (h registryHandler) mount(r chi.Router) {
 		r.Get("/pypi-package", h.getPypi)        // ?repo=<repo>&name=<pkg> (PyPI detail)
 		r.Get("/maven-artifact", h.getMaven)     // ?repo=<repo>&group=<g>&artifact=<a> (Maven detail)
 		r.Get("/go-module", h.getGoModule)       // ?repo=<repo>&module=<m> (Go detail)
+		r.Get("/cargo-crate", h.getCrate)        // ?repo=<repo>&name=<crate> (Cargo detail)
 	})
 }
 
@@ -594,6 +598,85 @@ func (h registryHandler) getGoModule(w http.ResponseWriter, r *http.Request) {
 		versions = append(versions, goVersionResponse{Version: v.Version, SizeBytes: v.SizeBytes, HasZip: v.HasZip})
 	}
 	writeJSON(w, h.log, http.StatusOK, goModuleDetailResponse{Module: detail.Module, Versions: versions})
+}
+
+// --- Cargo crates ---
+
+type cargoCrateResponse struct {
+	ProjectKey   string    `json:"projectKey"`
+	ProjectName  string    `json:"projectName"`
+	RepoKey      string    `json:"repoKey"`
+	Name         string    `json:"name"`
+	Kind         string    `json:"kind"`
+	VersionCount int       `json:"versionCount"`
+	SizeBytes    int64     `json:"sizeBytes"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type listCratesResponse struct {
+	Crates []cargoCrateResponse `json:"crates"`
+}
+
+// listCrates returns every Cargo crate across all projects.
+func (h registryHandler) listCrates(w http.ResponseWriter, r *http.Request) {
+	crates, err := h.crates.Crates(r.Context())
+	if err != nil {
+		h.log.Error("listing cargo crates", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	items := make([]cargoCrateResponse, 0, len(crates))
+	for _, c := range crates {
+		items = append(items, cargoCrateResponse{
+			ProjectKey:   c.ProjectKey,
+			ProjectName:  c.ProjectName,
+			RepoKey:      c.RepoKey,
+			Name:         c.Name,
+			Kind:         repoKind(c.IsProxy),
+			VersionCount: c.VersionCount,
+			SizeBytes:    c.SizeBytes,
+			UpdatedAt:    c.UpdatedAt,
+		})
+	}
+	writeJSON(w, h.log, http.StatusOK, listCratesResponse{Crates: items})
+}
+
+type cargoVersionResponse struct {
+	Version   string `json:"version"`
+	SizeBytes int64  `json:"sizeBytes"`
+	Yanked    bool   `json:"yanked"`
+	Cksum     string `json:"cksum,omitempty"`
+}
+
+type cargoCrateDetailResponse struct {
+	Name     string                 `json:"name"`
+	Versions []cargoVersionResponse `json:"versions"`
+}
+
+// getCrate returns one Cargo crate's versions for the detail page.
+func (h registryHandler) getCrate(w http.ResponseWriter, r *http.Request) {
+	projectKey := chi.URLParam(r, "project")
+	repoKey := r.URL.Query().Get("repo")
+	name := r.URL.Query().Get("name")
+	if repoKey == "" || name == "" {
+		writeProblem(w, http.StatusBadRequest, "Missing parameter", "repo and name are required")
+		return
+	}
+	detail, err := h.crates.Crate(r.Context(), projectKey, repoKey, name)
+	if err != nil {
+		if errors.Is(err, cargo.ErrCrateNotFound) {
+			writeProblem(w, http.StatusNotFound, "Crate not found", "no such crate in that project")
+			return
+		}
+		h.log.Error("getting cargo crate", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	versions := make([]cargoVersionResponse, 0, len(detail.Versions))
+	for _, v := range detail.Versions {
+		versions = append(versions, cargoVersionResponse{Version: v.Version, SizeBytes: v.SizeBytes, Yanked: v.Yanked, Cksum: v.Cksum})
+	}
+	writeJSON(w, h.log, http.StatusOK, cargoCrateDetailResponse{Name: detail.Name, Versions: versions})
 }
 
 // --- generic ---

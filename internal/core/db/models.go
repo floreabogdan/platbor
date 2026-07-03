@@ -29,6 +29,28 @@ type AuditLog struct {
 	CreatedAt  string         `json:"created_at"`
 }
 
+type CargoCrate struct {
+	ID           string `json:"id"`
+	RepositoryID string `json:"repository_id"`
+	Name         string `json:"name"`
+	NameLower    string `json:"name_lower"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
+type CargoVersion struct {
+	ID          string `json:"id"`
+	CrateID     string `json:"crate_id"`
+	Version     string `json:"version"`
+	IndexLine   string `json:"index_line"`
+	Cksum       string `json:"cksum"`
+	BlobDigest  string `json:"blob_digest"`
+	Size        int64  `json:"size"`
+	Yanked      int64  `json:"yanked"`
+	UpstreamUrl string `json:"upstream_url"`
+	CreatedAt   string `json:"created_at"`
+}
+
 type GenericFile struct {
 	ID           string `json:"id"`
 	RepositoryID string `json:"repository_id"`

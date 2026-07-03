@@ -82,6 +82,19 @@ export function GoIcon(props: IconProps) {
   );
 }
 
+export function CargoIcon(props: IconProps) {
+  // Stacked crates — Cargo's shipping-crate identity, a simple mark distinct
+  // from the other format glyphs.
+  return (
+    <Icon {...props}>
+      <rect x="3" y="13" width="8" height="8" rx="1" />
+      <rect x="13" y="13" width="8" height="8" rx="1" />
+      <rect x="8" y="4" width="8" height="8" rx="1" />
+      <path d="M8 8h8M7 17h4M13 17h4" />
+    </Icon>
+  );
+}
+
 export function MavenIcon(props: IconProps) {
   // A feather over a stack — Maven's build-and-package identity, rendered as a
   // simple mark distinct from the other format glyphs.
