@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"time"
 
@@ -38,16 +39,29 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Field, e.Message)
 }
 
+// Upstream is a proxied registry a project mirrors. Password is write-only: it
+// is accepted on create but never returned, so it must not leak through the API.
+type Upstream struct {
+	URL      string
+	Username string
+	Password string
+}
+
 // Project is the domain view: timestamps are real time.Time, not the strings
-// the store keeps.
+// the store keeps. Upstream is set only for pull-through proxy projects; it is
+// nil for ordinary local projects.
 type Project struct {
 	ID          string
 	Key         string
 	Name        string
 	Description string
+	Upstream    *Upstream
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }
+
+// IsProxy reports whether the project is a pull-through proxy.
+func (p Project) IsProxy() bool { return p.Upstream != nil }
 
 // Service provides project operations backed by the metadata store.
 type Service struct {
@@ -71,7 +85,9 @@ type CreateInput struct {
 	Key         string
 	Name        string
 	Description string
-	Actor       string
+	// Upstream, when set, makes the project a pull-through proxy of that registry.
+	Upstream *Upstream
+	Actor    string
 }
 
 // Create validates the input and, in a single transaction, inserts the project
@@ -108,14 +124,33 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Project, error) {
 		return Project{}, fmt.Errorf("creating project: %w", err)
 	}
 
+	if in.Upstream != nil {
+		if err := qtx.CreateProxy(ctx, db.CreateProxyParams{
+			ProjectID:   projectID,
+			UpstreamUrl: in.Upstream.URL,
+			Username:    in.Upstream.Username,
+			Password:    in.Upstream.Password,
+			CreatedAt:   ts,
+			UpdatedAt:   ts,
+		}); err != nil {
+			return Project{}, fmt.Errorf("configuring proxy: %w", err)
+		}
+	}
+
+	action := "project.create"
+	metadata := "{}"
+	if in.Upstream != nil {
+		action = "project.create.proxy"
+		metadata = fmt.Sprintf(`{"upstream":%q}`, in.Upstream.URL)
+	}
 	if _, err := qtx.InsertAuditEntry(ctx, db.InsertAuditEntryParams{
 		ID:         id.New("audit"),
 		ProjectID:  sql.NullString{String: projectID, Valid: true},
 		Actor:      actorOrSystem(in.Actor),
-		Action:     "project.create",
+		Action:     action,
 		TargetType: "project",
 		TargetID:   projectID,
-		Metadata:   "{}",
+		Metadata:   metadata,
 		CreatedAt:  ts,
 	}); err != nil {
 		return Project{}, fmt.Errorf("writing audit entry: %w", err)
@@ -124,10 +159,17 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Project, error) {
 	if err := tx.Commit(); err != nil {
 		return Project{}, fmt.Errorf("commit: %w", err)
 	}
-	return toDomain(row)
+
+	created, err := toDomain(row)
+	if err != nil {
+		return Project{}, err
+	}
+	created.Upstream = in.Upstream
+	return created, nil
 }
 
-// GetByKey returns a single project, or ErrNotFound.
+// GetByKey returns a single project, or ErrNotFound. A proxy project carries its
+// upstream URL and username, but never the stored password.
 func (s *Service) GetByKey(ctx context.Context, key string) (Project, error) {
 	row, err := s.q.GetProjectByKey(ctx, key)
 	if err != nil {
@@ -136,7 +178,24 @@ func (s *Service) GetByKey(ctx context.Context, key string) (Project, error) {
 		}
 		return Project{}, fmt.Errorf("getting project %s: %w", key, err)
 	}
-	return toDomain(row)
+	p, err := toDomain(row)
+	if err != nil {
+		return Project{}, err
+	}
+	proxyRow, err := s.q.GetProxyByProjectID(ctx, row.ID)
+	switch {
+	case err == nil:
+		p.Upstream = upstreamFromRow(proxyRow)
+	case !errors.Is(err, sql.ErrNoRows):
+		return Project{}, fmt.Errorf("loading proxy config for %s: %w", key, err)
+	}
+	return p, nil
+}
+
+// upstreamFromRow maps a stored proxy row to the display view, deliberately
+// dropping the password so it cannot leak through a read path.
+func upstreamFromRow(row db.RegistryProxy) *Upstream {
+	return &Upstream{URL: row.UpstreamUrl, Username: row.Username}
 }
 
 // Count returns the total number of projects (for the dashboard summary).
@@ -175,12 +234,24 @@ func (s *Service) List(ctx context.Context, cursor string, limit int) (Page, err
 		rows = rows[:limit]
 	}
 
+	// One lookup marks which of these projects are proxies, instead of a query
+	// per row.
+	proxyRows, err := s.q.ListProxies(ctx)
+	if err != nil {
+		return Page{}, fmt.Errorf("listing proxies: %w", err)
+	}
+	upstreams := make(map[string]*Upstream, len(proxyRows))
+	for _, pr := range proxyRows {
+		upstreams[pr.ProjectID] = upstreamFromRow(pr)
+	}
+
 	projects := make([]Project, 0, len(rows))
 	for _, row := range rows {
 		p, err := toDomain(row)
 		if err != nil {
 			return Page{}, err
 		}
+		p.Upstream = upstreams[row.ID]
 		projects = append(projects, p)
 	}
 	return Page{Projects: projects, NextCursor: next}, nil
@@ -198,6 +269,22 @@ func validateCreate(in CreateInput) error {
 	}
 	if len(in.Name) > 100 {
 		return &ValidationError{Field: "name", Message: "must be at most 100 characters"}
+	}
+	if in.Upstream != nil {
+		if err := validateUpstream(in.Upstream); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateUpstream checks a proxy's upstream URL is an absolute http(s) URL. A
+// password without a username (or vice versa) is allowed — some registries take
+// a token in one field — but the URL must be well-formed.
+func validateUpstream(u *Upstream) error {
+	parsed, err := url.Parse(u.URL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return &ValidationError{Field: "upstream.url", Message: "must be an absolute http(s) URL, e.g. https://registry-1.docker.io"}
 	}
 	return nil
 }
