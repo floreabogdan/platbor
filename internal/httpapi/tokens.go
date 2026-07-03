@@ -98,7 +98,7 @@ func (h tokensHandler) create(w http.ResponseWriter, r *http.Request) {
 	user, _ := userFromContext(r.Context())
 	ttl := time.Duration(req.ExpiresInDays) * 24 * time.Hour
 
-	raw, tok, err := h.svc.CreateToken(r.Context(), user.ID, req.Name, ttl)
+	raw, tok, err := h.svc.CreateToken(r.Context(), user.ID, user.Username, req.Name, ttl)
 	if err != nil {
 		h.log.Error("creating token", slog.String("error", err.Error()))
 		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
@@ -111,7 +111,7 @@ func (h tokensHandler) delete(w http.ResponseWriter, r *http.Request) {
 	user, _ := userFromContext(r.Context())
 	tokenID := chi.URLParam(r, "id")
 
-	if err := h.svc.DeleteToken(r.Context(), user.ID, tokenID); err != nil {
+	if err := h.svc.DeleteToken(r.Context(), user.ID, user.Username, tokenID); err != nil {
 		if errors.Is(err, auth.ErrTokenNotFound) {
 			writeProblem(w, http.StatusNotFound, "Token not found", "")
 			return

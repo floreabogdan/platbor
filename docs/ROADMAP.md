@@ -10,7 +10,7 @@ Goal: one binary that boots, authenticates, and serves the UI shell.
 - [x] SQLite + migrations + sqlc wiring; Postgres behind the same interface (SQLite done; Postgres seam present, driver not yet implemented)
 - [x] Blob store: `fs` driver, upload sessions, sha256 verification (content-addressable, resumable, dedup; served to a consumer in Phase 1, GC later)
 - [~] Auth: local users, sessions, instance admin bootstrap, and API tokens (bearer auth) done; project roles/RBAC pending
-- [~] Audit log table + middleware (table + transactional writes with the authenticated actor done; generic middleware pending)
+- [x] Audit log: every mutation is recorded transactionally with the authenticated actor — the audit write commits in the *same* transaction as the change it describes (projects, proxies, personal access tokens, OCI manifest/tag deletes, and GC), so the record and the change land together or not at all. This deliberately replaces the originally-planned generic HTTP middleware: a request-level interceptor only sees coarse method+path+status *after* the handler runs and cannot guarantee the record commits atomically with the change, whereas the domain services own both writes. Request-level observability (method, path, status, duration, request id) is separately covered by the slog request logger.
 - [x] React app shell: login, sidebar layout, projects list (per DESIGN-SYSTEM.md) wired to the API, embedded via `go:embed`
 - [ ] `docker run` quickstart works end to end
 

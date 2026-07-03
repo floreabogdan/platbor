@@ -218,7 +218,7 @@ func TestPushWithPersonalAccessToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
-	rawToken, _, err := h.auth.CreateToken(context.Background(), admin.ID, "ci", 0)
+	rawToken, _, err := h.auth.CreateToken(context.Background(), admin.ID, admin.Username, "ci", 0)
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}

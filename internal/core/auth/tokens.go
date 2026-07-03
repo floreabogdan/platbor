@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -43,13 +44,16 @@ type Token struct {
 
 // CreateToken issues a new personal access token for the user. ttl of 0 means
 // no expiry. The raw secret is returned once and never recoverable afterward.
-func (s *Service) CreateToken(ctx context.Context, userID, name string, ttl time.Duration) (raw string, tok Token, err error) {
+// actor is the username recorded in the audit log (the token owner acting on
+// their own behalf). The token row and its audit entry commit together.
+func (s *Service) CreateToken(ctx context.Context, userID, actor, name string, ttl time.Duration) (raw string, tok Token, err error) {
 	raw, err = newAPIToken()
 	if err != nil {
 		return "", Token{}, err
 	}
 
 	now := s.now()
+	ts := now.Format(time.RFC3339Nano)
 	var expires sql.NullString
 	var expiresPtr *time.Time
 	if ttl > 0 {
@@ -57,18 +61,33 @@ func (s *Service) CreateToken(ctx context.Context, userID, name string, ttl time
 		expires = sql.NullString{String: exp.Format(time.RFC3339Nano), Valid: true}
 		expiresPtr = &exp
 	}
+	tokenID := id.New("tok")
 
-	row, err := s.q.CreateAPIToken(ctx, db.CreateAPITokenParams{
-		ID:        id.New("tok"),
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", Token{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	qtx := s.q.WithTx(tx)
+
+	row, err := qtx.CreateAPIToken(ctx, db.CreateAPITokenParams{
+		ID:        tokenID,
 		UserID:    userID,
 		Name:      name,
 		TokenHash: hashToken(raw),
 		Prefix:    raw[:displayPrefixLen],
-		CreatedAt: now.Format(time.RFC3339Nano),
+		CreatedAt: ts,
 		ExpiresAt: expires,
 	})
 	if err != nil {
 		return "", Token{}, fmt.Errorf("creating token: %w", err)
+	}
+
+	if _, err := qtx.InsertAuditEntry(ctx, tokenAudit(tokenID, actor, "token.create", tokenMetadata(name), ts)); err != nil {
+		return "", Token{}, fmt.Errorf("writing audit entry: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", Token{}, fmt.Errorf("commit: %w", err)
 	}
 
 	tok = Token{ID: row.ID, Name: row.Name, Prefix: row.Prefix, CreatedAt: now, ExpiresAt: expiresPtr}
@@ -89,16 +108,54 @@ func (s *Service) ListTokens(ctx context.Context, userID string) ([]Token, error
 }
 
 // DeleteToken revokes a token the user owns. Deleting an unknown or
-// not-owned token returns ErrTokenNotFound.
-func (s *Service) DeleteToken(ctx context.Context, userID, tokenID string) error {
-	affected, err := s.q.DeleteAPIToken(ctx, db.DeleteAPITokenParams{ID: tokenID, UserID: userID})
+// not-owned token returns ErrTokenNotFound. actor is the username recorded in
+// the audit log; the revocation and its audit entry commit together.
+func (s *Service) DeleteToken(ctx context.Context, userID, actor, tokenID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	qtx := s.q.WithTx(tx)
+
+	affected, err := qtx.DeleteAPIToken(ctx, db.DeleteAPITokenParams{ID: tokenID, UserID: userID})
 	if err != nil {
 		return fmt.Errorf("deleting token: %w", err)
 	}
 	if affected == 0 {
 		return ErrTokenNotFound
 	}
-	return nil
+
+	if _, err := qtx.InsertAuditEntry(ctx, tokenAudit(tokenID, actor, "token.revoke", "{}", s.now().Format(time.RFC3339Nano))); err != nil {
+		return fmt.Errorf("writing audit entry: %w", err)
+	}
+	return tx.Commit()
+}
+
+// tokenAudit builds an audit entry for a personal-token mutation. Tokens are
+// personal, not project-scoped, so project_id is left null (an instance-level
+// event in the activity feed).
+func tokenAudit(tokenID, actor, action, metadata, ts string) db.InsertAuditEntryParams {
+	return db.InsertAuditEntryParams{
+		ID:         id.New("audit"),
+		ProjectID:  sql.NullString{},
+		Actor:      actor,
+		Action:     action,
+		TargetType: "token",
+		TargetID:   tokenID,
+		Metadata:   metadata,
+		CreatedAt:  ts,
+	}
+}
+
+// tokenMetadata records the token's display name so the activity feed can name
+// it. json.Marshal keeps the object valid for arbitrary user-supplied names.
+func tokenMetadata(name string) string {
+	b, err := json.Marshal(map[string]string{"name": name})
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
 }
 
 // AuthenticateToken resolves a raw token to its owner, rejecting unknown or

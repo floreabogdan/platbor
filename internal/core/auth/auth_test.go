@@ -132,7 +132,7 @@ func TestTokenLifecycle(t *testing.T) {
 	ctx := context.Background()
 	user := bootstrapUser(t, svc)
 
-	raw, tok, err := svc.CreateToken(ctx, user.ID, "ci", 0)
+	raw, tok, err := svc.CreateToken(ctx, user.ID, user.Username, "ci", 0)
 	if err != nil {
 		t.Fatalf("CreateToken: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestTokenLifecycle(t *testing.T) {
 	}
 
 	// Revoking it makes the raw token stop working.
-	if err := svc.DeleteToken(ctx, user.ID, tok.ID); err != nil {
+	if err := svc.DeleteToken(ctx, user.ID, user.Username, tok.ID); err != nil {
 		t.Fatalf("DeleteToken: %v", err)
 	}
 	if _, err := svc.AuthenticateToken(ctx, raw); err != auth.ErrInvalidToken {
@@ -173,7 +173,7 @@ func TestTokenLifecycle(t *testing.T) {
 func TestDeleteUnknownTokenReturnsNotFound(t *testing.T) {
 	svc := newService(t)
 	user := bootstrapUser(t, svc)
-	if err := svc.DeleteToken(context.Background(), user.ID, "tok_does_not_exist"); err != auth.ErrTokenNotFound {
+	if err := svc.DeleteToken(context.Background(), user.ID, user.Username, "tok_does_not_exist"); err != auth.ErrTokenNotFound {
 		t.Errorf("got %v, want ErrTokenNotFound", err)
 	}
 }
