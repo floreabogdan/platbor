@@ -14,7 +14,7 @@ export function ProjectsPage() {
     <div className="animate-rise">
       <PageHeader
         title="Projects"
-        subtitle="Every artifact and catalog entity is scoped to a project."
+        subtitle="The tenant boundary that scopes every repository and catalog entity. Create and configure them here."
         actions={<Button onClick={() => setCreating(true)}>New project</Button>}
       />
 

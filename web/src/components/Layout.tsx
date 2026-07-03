@@ -16,18 +16,25 @@ interface NavGroup {
   items: NavItem[];
 }
 
+// The sidebar separates two axes that used to sit as look-alike peers:
+// "Browse" is the content axis (what kind of artifact — global, cross-project),
+// while "Manage" is the container axis (projects are the tenant boundary that
+// scopes everything, not another browse view). See docs/DESIGN-SYSTEM.md.
 const NAV: NavGroup[] = [
   {
     label: 'Overview',
     items: [{ to: '/', label: 'Dashboard', icon: <DashboardIcon /> }],
   },
   {
-    label: 'Platform',
+    label: 'Browse',
     items: [
-      { to: '/projects', label: 'Projects', icon: <ProjectsIcon /> },
       { to: '/registry', label: 'Registry', icon: <RegistryIcon /> },
       { to: '/catalog', label: 'Catalog', icon: <CatalogIcon /> },
     ],
+  },
+  {
+    label: 'Manage',
+    items: [{ to: '/projects', label: 'Projects', icon: <ProjectsIcon /> }],
   },
   {
     label: 'Admin',
