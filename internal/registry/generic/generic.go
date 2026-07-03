@@ -296,8 +296,20 @@ func (h *handler) authenticate(r *http.Request) (auth.User, bool) {
 			return user, true
 		}
 	}
+	// A generic repository is a UI-managed "bucket": the browser uploads and
+	// downloads files directly, carrying the session cookie rather than a token.
+	// Accept it here (the CLI formats never need cookie auth).
+	if c, err := r.Cookie(sessionCookieName); err == nil {
+		if user, err := h.auth.ResolveSession(r.Context(), c.Value); err == nil {
+			return user, true
+		}
+	}
 	return auth.User{}, false
 }
+
+// sessionCookieName mirrors the httpapi session cookie so the browser can reach
+// a generic bucket with the same login it uses for the rest of the UI.
+const sessionCookieName = "platbor_session"
 
 // validPath rejects empty, absolute, or dot-segment paths so a file can never
 // escape its repository.

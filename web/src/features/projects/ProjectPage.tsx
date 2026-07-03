@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { api, ApiError } from '../../lib/api';
 import { Breadcrumb, Button, Card, EmptyState, Modal, PageHeader } from '../../components/ui';
 import { FileIcon, NugetIcon, PackageIcon, ProjectsIcon, RegistryIcon, TrashIcon } from '../../components/icons';
@@ -94,6 +94,7 @@ export function ProjectPage() {
               {repos.map((repo) => (
                 <RepoRow
                   key={repo.key}
+                  projectKey={key}
                   repo={repo}
                   isAdmin={isAdmin}
                   onEdit={() => setEditing(repo)}
@@ -132,21 +133,35 @@ export function ProjectPage() {
 }
 
 function RepoRow({
+  projectKey,
   repo,
   isAdmin,
   onEdit,
   onDelete,
 }: {
+  projectKey: string;
   repo: Repo;
   isAdmin: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   const glyph = FORMAT_GLYPH[repo.format];
+  // A generic repository is a browsable bucket: link into it. Other formats are
+  // read/written by their protocol client and browsed in the Registry.
+  const isBucket = repo.format === 'generic';
   return (
     <tr className="border-b border-slate-100 last:border-0">
       <Td>
-        <span className="font-mono font-medium text-slate-900">{repo.key}</span>
+        {isBucket ? (
+          <Link
+            to={`/projects/${projectKey}/buckets/${repo.key}`}
+            className="font-mono font-medium text-teal-700 hover:underline"
+          >
+            {repo.key}
+          </Link>
+        ) : (
+          <span className="font-mono font-medium text-slate-900">{repo.key}</span>
+        )}
         {repo.name && repo.name !== repo.key ? (
           <span className="ml-2 text-xs text-slate-400">{repo.name}</span>
         ) : null}
