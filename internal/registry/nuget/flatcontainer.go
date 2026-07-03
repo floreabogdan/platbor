@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/platbor/platbor/internal/core/blob"
+	"github.com/platbor/platbor/internal/core/repository"
 )
 
 // flatContainer serves the PackageBaseAddress resource used by restore:
@@ -23,11 +24,20 @@ func (h *handler) flatContainer(w http.ResponseWriter, r *http.Request) {
 	}
 	rest := strings.Trim(chi.URLParam(r, "*"), "/")
 	parts := strings.Split(rest, "/")
+	proxy := repo.Mode == repository.ModeProxy
 
 	switch {
 	case len(parts) == 2 && parts[1] == "index.json":
+		if proxy {
+			h.proxyFlatVersions(w, r, upstreamOf(repo), strings.ToLower(parts[0]))
+			return
+		}
 		h.flatVersions(w, r, repo.ID, strings.ToLower(parts[0]))
 	case len(parts) == 3 && strings.HasSuffix(strings.ToLower(parts[2]), ".nupkg"):
+		if proxy {
+			h.proxyFlatDownload(w, r, upstreamOf(repo), repo.ID, strings.ToLower(parts[0]), strings.ToLower(parts[1]))
+			return
+		}
 		h.flatDownload(w, r, repo.ID, strings.ToLower(parts[0]), strings.ToLower(parts[1]))
 	default:
 		writeError(w, http.StatusNotFound, "not found")

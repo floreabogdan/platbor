@@ -5,6 +5,8 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/platbor/platbor/internal/core/repository"
 )
 
 // search serves the SearchQueryService: a minimal search over package ids in the
@@ -12,6 +14,10 @@ import (
 func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 	repo, ok := h.resolveRepo(w, r, false)
 	if !ok {
+		return
+	}
+	if repo.Mode == repository.ModeProxy {
+		h.proxySearch(w, r, upstreamOf(repo), chi.URLParam(r, "project"), chi.URLParam(r, "repo"))
 		return
 	}
 	query := r.URL.Query().Get("q")

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -266,6 +267,161 @@ func TestSearch(t *testing.T) {
 	_ = json.Unmarshal(rr.Body.Bytes(), &res)
 	if res.TotalHits != 1 || res.Data[0].ID != "Acme.Widgets" {
 		t.Errorf("search = %+v, want 1 hit Acme.Widgets", res)
+	}
+}
+
+// fakeNugetUpstream is an in-memory upstream V3 feed for the proxy test. It
+// serves a service index, a flat-container version list + .nupkg, a registration
+// whose single page is an external reference (to exercise page inlining), and
+// search — all with URLs pointing back at itself so the proxy must rewrite them.
+type fakeNugetUpstream struct {
+	server    *httptest.Server
+	idLower   string
+	version   string
+	nupkg     []byte
+	nupkgHits int
+	offline   bool
+}
+
+func newFakeNugetUpstream(t *testing.T, id, version string, nupkg []byte) *fakeNugetUpstream {
+	t.Helper()
+	f := &fakeNugetUpstream{idLower: strings.ToLower(id), version: version, nupkg: nupkg}
+	mux := http.NewServeMux()
+	base := func() string { return f.server.URL }
+
+	mux.HandleFunc("/v3/index.json", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version": "3.0.0",
+			"resources": []map[string]string{
+				{"@id": base() + "/flat/", "@type": "PackageBaseAddress/3.0.0"},
+				{"@id": base() + "/reg/", "@type": "RegistrationsBaseUrl/3.6.0"},
+				{"@id": base() + "/query", "@type": "SearchQueryService/3.5.0"},
+			},
+		})
+	})
+	mux.HandleFunc("/flat/"+f.idLower+"/index.json", func(w http.ResponseWriter, _ *http.Request) {
+		if f.offline {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"versions": []string{f.version}})
+	})
+	nupkgPath := "/flat/" + f.idLower + "/" + f.version + "/" + f.idLower + "." + f.version + ".nupkg"
+	mux.HandleFunc(nupkgPath, func(w http.ResponseWriter, _ *http.Request) {
+		if f.offline {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		f.nupkgHits++
+		_, _ = w.Write(f.nupkg)
+	})
+	content := base
+	// Registration root: one page given only by reference, forcing an inline fetch.
+	mux.HandleFunc("/reg/"+f.idLower+"/index.json", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"@id":   content() + "/reg/" + f.idLower + "/index.json",
+			"count": 1,
+			"items": []map[string]any{{
+				"@id":   content() + "/reg/" + f.idLower + "/page/0.json",
+				"count": 1,
+			}},
+		})
+	})
+	mux.HandleFunc("/reg/"+f.idLower+"/page/0.json", func(w http.ResponseWriter, _ *http.Request) {
+		pkgContent := content() + "/flat/" + f.idLower + "/" + f.version + "/" + f.idLower + "." + f.version + ".nupkg"
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"@id":   content() + "/reg/" + f.idLower + "/page/0.json",
+			"count": 1,
+			"items": []map[string]any{{
+				"catalogEntry":   map[string]any{"id": f.idLower, "version": f.version, "packageContent": pkgContent},
+				"packageContent": pkgContent,
+			}},
+		})
+	})
+	mux.HandleFunc("/query", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"totalHits": 1,
+			"data": []map[string]any{{
+				"id":           f.idLower,
+				"version":      f.version,
+				"registration": content() + "/reg/" + f.idLower + "/index.json",
+			}},
+		})
+	})
+	f.server = httptest.NewServer(mux)
+	t.Cleanup(f.server.Close)
+	return f
+}
+
+func TestProxyPullThrough(t *testing.T) {
+	h := newHarness(t)
+	key := h.token(t)
+	nupkg := buildNupkg(t, "Acme.Widgets", "1.0.0")
+	up := newFakeNugetUpstream(t, "Acme.Widgets", "1.0.0", nupkg)
+
+	// A project with a proxy NuGet repository mirroring the fake upstream.
+	proj, err := project.NewService(h.db).Create(context.Background(), project.CreateInput{
+		Key: "up", Name: "Upstream", AllowAutoCreate: true, Actor: "admin",
+	})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if _, err := repository.NewService(h.db).Create(context.Background(), repository.CreateInput{
+		ProjectID: proj.ID, Key: "cache", Name: "Cache",
+		Format: repository.FormatNuGet, Mode: repository.ModeProxy,
+		Upstream: &repository.Upstream{URL: up.server.URL + "/v3/index.json"}, Actor: "admin",
+	}); err != nil {
+		t.Fatalf("create proxy repo: %v", err)
+	}
+
+	// Flat-container version list is proxied through.
+	fv := h.do(t, http.MethodGet, "/nuget/up/cache/v3-flatcontainer/acme.widgets/index.json", nil, key)
+	if fv.Code != http.StatusOK {
+		t.Fatalf("proxy versions: status = %d (%s)", fv.Code, fv.Body.String())
+	}
+	if !bytes.Contains(fv.Body.Bytes(), []byte("1.0.0")) {
+		t.Errorf("proxy versions missing 1.0.0: %s", fv.Body.String())
+	}
+
+	// First .nupkg GET fills the cache from upstream; the second is a local hit.
+	dlPath := "/nuget/up/cache/v3-flatcontainer/acme.widgets/1.0.0/acme.widgets.1.0.0.nupkg"
+	for i := 0; i < 2; i++ {
+		dl := h.do(t, http.MethodGet, dlPath, nil, key)
+		if dl.Code != http.StatusOK || !bytes.Equal(dl.Body.Bytes(), nupkg) {
+			t.Fatalf("nupkg GET #%d: status=%d match=%v", i, dl.Code, bytes.Equal(dl.Body.Bytes(), nupkg))
+		}
+	}
+	if up.nupkgHits != 1 {
+		t.Errorf("upstream nupkg fetched %d times; want 1 (cached after first)", up.nupkgHits)
+	}
+
+	// Registration inlines the external page and rewrites packageContent to us.
+	reg := h.do(t, http.MethodGet, "/nuget/up/cache/v3/registrations/acme.widgets/index.json", nil, key)
+	if reg.Code != http.StatusOK {
+		t.Fatalf("proxy registration: status = %d (%s)", reg.Code, reg.Body.String())
+	}
+	wantContent := "http://localhost:8094/nuget/up/cache/v3-flatcontainer/acme.widgets/1.0.0/acme.widgets.1.0.0.nupkg"
+	if !bytes.Contains(reg.Body.Bytes(), []byte(wantContent)) {
+		t.Errorf("registration packageContent not rewritten to us:\n%s", reg.Body.String())
+	}
+	if bytes.Contains(reg.Body.Bytes(), []byte(up.server.URL)) {
+		t.Errorf("registration still references the upstream host:\n%s", reg.Body.String())
+	}
+
+	// Search results have their registration URL rewritten to us.
+	sr := h.do(t, http.MethodGet, "/nuget/up/cache/v3/search?q=acme", nil, key)
+	if sr.Code != http.StatusOK {
+		t.Fatalf("proxy search: status = %d (%s)", sr.Code, sr.Body.String())
+	}
+	if !bytes.Contains(sr.Body.Bytes(), []byte("http://localhost:8094/nuget/up/cache/v3/registrations/acme.widgets/index.json")) {
+		t.Errorf("search registration not rewritten to us:\n%s", sr.Body.String())
+	}
+
+	// Offline: a cached .nupkg still downloads (cache hit needs no upstream).
+	up.offline = true
+	off := h.do(t, http.MethodGet, dlPath, nil, key)
+	if off.Code != http.StatusOK || !bytes.Equal(off.Body.Bytes(), nupkg) {
+		t.Errorf("offline cached download: status=%d match=%v", off.Code, bytes.Equal(off.Body.Bytes(), nupkg))
 	}
 }
 

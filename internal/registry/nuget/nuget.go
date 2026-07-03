@@ -34,11 +34,12 @@ func (a *Adapter) Key() string { return "nuget" }
 // Mount registers the NuGet routes. r is already scoped to /nuget.
 func (a *Adapter) Mount(r chi.Router, deps registry.Deps) {
 	h := &handler{
-		blobs: deps.Blobs,
-		auth:  deps.Auth,
-		store: newPackageStore(deps.DB),
-		repos: deps.Repositories,
-		log:   deps.Log,
+		blobs:    deps.Blobs,
+		auth:     deps.Auth,
+		store:    newPackageStore(deps.DB),
+		repos:    deps.Repositories,
+		upstream: newUpstreamClient(),
+		log:      deps.Log,
 	}
 	r.Route("/{project}/{repo}", func(sub chi.Router) {
 		// The service index is anonymous so clients can discover the feed.
@@ -57,11 +58,12 @@ func (a *Adapter) Mount(r chi.Router, deps registry.Deps) {
 }
 
 type handler struct {
-	blobs blob.Store
-	auth  *auth.Service
-	store *packageStore
-	repos *repository.Service
-	log   *slog.Logger
+	blobs    blob.Store
+	auth     *auth.Service
+	store    *packageStore
+	repos    *repository.Service
+	upstream *upstreamClient
+	log      *slog.Logger
 }
 
 // requireAuth authenticates via API key, Basic, or bearer, challenging otherwise.

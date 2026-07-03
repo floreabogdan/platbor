@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/platbor/platbor/internal/core/repository"
 )
 
 // registration serves the RegistrationsBaseUrl resource: package metadata the
@@ -23,6 +25,11 @@ func (h *handler) registration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	idLower := strings.ToLower(parts[0])
+
+	if repo.Mode == repository.ModeProxy {
+		h.proxyRegistration(w, r, upstreamOf(repo), chi.URLParam(r, "project"), chi.URLParam(r, "repo"), idLower)
+		return
+	}
 
 	versions, err := h.store.versions(r.Context(), repo.ID, idLower)
 	if err != nil {

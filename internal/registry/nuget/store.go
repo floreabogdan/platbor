@@ -101,6 +101,62 @@ func (s *packageStore) push(ctx context.Context, in pushInput) error {
 	})
 }
 
+// cacheInput records a proxied .nupkg pulled through from an upstream feed. The
+// lookup keys (IDLower, VersionLower) come from the request URL so a later cache
+// hit resolves; the display fields come from the embedded .nuspec when readable.
+type cacheInput struct {
+	RepositoryID string
+	IDOriginal   string
+	IDLower      string
+	Version      string
+	VersionLower string
+	NupkgDigest  string
+	NupkgSize    int64
+	Nuspec       []byte
+}
+
+// cacheVersion stores a pulled-through package version without an audit entry (a
+// cache fill is not a user mutation) and treats an already-cached version as a
+// no-op, so concurrent pulls of the same package are idempotent.
+func (s *packageStore) cacheVersion(ctx context.Context, in cacheInput) error {
+	ts := s.now().Format(time.RFC3339Nano)
+	return s.inTx(ctx, func(qtx *db.Queries) error {
+		pkgID, err := qtx.UpsertNugetPackage(ctx, db.UpsertNugetPackageParams{
+			ID:           id.New("nugetpkg"),
+			RepositoryID: in.RepositoryID,
+			IDLower:      in.IDLower,
+			IDOriginal:   in.IDOriginal,
+			CreatedAt:    ts,
+			UpdatedAt:    ts,
+		})
+		if err != nil {
+			return fmt.Errorf("upserting cached package: %w", err)
+		}
+		exists, err := qtx.NugetVersionExists(ctx, db.NugetVersionExistsParams{
+			RepositoryID: in.RepositoryID, IDLower: in.IDLower, VersionLower: in.VersionLower,
+		})
+		if err != nil {
+			return fmt.Errorf("checking cached version: %w", err)
+		}
+		if exists > 0 {
+			return nil
+		}
+		if err := qtx.InsertNugetVersion(ctx, db.InsertNugetVersionParams{
+			ID:           id.New("nugetver"),
+			PackageID:    pkgID,
+			Version:      in.Version,
+			VersionLower: in.VersionLower,
+			NupkgDigest:  in.NupkgDigest,
+			NupkgSize:    in.NupkgSize,
+			Nuspec:       in.Nuspec,
+			CreatedAt:    ts,
+		}); err != nil {
+			return fmt.Errorf("inserting cached version: %w", err)
+		}
+		return nil
+	})
+}
+
 // storedVersion is a version read back for the flat-container, registration, and
 // download resources.
 type storedVersion struct {
