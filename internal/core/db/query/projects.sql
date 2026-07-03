@@ -1,6 +1,6 @@
 -- name: CreateProject :one
-INSERT INTO projects (id, key, name, description, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO projects (id, key, name, description, allow_auto_create, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: GetProjectByKey :one
@@ -8,6 +8,9 @@ SELECT * FROM projects WHERE key = ?;
 
 -- name: GetProjectByID :one
 SELECT * FROM projects WHERE id = ?;
+
+-- name: SetProjectAutoCreate :exec
+UPDATE projects SET allow_auto_create = ?, updated_at = ? WHERE key = ?;
 
 -- Keyset pagination on the unique `key` column. The first page passes the empty
 -- string, which sorts before any valid key, so a single query serves both the

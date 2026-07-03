@@ -10,10 +10,10 @@ import (
 )
 
 const countRepositories = `-- name: CountRepositories :one
-SELECT COUNT(*) FROM (SELECT DISTINCT project_id, repository FROM oci_manifests) AS repos
+SELECT COUNT(*) FROM (SELECT DISTINCT repository_id, repository FROM oci_manifests) AS repos
 `
 
-// Distinct repositories across all projects, for the dashboard summary.
+// Distinct images across all repositories, for the dashboard summary.
 func (q *Queries) CountRepositories(ctx context.Context) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countRepositories)
 	var count int64
@@ -34,17 +34,17 @@ func (q *Queries) CountTags(ctx context.Context) (int64, error) {
 
 const deleteManifest = `-- name: DeleteManifest :execrows
 DELETE FROM oci_manifests
-WHERE project_id = ? AND repository = ? AND digest = ?
+WHERE repository_id = ? AND repository = ? AND digest = ?
 `
 
 type DeleteManifestParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Digest     string `json:"digest"`
+	RepositoryID string `json:"repository_id"`
+	Repository   string `json:"repository"`
+	Digest       string `json:"digest"`
 }
 
 func (q *Queries) DeleteManifest(ctx context.Context, arg DeleteManifestParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteManifest, arg.ProjectID, arg.Repository, arg.Digest)
+	result, err := q.db.ExecContext(ctx, deleteManifest, arg.RepositoryID, arg.Repository, arg.Digest)
 	if err != nil {
 		return 0, err
 	}
@@ -53,17 +53,17 @@ func (q *Queries) DeleteManifest(ctx context.Context, arg DeleteManifestParams) 
 
 const deleteTag = `-- name: DeleteTag :execrows
 DELETE FROM oci_tags
-WHERE project_id = ? AND repository = ? AND tag = ?
+WHERE repository_id = ? AND repository = ? AND tag = ?
 `
 
 type DeleteTagParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
+	RepositoryID string `json:"repository_id"`
+	Repository   string `json:"repository"`
+	Tag          string `json:"tag"`
 }
 
 func (q *Queries) DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteTag, arg.ProjectID, arg.Repository, arg.Tag)
+	result, err := q.db.ExecContext(ctx, deleteTag, arg.RepositoryID, arg.Repository, arg.Tag)
 	if err != nil {
 		return 0, err
 	}
@@ -72,65 +72,65 @@ func (q *Queries) DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, er
 
 const deleteTagsForDigest = `-- name: DeleteTagsForDigest :exec
 DELETE FROM oci_tags
-WHERE project_id = ? AND repository = ? AND digest = ?
+WHERE repository_id = ? AND repository = ? AND digest = ?
 `
 
 type DeleteTagsForDigestParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Digest     string `json:"digest"`
+	RepositoryID string `json:"repository_id"`
+	Repository   string `json:"repository"`
+	Digest       string `json:"digest"`
 }
 
 func (q *Queries) DeleteTagsForDigest(ctx context.Context, arg DeleteTagsForDigestParams) error {
-	_, err := q.db.ExecContext(ctx, deleteTagsForDigest, arg.ProjectID, arg.Repository, arg.Digest)
+	_, err := q.db.ExecContext(ctx, deleteTagsForDigest, arg.RepositoryID, arg.Repository, arg.Digest)
 	return err
 }
 
 const getManifest = `-- name: GetManifest :one
-SELECT id, project_id, repository, digest, media_type, payload, size, created_at, subject, artifact_type FROM oci_manifests
-WHERE project_id = ? AND repository = ? AND digest = ?
+SELECT id, repository_id, repository, digest, media_type, payload, size, subject, artifact_type, created_at FROM oci_manifests
+WHERE repository_id = ? AND repository = ? AND digest = ?
 `
 
 type GetManifestParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Digest     string `json:"digest"`
+	RepositoryID string `json:"repository_id"`
+	Repository   string `json:"repository"`
+	Digest       string `json:"digest"`
 }
 
 func (q *Queries) GetManifest(ctx context.Context, arg GetManifestParams) (OciManifest, error) {
-	row := q.db.QueryRowContext(ctx, getManifest, arg.ProjectID, arg.Repository, arg.Digest)
+	row := q.db.QueryRowContext(ctx, getManifest, arg.RepositoryID, arg.Repository, arg.Digest)
 	var i OciManifest
 	err := row.Scan(
 		&i.ID,
-		&i.ProjectID,
+		&i.RepositoryID,
 		&i.Repository,
 		&i.Digest,
 		&i.MediaType,
 		&i.Payload,
 		&i.Size,
-		&i.CreatedAt,
 		&i.Subject,
 		&i.ArtifactType,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getTag = `-- name: GetTag :one
-SELECT project_id, repository, tag, digest, updated_at FROM oci_tags
-WHERE project_id = ? AND repository = ? AND tag = ?
+SELECT repository_id, repository, tag, digest, updated_at FROM oci_tags
+WHERE repository_id = ? AND repository = ? AND tag = ?
 `
 
 type GetTagParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
+	RepositoryID string `json:"repository_id"`
+	Repository   string `json:"repository"`
+	Tag          string `json:"tag"`
 }
 
 func (q *Queries) GetTag(ctx context.Context, arg GetTagParams) (OciTag, error) {
-	row := q.db.QueryRowContext(ctx, getTag, arg.ProjectID, arg.Repository, arg.Tag)
+	row := q.db.QueryRowContext(ctx, getTag, arg.RepositoryID, arg.Repository, arg.Tag)
 	var i OciTag
 	err := row.Scan(
-		&i.ProjectID,
+		&i.RepositoryID,
 		&i.Repository,
 		&i.Tag,
 		&i.Digest,
@@ -143,22 +143,24 @@ const listAllRepositories = `-- name: ListAllRepositories :many
 SELECT
     p.key                    AS project_key,
     p.name                   AS project_name,
+    r.key                    AS repo_key,
     m.repository             AS repository,
     COUNT(DISTINCT m.digest) AS manifest_count,
     (SELECT COUNT(*) FROM oci_tags t
-       WHERE t.project_id = m.project_id AND t.repository = m.repository) AS tag_count,
-    CAST(rp.project_id IS NOT NULL AS INTEGER) AS is_proxy,
+       WHERE t.repository_id = m.repository_id AND t.repository = m.repository) AS tag_count,
+    CAST(r.mode = 'proxy' AS INTEGER) AS is_proxy,
     MAX(m.created_at)        AS updated_at
 FROM oci_manifests m
-JOIN projects p ON p.id = m.project_id
-LEFT JOIN registry_proxies rp ON rp.project_id = m.project_id
-GROUP BY m.project_id, m.repository
-ORDER BY p.key ASC, m.repository ASC
+JOIN repositories r ON r.id = m.repository_id
+JOIN projects p ON p.id = r.project_id
+GROUP BY m.repository_id, m.repository
+ORDER BY p.key ASC, r.key ASC, m.repository ASC
 `
 
 type ListAllRepositoriesRow struct {
 	ProjectKey    string      `json:"project_key"`
 	ProjectName   string      `json:"project_name"`
+	RepoKey       string      `json:"repo_key"`
 	Repository    string      `json:"repository"`
 	ManifestCount int64       `json:"manifest_count"`
 	TagCount      int64       `json:"tag_count"`
@@ -166,11 +168,9 @@ type ListAllRepositoriesRow struct {
 	UpdatedAt     interface{} `json:"updated_at"`
 }
 
-// Every repository across all projects, with tag and manifest counts, for the
-// registry browser's project-grouped index. A repository exists once it has at
-// least one manifest. is_proxy is 1 when the repository's project is a
-// pull-through mirror (a registry_proxies row exists), so the browser can label
-// it Local vs Proxy without a second query.
+// Every OCI image across all repositories, joined to its typed repository and
+// project, with tag and manifest counts, for the browser's index. is_proxy is 1
+// for a proxy repository.
 func (q *Queries) ListAllRepositories(ctx context.Context) ([]ListAllRepositoriesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAllRepositories)
 	if err != nil {
@@ -183,6 +183,7 @@ func (q *Queries) ListAllRepositories(ctx context.Context) ([]ListAllRepositorie
 		if err := rows.Scan(
 			&i.ProjectKey,
 			&i.ProjectName,
+			&i.RepoKey,
 			&i.Repository,
 			&i.ManifestCount,
 			&i.TagCount,
@@ -208,7 +209,7 @@ SELECT payload FROM oci_manifests
 
 // Every manifest's raw bytes, for garbage collection to mark the config and
 // layer blobs each one references. Blobs are a global CAS, so this spans all
-// projects.
+// repositories.
 func (q *Queries) ListManifestPayloads(ctx context.Context) ([][]byte, error) {
 	rows, err := q.db.QueryContext(ctx, listManifestPayloads)
 	if err != nil {
@@ -235,26 +236,29 @@ func (q *Queries) ListManifestPayloads(ctx context.Context) ([][]byte, error) {
 const listManifestSizing = `-- name: ListManifestSizing :many
 SELECT
     p.key        AS project_key,
+    r.key        AS repo_key,
     m.repository AS repository,
     m.digest     AS digest,
     m.size       AS size,
     m.payload    AS payload
 FROM oci_manifests m
-JOIN projects p ON p.id = m.project_id
+JOIN repositories r ON r.id = m.repository_id
+JOIN projects p ON p.id = r.project_id
 `
 
 type ListManifestSizingRow struct {
 	ProjectKey string `json:"project_key"`
+	RepoKey    string `json:"repo_key"`
 	Repository string `json:"repository"`
 	Digest     string `json:"digest"`
 	Size       int64  `json:"size"`
 	Payload    []byte `json:"payload"`
 }
 
-// Every manifest's project, repository, digest, stored size, and payload, so the
-// browser can compute per-repository storage: the sum of the distinct blobs each
-// repository references. Blobs are a shared CAS, so a layer used by two
-// repositories is counted once per repository (logical size), not physically.
+// Every manifest's project, repo, image, digest, stored size, and payload, so
+// the browser can compute per-image storage: the sum of the distinct blobs each
+// image references. Blobs are a shared CAS, so a layer used by two images is
+// counted once per image (logical size), not physically.
 func (q *Queries) ListManifestSizing(ctx context.Context) ([]ListManifestSizingRow, error) {
 	rows, err := q.db.QueryContext(ctx, listManifestSizing)
 	if err != nil {
@@ -266,6 +270,7 @@ func (q *Queries) ListManifestSizing(ctx context.Context) ([]ListManifestSizingR
 		var i ListManifestSizingRow
 		if err := rows.Scan(
 			&i.ProjectKey,
+			&i.RepoKey,
 			&i.Repository,
 			&i.Digest,
 			&i.Size,
@@ -287,14 +292,14 @@ func (q *Queries) ListManifestSizing(ctx context.Context) ([]ListManifestSizingR
 const listReferrers = `-- name: ListReferrers :many
 SELECT digest, media_type, size, artifact_type, payload
 FROM oci_manifests
-WHERE project_id = ? AND repository = ? AND subject = ?
+WHERE repository_id = ? AND repository = ? AND subject = ?
 ORDER BY created_at DESC
 `
 
 type ListReferrersParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Subject    string `json:"subject"`
+	RepositoryID string `json:"repository_id"`
+	Repository   string `json:"repository"`
+	Subject      string `json:"subject"`
 }
 
 type ListReferrersRow struct {
@@ -308,7 +313,7 @@ type ListReferrersRow struct {
 // Manifests whose subject is the given digest (a subject's signatures, SBOMs,
 // and other attestations) for the referrers API. Newest first.
 func (q *Queries) ListReferrers(ctx context.Context, arg ListReferrersParams) ([]ListReferrersRow, error) {
-	rows, err := q.db.QueryContext(ctx, listReferrers, arg.ProjectID, arg.Repository, arg.Subject)
+	rows, err := q.db.QueryContext(ctx, listReferrers, arg.RepositoryID, arg.Repository, arg.Subject)
 	if err != nil {
 		return nil, err
 	}
@@ -338,23 +343,23 @@ func (q *Queries) ListReferrers(ctx context.Context, arg ListReferrersParams) ([
 
 const listTags = `-- name: ListTags :many
 SELECT tag FROM oci_tags
-WHERE project_id = ? AND repository = ? AND tag > ?
+WHERE repository_id = ? AND repository = ? AND tag > ?
 ORDER BY tag ASC
 LIMIT ?
 `
 
 type ListTagsParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
-	Limit      int64  `json:"limit"`
+	RepositoryID string `json:"repository_id"`
+	Repository   string `json:"repository"`
+	Tag          string `json:"tag"`
+	Limit        int64  `json:"limit"`
 }
 
 // Keyset pagination on `tag`: the empty string sorts before any tag, so the
 // first page and subsequent pages share one query.
 func (q *Queries) ListTags(ctx context.Context, arg ListTagsParams) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, listTags,
-		arg.ProjectID,
+		arg.RepositoryID,
 		arg.Repository,
 		arg.Tag,
 		arg.Limit,
@@ -382,7 +387,7 @@ func (q *Queries) ListTags(ctx context.Context, arg ListTagsParams) ([]string, e
 
 const listTagsForRetention = `-- name: ListTagsForRetention :many
 SELECT repository, tag, updated_at FROM oci_tags
-WHERE project_id = ?
+WHERE repository_id = ?
 ORDER BY repository ASC, updated_at DESC, tag DESC
 `
 
@@ -392,10 +397,10 @@ type ListTagsForRetentionRow struct {
 	UpdatedAt  string `json:"updated_at"`
 }
 
-// Every tag in a project, grouped by repository and newest first, so a
+// Every tag in a repository, grouped by image and newest first, so a
 // keep-last-N policy can keep the newest tags and delete the rest.
-func (q *Queries) ListTagsForRetention(ctx context.Context, projectID string) ([]ListTagsForRetentionRow, error) {
-	rows, err := q.db.QueryContext(ctx, listTagsForRetention, projectID)
+func (q *Queries) ListTagsForRetention(ctx context.Context, repositoryID string) ([]ListTagsForRetentionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTagsForRetention, repositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -427,14 +432,14 @@ SELECT
     m.payload    AS payload
 FROM oci_tags t
 JOIN oci_manifests m
-  ON m.project_id = t.project_id AND m.repository = t.repository AND m.digest = t.digest
-WHERE t.project_id = ? AND t.repository = ?
+  ON m.repository_id = t.repository_id AND m.repository = t.repository AND m.digest = t.digest
+WHERE t.repository_id = ? AND t.repository = ?
 ORDER BY t.updated_at DESC, t.tag ASC
 `
 
 type ListTagsWithManifestParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
+	RepositoryID string `json:"repository_id"`
+	Repository   string `json:"repository"`
 }
 
 type ListTagsWithManifestRow struct {
@@ -446,10 +451,10 @@ type ListTagsWithManifestRow struct {
 	Payload   []byte `json:"payload"`
 }
 
-// Tags in a repository joined to the manifest each points at, so the browser can
+// Tags in an image joined to the manifest each points at, so the browser can
 // show media type and size without a second round-trip. Newest push first.
 func (q *Queries) ListTagsWithManifest(ctx context.Context, arg ListTagsWithManifestParams) ([]ListTagsWithManifestRow, error) {
-	rows, err := q.db.QueryContext(ctx, listTagsWithManifest, arg.ProjectID, arg.Repository)
+	rows, err := q.db.QueryContext(ctx, listTagsWithManifest, arg.RepositoryID, arg.Repository)
 	if err != nil {
 		return nil, err
 	}
@@ -480,10 +485,10 @@ func (q *Queries) ListTagsWithManifest(ctx context.Context, arg ListTagsWithMani
 
 const listUntaggedManifests = `-- name: ListUntaggedManifests :many
 SELECT m.repository AS repository, m.digest AS digest FROM oci_manifests m
-WHERE m.project_id = ?
+WHERE m.repository_id = ?
   AND NOT EXISTS (
     SELECT 1 FROM oci_tags t
-    WHERE t.project_id = m.project_id AND t.repository = m.repository AND t.digest = m.digest
+    WHERE t.repository_id = m.repository_id AND t.repository = m.repository AND t.digest = m.digest
   )
 `
 
@@ -492,9 +497,9 @@ type ListUntaggedManifestsRow struct {
 	Digest     string `json:"digest"`
 }
 
-// Manifests in a project that no tag points at, for the delete-untagged policy.
-func (q *Queries) ListUntaggedManifests(ctx context.Context, projectID string) ([]ListUntaggedManifestsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listUntaggedManifests, projectID)
+// Manifests in a repository that no tag points at, for the delete-untagged policy.
+func (q *Queries) ListUntaggedManifests(ctx context.Context, repositoryID string) ([]ListUntaggedManifestsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUntaggedManifests, repositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -518,31 +523,31 @@ func (q *Queries) ListUntaggedManifests(ctx context.Context, projectID string) (
 
 const manifestExists = `-- name: ManifestExists :one
 SELECT COUNT(*) FROM oci_manifests
-WHERE project_id = ? AND repository = ? AND digest = ?
+WHERE repository_id = ? AND repository = ? AND digest = ?
 `
 
 type ManifestExistsParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Digest     string `json:"digest"`
+	RepositoryID string `json:"repository_id"`
+	Repository   string `json:"repository"`
+	Digest       string `json:"digest"`
 }
 
 func (q *Queries) ManifestExists(ctx context.Context, arg ManifestExistsParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, manifestExists, arg.ProjectID, arg.Repository, arg.Digest)
+	row := q.db.QueryRowContext(ctx, manifestExists, arg.RepositoryID, arg.Repository, arg.Digest)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
 const upsertManifest = `-- name: UpsertManifest :exec
-INSERT INTO oci_manifests (id, project_id, repository, digest, media_type, payload, size, subject, artifact_type, created_at)
+INSERT INTO oci_manifests (id, repository_id, repository, digest, media_type, payload, size, subject, artifact_type, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT (project_id, repository, digest) DO NOTHING
+ON CONFLICT (repository_id, repository, digest) DO NOTHING
 `
 
 type UpsertManifestParams struct {
 	ID           string `json:"id"`
-	ProjectID    string `json:"project_id"`
+	RepositoryID string `json:"repository_id"`
 	Repository   string `json:"repository"`
 	Digest       string `json:"digest"`
 	MediaType    string `json:"media_type"`
@@ -559,7 +564,7 @@ type UpsertManifestParams struct {
 func (q *Queries) UpsertManifest(ctx context.Context, arg UpsertManifestParams) error {
 	_, err := q.db.ExecContext(ctx, upsertManifest,
 		arg.ID,
-		arg.ProjectID,
+		arg.RepositoryID,
 		arg.Repository,
 		arg.Digest,
 		arg.MediaType,
@@ -573,23 +578,23 @@ func (q *Queries) UpsertManifest(ctx context.Context, arg UpsertManifestParams) 
 }
 
 const upsertTag = `-- name: UpsertTag :exec
-INSERT INTO oci_tags (project_id, repository, tag, digest, updated_at)
+INSERT INTO oci_tags (repository_id, repository, tag, digest, updated_at)
 VALUES (?, ?, ?, ?, ?)
-ON CONFLICT (project_id, repository, tag)
+ON CONFLICT (repository_id, repository, tag)
 DO UPDATE SET digest = excluded.digest, updated_at = excluded.updated_at
 `
 
 type UpsertTagParams struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
-	Digest     string `json:"digest"`
-	UpdatedAt  string `json:"updated_at"`
+	RepositoryID string `json:"repository_id"`
+	Repository   string `json:"repository"`
+	Tag          string `json:"tag"`
+	Digest       string `json:"digest"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 func (q *Queries) UpsertTag(ctx context.Context, arg UpsertTagParams) error {
 	_, err := q.db.ExecContext(ctx, upsertTag,
-		arg.ProjectID,
+		arg.RepositoryID,
 		arg.Repository,
 		arg.Tag,
 		arg.Digest,

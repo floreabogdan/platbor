@@ -25,39 +25,28 @@ func (h projectsHandler) mount(r chi.Router) {
 }
 
 // projectResponse is the API view of a project (camelCase, RFC 3339 timestamps).
-// Kind is "local" or "proxy"; upstream is present only for proxy projects and
-// never carries the stored password.
+// A project is a tenant that contains typed repositories; allowAutoCreate governs
+// whether a push to an unknown repo path auto-creates a local repo of that format.
 type projectResponse struct {
-	ID          string            `json:"id"`
-	Key         string            `json:"key"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Kind        string            `json:"kind"`
-	Upstream    *upstreamResponse `json:"upstream,omitempty"`
-	CreatedAt   time.Time         `json:"createdAt"`
-	UpdatedAt   time.Time         `json:"updatedAt"`
-}
-
-type upstreamResponse struct {
-	URL      string `json:"url"`
-	Username string `json:"username,omitempty"`
+	ID              string    `json:"id"`
+	Key             string    `json:"key"`
+	Name            string    `json:"name"`
+	Description     string    `json:"description"`
+	AllowAutoCreate bool      `json:"allowAutoCreate"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }
 
 func toProjectResponse(p project.Project) projectResponse {
-	resp := projectResponse{
-		ID:          p.ID,
-		Key:         p.Key,
-		Name:        p.Name,
-		Description: p.Description,
-		Kind:        "local",
-		CreatedAt:   p.CreatedAt,
-		UpdatedAt:   p.UpdatedAt,
+	return projectResponse{
+		ID:              p.ID,
+		Key:             p.Key,
+		Name:            p.Name,
+		Description:     p.Description,
+		AllowAutoCreate: p.AllowAutoCreate,
+		CreatedAt:       p.CreatedAt,
+		UpdatedAt:       p.UpdatedAt,
 	}
-	if p.Upstream != nil {
-		resp.Kind = "proxy"
-		resp.Upstream = &upstreamResponse{URL: p.Upstream.URL, Username: p.Upstream.Username}
-	}
-	return resp
 }
 
 type listProjectsResponse struct {
@@ -96,14 +85,9 @@ type createProjectRequest struct {
 	Key         string `json:"key"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	// Upstream, when present, creates a pull-through proxy of that registry.
-	Upstream *upstreamRequest `json:"upstream,omitempty"`
-}
-
-type upstreamRequest struct {
-	URL      string `json:"url"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	// AllowAutoCreate defaults to true (zero-config push auto-creates repos).
+	// Pass false to require repositories to be created before pushing.
+	AllowAutoCreate *bool `json:"allowAutoCreate,omitempty"`
 }
 
 func (h projectsHandler) create(w http.ResponseWriter, r *http.Request) {
@@ -113,21 +97,17 @@ func (h projectsHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var upstream *project.Upstream
-	if req.Upstream != nil {
-		upstream = &project.Upstream{
-			URL:      req.Upstream.URL,
-			Username: req.Upstream.Username,
-			Password: req.Upstream.Password,
-		}
+	allowAutoCreate := true
+	if req.AllowAutoCreate != nil {
+		allowAutoCreate = *req.AllowAutoCreate
 	}
 
 	created, err := h.svc.Create(r.Context(), project.CreateInput{
-		Key:         req.Key,
-		Name:        req.Name,
-		Description: req.Description,
-		Upstream:    upstream,
-		Actor:       actorFrom(r),
+		Key:             req.Key,
+		Name:            req.Name,
+		Description:     req.Description,
+		AllowAutoCreate: allowAutoCreate,
+		Actor:           actorFrom(r),
 	})
 	if err != nil {
 		h.writeCreateError(w, err)

@@ -44,12 +44,12 @@ func (h *handler) serveReferrers(w http.ResponseWriter, r *http.Request, p parse
 		return
 	}
 
-	projectID, repo, ok := h.resolveName(w, r, p.name)
+	repo, image, ok := h.resolveRepo(w, r, p.name, false)
 	if !ok {
 		return
 	}
 
-	rows, err := h.manifests.listReferrers(r.Context(), projectID, repo, p.ref)
+	rows, err := h.manifests.listReferrers(r.Context(), repo.ID, image, p.ref)
 	if err != nil {
 		h.internalError(w, "listing referrers", err)
 		return

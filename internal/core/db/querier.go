@@ -10,13 +10,12 @@ import (
 
 type Querier interface {
 	CountProjects(ctx context.Context) (int64, error)
-	// Distinct repositories across all projects, for the dashboard summary.
+	// Distinct images across all repositories, for the dashboard summary.
 	CountRepositories(ctx context.Context) (int64, error)
 	CountTags(ctx context.Context) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (ApiToken, error)
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
-	CreateProxy(ctx context.Context, arg CreateProxyParams) error
 	CreateRepository(ctx context.Context, arg CreateRepositoryParams) (Repository, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
@@ -42,10 +41,8 @@ type Querier interface {
 	GetNugetPackage(ctx context.Context, arg GetNugetPackageParams) (NugetPackage, error)
 	GetProjectByID(ctx context.Context, id string) (Project, error)
 	GetProjectByKey(ctx context.Context, key string) (Project, error)
-	GetProxyByProjectID(ctx context.Context, projectID string) (RegistryProxy, error)
 	GetRepository(ctx context.Context, arg GetRepositoryParams) (Repository, error)
 	GetRepositoryByID(ctx context.Context, id string) (Repository, error)
-	GetRetentionPolicy(ctx context.Context, projectID string) (RetentionPolicy, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (GetSessionByTokenHashRow, error)
 	GetTag(ctx context.Context, arg GetTagParams) (OciTag, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
@@ -56,21 +53,19 @@ type Querier interface {
 	InsertNpmVersion(ctx context.Context, arg InsertNpmVersionParams) error
 	InsertNugetVersion(ctx context.Context, arg InsertNugetVersionParams) error
 	ListAPITokensByUser(ctx context.Context, userID string) ([]ApiToken, error)
-	// Every generic file across all projects, with a proxy flag, for the registry
-	// browser's generic index. is_proxy is 1 when the file's project is a mirror.
+	// Every generic file across all repositories, joined to its repository and
+	// project, for the registry browser's generic index. is_proxy is 1 for a proxy
+	// repository.
 	ListAllGenericFiles(ctx context.Context) ([]ListAllGenericFilesRow, error)
-	// Every npm package across all projects, with version count, total tarball size,
-	// and a proxy flag, for the registry browser's package index. is_proxy is 1 when
-	// the package's project is a pull-through mirror.
+	// Every npm package across all repositories, joined to its repository and
+	// project, with version count, total tarball size, and a proxy flag.
 	ListAllNpmPackages(ctx context.Context) ([]ListAllNpmPackagesRow, error)
-	// Every NuGet package across all projects, with version count, total nupkg size,
-	// and a proxy flag, for the registry browser's package index.
+	// Every NuGet package across all repositories, joined to its repository and
+	// project, with version count, total nupkg size, and a proxy flag.
 	ListAllNugetPackages(ctx context.Context) ([]ListAllNugetPackagesRow, error)
-	// Every repository across all projects, with tag and manifest counts, for the
-	// registry browser's project-grouped index. A repository exists once it has at
-	// least one manifest. is_proxy is 1 when the repository's project is a
-	// pull-through mirror (a registry_proxies row exists), so the browser can label
-	// it Local vs Proxy without a second query.
+	// Every OCI image across all repositories, joined to its typed repository and
+	// project, with tag and manifest counts, for the browser's index. is_proxy is 1
+	// for a proxy repository.
 	ListAllRepositories(ctx context.Context) ([]ListAllRepositoriesRow, error)
 	// Every repository across all projects, with its project key, for the browser
 	// and instance-wide operations (retention, listing).
@@ -81,12 +76,12 @@ type Querier interface {
 	ListGenericBlobDigests(ctx context.Context) ([]string, error)
 	// Every manifest's raw bytes, for garbage collection to mark the config and
 	// layer blobs each one references. Blobs are a global CAS, so this spans all
-	// projects.
+	// repositories.
 	ListManifestPayloads(ctx context.Context) ([][]byte, error)
-	// Every manifest's project, repository, digest, stored size, and payload, so the
-	// browser can compute per-repository storage: the sum of the distinct blobs each
-	// repository references. Blobs are a shared CAS, so a layer used by two
-	// repositories is counted once per repository (logical size), not physically.
+	// Every manifest's project, repo, image, digest, stored size, and payload, so
+	// the browser can compute per-image storage: the sum of the distinct blobs each
+	// image references. Blobs are a shared CAS, so a layer used by two images is
+	// counted once per image (logical size), not physically.
 	ListManifestSizing(ctx context.Context) ([]ListManifestSizingRow, error)
 	ListNpmDistTags(ctx context.Context, arg ListNpmDistTagsParams) ([]ListNpmDistTagsRow, error)
 	// Distinct tarball digests every npm version references, for garbage collection
@@ -95,23 +90,22 @@ type Querier interface {
 	// Every published version of a package, oldest first, with the verbatim version
 	// metadata and its tarball's digests, so the packument can be rebuilt.
 	ListNpmVersions(ctx context.Context, arg ListNpmVersionsParams) ([]ListNpmVersionsRow, error)
-	// Every version in a project, grouped by package and newest first, for
+	// Every version in a repository, grouped by package and newest first, for
 	// keep-last-N pruning.
-	ListNpmVersionsForRetention(ctx context.Context, projectID string) ([]ListNpmVersionsForRetentionRow, error)
+	ListNpmVersionsForRetention(ctx context.Context, repositoryID string) ([]ListNpmVersionsForRetentionRow, error)
 	// Distinct nupkg digests every version references, for garbage collection to
 	// mark them alongside the other formats (shared CAS).
 	ListNugetBlobDigests(ctx context.Context) ([]string, error)
 	// Every version of a package, oldest first, with the nuspec and nupkg pointer,
 	// for the flat-container index, registration, and downloads.
 	ListNugetVersions(ctx context.Context, arg ListNugetVersionsParams) ([]ListNugetVersionsRow, error)
-	// Every version in a project, grouped by package and newest first, for
+	// Every version in a repository, grouped by package and newest first, for
 	// keep-last-N pruning.
-	ListNugetVersionsForRetention(ctx context.Context, projectID string) ([]ListNugetVersionsForRetentionRow, error)
+	ListNugetVersionsForRetention(ctx context.Context, repositoryID string) ([]ListNugetVersionsForRetentionRow, error)
 	// Keyset pagination on the unique `key` column. The first page passes the empty
 	// string, which sorts before any valid key, so a single query serves both the
 	// first page and subsequent pages.
 	ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error)
-	ListProxies(ctx context.Context) ([]RegistryProxy, error)
 	// Instance-wide recent mutations for the dashboard feed, joined to the project
 	// they touched (project_id is nullable for instance-level events).
 	ListRecentActivity(ctx context.Context, limit int64) ([]ListRecentActivityRow, error)
@@ -119,20 +113,19 @@ type Querier interface {
 	// and other attestations) for the referrers API. Newest first.
 	ListReferrers(ctx context.Context, arg ListReferrersParams) ([]ListReferrersRow, error)
 	ListRepositoriesByProject(ctx context.Context, projectID string) ([]Repository, error)
-	// Every project with an effective policy (keeps some, or sweeps untagged), with
-	// its key, for a retention run.
-	ListRetentionPolicies(ctx context.Context) ([]ListRetentionPoliciesRow, error)
+	// Repositories that have an effective retention policy, for a retention run.
+	ListRepositoriesWithPolicy(ctx context.Context) ([]Repository, error)
 	// Keyset pagination on `tag`: the empty string sorts before any tag, so the
 	// first page and subsequent pages share one query.
 	ListTags(ctx context.Context, arg ListTagsParams) ([]string, error)
-	// Every tag in a project, grouped by repository and newest first, so a
+	// Every tag in a repository, grouped by image and newest first, so a
 	// keep-last-N policy can keep the newest tags and delete the rest.
-	ListTagsForRetention(ctx context.Context, projectID string) ([]ListTagsForRetentionRow, error)
-	// Tags in a repository joined to the manifest each points at, so the browser can
+	ListTagsForRetention(ctx context.Context, repositoryID string) ([]ListTagsForRetentionRow, error)
+	// Tags in an image joined to the manifest each points at, so the browser can
 	// show media type and size without a second round-trip. Newest push first.
 	ListTagsWithManifest(ctx context.Context, arg ListTagsWithManifestParams) ([]ListTagsWithManifestRow, error)
-	// Manifests in a project that no tag points at, for the delete-untagged policy.
-	ListUntaggedManifests(ctx context.Context, projectID string) ([]ListUntaggedManifestsRow, error)
+	// Manifests in a repository that no tag points at, for the delete-untagged policy.
+	ListUntaggedManifests(ctx context.Context, repositoryID string) ([]ListUntaggedManifestsRow, error)
 	ManifestExists(ctx context.Context, arg ManifestExistsParams) (int64, error)
 	// Whether a specific version is already published. npm forbids overwriting a
 	// published version, so the handler rejects a re-publish before inserting.
@@ -140,25 +133,25 @@ type Querier interface {
 	// Whether a specific version is already pushed. NuGet forbids overwriting a
 	// published version, so the handler rejects a re-push before inserting.
 	NugetVersionExists(ctx context.Context, arg NugetVersionExistsParams) (int64, error)
-	// Packages in a project whose id contains the (lowercased) query, newest first,
-	// for the search resource. An empty query matches all.
+	// Packages in a repository whose id contains the (lowercased) query, newest
+	// first, for the search resource. An empty query matches all.
 	SearchNugetPackages(ctx context.Context, arg SearchNugetPackagesParams) ([]SearchNugetPackagesRow, error)
+	SetProjectAutoCreate(ctx context.Context, arg SetProjectAutoCreateParams) error
 	UpdateRepository(ctx context.Context, arg UpdateRepositoryParams) (Repository, error)
-	// Store a file at a path, replacing any existing file there (generic paths are
-	// mutable: a re-upload overwrites).
+	// Store a file at a path in a repository, replacing any existing file there
+	// (generic paths are mutable: a re-upload overwrites).
 	UpsertGenericFile(ctx context.Context, arg UpsertGenericFileParams) error
 	// Store a manifest by digest. Re-pushing identical content is a no-op, so an
 	// image can be tagged repeatedly without duplicating the payload. subject and
 	// artifact_type are denormalized from the payload for the referrers API.
 	UpsertManifest(ctx context.Context, arg UpsertManifestParams) error
 	UpsertNpmDistTag(ctx context.Context, arg UpsertNpmDistTagParams) error
-	// Ensure the package row for (project, name) exists, returning its id.
+	// Ensure the package row for (repository, name) exists, returning its id.
 	// Publishing a new version of an existing package just bumps updated_at.
 	UpsertNpmPackage(ctx context.Context, arg UpsertNpmPackageParams) (string, error)
-	// Ensure the package row for (project, id_lower) exists, returning its id.
+	// Ensure the package row for (repository, id_lower) exists, returning its id.
 	// Pushing a new version of an existing package bumps updated_at.
 	UpsertNugetPackage(ctx context.Context, arg UpsertNugetPackageParams) (string, error)
-	UpsertRetentionPolicy(ctx context.Context, arg UpsertRetentionPolicyParams) error
 	UpsertTag(ctx context.Context, arg UpsertTagParams) error
 }
 

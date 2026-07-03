@@ -24,11 +24,15 @@ func NewPruner(sqlDB *sql.DB) *Pruner {
 }
 
 // Prune implements registry.Pruner.
-func (p *Pruner) Prune(ctx context.Context, projectID string, keepLast int, _ bool, dryRun bool, actor string) (int, error) {
+func (p *Pruner) Prune(ctx context.Context, repositoryID string, keepLast int, _ bool, dryRun bool, actor string) (int, error) {
 	if keepLast <= 0 {
 		return 0, nil
 	}
-	rows, err := p.q.ListNugetVersionsForRetention(ctx, projectID)
+	repo, err := p.q.GetRepositoryByID(ctx, repositoryID)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := p.q.ListNugetVersionsForRetention(ctx, repositoryID)
 	if err != nil {
 		return 0, err
 	}
@@ -43,14 +47,14 @@ func (p *Pruner) Prune(ctx context.Context, projectID string, keepLast int, _ bo
 		if dryRun {
 			continue
 		}
-		if err := p.deleteVersion(ctx, projectID, r.IDLower, r.VersionLower, actor); err != nil {
+		if err := p.deleteVersion(ctx, repositoryID, repo.ProjectID, r.IDLower, r.VersionLower, actor); err != nil {
 			return deleted, err
 		}
 	}
 	return deleted, nil
 }
 
-func (p *Pruner) deleteVersion(ctx context.Context, projectID, idLower, versionLower, actor string) error {
+func (p *Pruner) deleteVersion(ctx context.Context, repositoryID, projectID, idLower, versionLower, actor string) error {
 	ts := p.now().Format(time.RFC3339Nano)
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -59,7 +63,7 @@ func (p *Pruner) deleteVersion(ctx context.Context, projectID, idLower, versionL
 	defer func() { _ = tx.Rollback() }()
 	qtx := p.q.WithTx(tx)
 
-	if _, err := qtx.DeleteNugetVersion(ctx, db.DeleteNugetVersionParams{ProjectID: projectID, IDLower: idLower, VersionLower: versionLower}); err != nil {
+	if _, err := qtx.DeleteNugetVersion(ctx, db.DeleteNugetVersionParams{RepositoryID: repositoryID, IDLower: idLower, VersionLower: versionLower}); err != nil {
 		return fmt.Errorf("deleting version: %w", err)
 	}
 	if _, err := qtx.InsertAuditEntry(ctx, db.InsertAuditEntryParams{

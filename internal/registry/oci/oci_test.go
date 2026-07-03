@@ -20,6 +20,7 @@ import (
 	"github.com/platbor/platbor/internal/core/config"
 	"github.com/platbor/platbor/internal/core/db"
 	"github.com/platbor/platbor/internal/core/project"
+	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry"
 	"github.com/platbor/platbor/internal/registry/oci"
 )
@@ -51,7 +52,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	// A repository name is <project>/<repo>; the manifest API requires the
 	// project to exist, so seed the one the tests push to.
-	if _, err := project.NewService(sqlDB).Create(ctx, project.CreateInput{Key: "library", Name: "Library", Actor: "admin"}); err != nil {
+	if _, err := project.NewService(sqlDB).Create(ctx, project.CreateInput{Key: "library", Name: "Library", AllowAutoCreate: true, Actor: "admin"}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	store, err := blob.NewFS(cfg.DataDir)
@@ -61,7 +62,7 @@ func newHarness(t *testing.T) *harness {
 
 	r := chi.NewRouter()
 	r.Route("/v2", func(sub chi.Router) {
-		oci.New().Mount(sub, registry.Deps{Blobs: store, Auth: authSvc, DB: sqlDB, Log: discardLogger()})
+		oci.New().Mount(sub, registry.Deps{Blobs: store, Auth: authSvc, DB: sqlDB, Log: discardLogger(), Repositories: repository.NewService(sqlDB)})
 	})
 	return &harness{router: r, auth: authSvc, db: sqlDB, blobs: store}
 }
@@ -110,7 +111,7 @@ func TestChunkedBlobPushAndPull(t *testing.T) {
 	digest := blob.DigestBytes(content)
 
 	// 1. Start the upload session.
-	start := h.req(t, http.MethodPost, "/v2/library/alpine/blobs/uploads/", nil, "password")
+	start := h.req(t, http.MethodPost, "/v2/library/images/alpine/blobs/uploads/", nil, "password")
 	if start.Code != http.StatusAccepted {
 		t.Fatalf("POST uploads: status = %d, want 202; body=%s", start.Code, start.Body.String())
 	}
@@ -135,13 +136,13 @@ func TestChunkedBlobPushAndPull(t *testing.T) {
 	}
 
 	// 4. HEAD reports it exists with the right size.
-	head := h.req(t, http.MethodHead, "/v2/library/alpine/blobs/"+digest, nil, "password")
+	head := h.req(t, http.MethodHead, "/v2/library/images/alpine/blobs/"+digest, nil, "password")
 	if head.Code != http.StatusOK {
 		t.Fatalf("HEAD: status = %d, want 200", head.Code)
 	}
 
 	// 5. GET returns the exact bytes.
-	get := h.req(t, http.MethodGet, "/v2/library/alpine/blobs/"+digest, nil, "password")
+	get := h.req(t, http.MethodGet, "/v2/library/images/alpine/blobs/"+digest, nil, "password")
 	if get.Code != http.StatusOK {
 		t.Fatalf("GET: status = %d, want 200", get.Code)
 	}
@@ -155,11 +156,11 @@ func TestMonolithicBlobPush(t *testing.T) {
 	content := []byte("single-request blob")
 	digest := blob.DigestBytes(content)
 
-	rr := h.req(t, http.MethodPost, "/v2/library/app/blobs/uploads/?digest="+digest, content, "password")
+	rr := h.req(t, http.MethodPost, "/v2/library/images/app/blobs/uploads/?digest="+digest, content, "password")
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("monolithic POST: status = %d, want 201; body=%s", rr.Code, rr.Body.String())
 	}
-	if head := h.req(t, http.MethodHead, "/v2/library/app/blobs/"+digest, nil, "password"); head.Code != http.StatusOK {
+	if head := h.req(t, http.MethodHead, "/v2/library/images/app/blobs/"+digest, nil, "password"); head.Code != http.StatusOK {
 		t.Fatalf("HEAD after monolithic push: status = %d, want 200", head.Code)
 	}
 }
@@ -169,7 +170,7 @@ func TestDigestMismatchRejected(t *testing.T) {
 	content := []byte("real content")
 	wrong := blob.DigestBytes([]byte("different"))
 
-	start := h.req(t, http.MethodPost, "/v2/library/x/blobs/uploads/", nil, "password")
+	start := h.req(t, http.MethodPost, "/v2/library/images/x/blobs/uploads/", nil, "password")
 	loc := start.Header().Get("Location")
 	_ = h.req(t, http.MethodPatch, loc, content, "password")
 	put := h.req(t, http.MethodPut, loc+"?digest="+wrong, nil, "password")
@@ -177,7 +178,7 @@ func TestDigestMismatchRejected(t *testing.T) {
 		t.Fatalf("mismatched PUT: status = %d, want 400", put.Code)
 	}
 	// The real content must not have been stored.
-	if head := h.req(t, http.MethodHead, "/v2/library/x/blobs/"+blob.DigestBytes(content), nil, "password"); head.Code != http.StatusNotFound {
+	if head := h.req(t, http.MethodHead, "/v2/library/images/x/blobs/"+blob.DigestBytes(content), nil, "password"); head.Code != http.StatusNotFound {
 		t.Fatalf("mismatched content stored: HEAD status = %d, want 404", head.Code)
 	}
 }
@@ -185,7 +186,7 @@ func TestDigestMismatchRejected(t *testing.T) {
 func TestHeadUnknownBlobIs404(t *testing.T) {
 	h := newHarness(t)
 	unknown := blob.DigestBytes([]byte("nope"))
-	rr := h.req(t, http.MethodHead, "/v2/library/y/blobs/"+unknown, nil, "password")
+	rr := h.req(t, http.MethodHead, "/v2/library/images/y/blobs/"+unknown, nil, "password")
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rr.Code)
 	}
@@ -193,7 +194,7 @@ func TestHeadUnknownBlobIs404(t *testing.T) {
 
 func TestUploadStatusAndCancel(t *testing.T) {
 	h := newHarness(t)
-	start := h.req(t, http.MethodPost, "/v2/library/z/blobs/uploads/", nil, "password")
+	start := h.req(t, http.MethodPost, "/v2/library/images/z/blobs/uploads/", nil, "password")
 	loc := start.Header().Get("Location")
 	_ = h.req(t, http.MethodPatch, loc, []byte("partial"), "password")
 
@@ -294,7 +295,7 @@ func (h *harness) buildImage(t *testing.T, name string) (body []byte, digest str
 
 func TestManifestPushPullByTagAndDigest(t *testing.T) {
 	h := newHarness(t)
-	const name = "library/alpine"
+	const name = "library/images/alpine"
 	body, digest := h.buildImage(t, name)
 
 	put := h.putManifest(t, name, "v1.0", body)
@@ -334,7 +335,7 @@ func TestManifestPushPullByTagAndDigest(t *testing.T) {
 
 func TestManifestMissingBlobRejected(t *testing.T) {
 	h := newHarness(t)
-	const name = "library/alpine"
+	const name = "library/images/alpine"
 
 	// A manifest that references blobs which were never uploaded.
 	m := testManifest{
@@ -357,9 +358,9 @@ func TestManifestMissingBlobRejected(t *testing.T) {
 func TestManifestUnknownProjectRejected(t *testing.T) {
 	h := newHarness(t)
 	// "ghost" is not a project; the config blob push targets the same name.
-	body, _ := h.buildImage(t, "ghost/app")
+	body, _ := h.buildImage(t, "ghost/images/app")
 
-	put := h.putManifest(t, "ghost/app", "v1.0", body)
+	put := h.putManifest(t, "ghost/images/app", "v1.0", body)
 	if put.Code != http.StatusNotFound {
 		t.Fatalf("PUT to unknown project: status = %d, want 404; body=%s", put.Code, put.Body.String())
 	}
@@ -370,7 +371,7 @@ func TestManifestUnknownProjectRejected(t *testing.T) {
 
 func TestManifestDigestMismatchRejected(t *testing.T) {
 	h := newHarness(t)
-	const name = "library/alpine"
+	const name = "library/images/alpine"
 	body, _ := h.buildImage(t, name)
 	wrong := blob.DigestBytes([]byte("some other content"))
 
@@ -382,7 +383,7 @@ func TestManifestDigestMismatchRejected(t *testing.T) {
 
 func TestManifestDeleteTagAndManifest(t *testing.T) {
 	h := newHarness(t)
-	const name = "library/alpine"
+	const name = "library/images/alpine"
 	body, digest := h.buildImage(t, name)
 	if put := h.putManifest(t, name, "v1.0", body); put.Code != http.StatusCreated {
 		t.Fatalf("seed PUT: status = %d", put.Code)
@@ -410,7 +411,7 @@ func TestManifestDeleteTagAndManifest(t *testing.T) {
 
 func TestTagsList(t *testing.T) {
 	h := newHarness(t)
-	const name = "library/alpine"
+	const name = "library/images/alpine"
 	body, _ := h.buildImage(t, name)
 	for _, tag := range []string{"v2.0", "v1.0", "latest"} {
 		if put := h.putManifest(t, name, tag, body); put.Code != http.StatusCreated {
@@ -463,7 +464,7 @@ type tagListResponse struct {
 
 func TestBrowserRepositoriesTagsAndManifest(t *testing.T) {
 	h := newHarness(t)
-	const name = "library/alpine"
+	const name = "library/images/alpine"
 	body, digest := h.buildImage(t, name)
 	for _, tag := range []string{"v1.0", "latest"} {
 		if put := h.putManifest(t, name, tag, body); put.Code != http.StatusCreated {
@@ -484,15 +485,15 @@ func TestBrowserRepositoriesTagsAndManifest(t *testing.T) {
 	}
 	repo := repos[0]
 	if repo.ProjectKey != "library" || repo.Repository != "alpine" {
-		t.Errorf("repo = %s/%s, want library/alpine", repo.ProjectKey, repo.Repository)
+		t.Errorf("repo = %s/%s, want library/images/alpine", repo.ProjectKey, repo.Repository)
 	}
 	if repo.TagCount != 2 || repo.ManifestCount != 1 {
 		t.Errorf("tagCount=%d manifestCount=%d, want 2/1", repo.TagCount, repo.ManifestCount)
 	}
 
 	// Tags: both present, each an image with a computed total size.
-	projectID := mustProjectID(t, h, "library")
-	tags, err := browser.Tags(ctx, projectID, "alpine")
+	repoID, _ := mustRepoIDs(t, h, "library", "images")
+	tags, err := browser.Tags(ctx, repoID, "alpine")
 	if err != nil {
 		t.Fatalf("Tags: %v", err)
 	}
@@ -512,7 +513,7 @@ func TestBrowserRepositoriesTagsAndManifest(t *testing.T) {
 	}
 
 	// Manifest detail (by tag): config + one layer, total size is their sum.
-	view, err := browser.Manifest(ctx, projectID, "alpine", "v1.0")
+	view, err := browser.Manifest(ctx, repoID, "alpine", "v1.0")
 	if err != nil {
 		t.Fatalf("Manifest: %v", err)
 	}
@@ -534,12 +535,12 @@ func TestBrowserRepositoriesTagsAndManifest(t *testing.T) {
 	}
 
 	// Manifest detail (by digest) resolves to the same view.
-	if byDigest, err := browser.Manifest(ctx, projectID, "alpine", digest); err != nil || byDigest.Digest != digest {
+	if byDigest, err := browser.Manifest(ctx, repoID, "alpine", digest); err != nil || byDigest.Digest != digest {
 		t.Fatalf("Manifest by digest: view=%+v err=%v", byDigest, err)
 	}
 
 	// An unknown reference is a not-found, not an empty view.
-	if _, err := browser.Manifest(ctx, projectID, "alpine", "nope"); !errors.Is(err, oci.ErrManifestNotFound) {
+	if _, err := browser.Manifest(ctx, repoID, "alpine", "nope"); !errors.Is(err, oci.ErrManifestNotFound) {
 		t.Errorf("unknown ref error = %v, want ErrManifestNotFound", err)
 	}
 }
@@ -548,14 +549,14 @@ func TestBrowserRepositoriesTagsAndManifest(t *testing.T) {
 
 func TestCollectorReclaimsOrphanBlobs(t *testing.T) {
 	h := newHarness(t)
-	const name = "library/alpine"
+	const name = "library/images/alpine"
 	body, digest := h.buildImage(t, name) // pushes a config + a layer blob
 	if put := h.putManifest(t, name, "v1.0", body); put.Code != http.StatusCreated {
 		t.Fatalf("push: status = %d", put.Code)
 	}
 
 	ctx := context.Background()
-	projectID := mustProjectID(t, h, "library")
+	repoID, projectID := mustRepoIDs(t, h, "library", "images")
 	collector := oci.NewCollector(h.blobs, h.db)
 	// A "now" far in the future puts the just-written blobs outside any grace
 	// window, so eligibility is deterministic.
@@ -571,7 +572,7 @@ func TestCollectorReclaimsOrphanBlobs(t *testing.T) {
 	}
 
 	// Delete the manifest; its two blobs become orphans.
-	if err := oci.NewManager(h.db).DeleteManifest(ctx, projectID, "alpine", digest, "admin"); err != nil {
+	if err := oci.NewManager(h.db).DeleteManifest(ctx, repoID, projectID, "alpine", digest, "admin"); err != nil {
 		t.Fatalf("DeleteManifest: %v", err)
 	}
 
@@ -598,13 +599,13 @@ func TestCollectorReclaimsOrphanBlobs(t *testing.T) {
 
 func TestCollectorDryRunKeepsBlobs(t *testing.T) {
 	h := newHarness(t)
-	const name = "library/alpine"
+	const name = "library/images/alpine"
 	body, digest := h.buildImage(t, name)
 	_ = h.putManifest(t, name, "v1.0", body)
 
 	ctx := context.Background()
-	projectID := mustProjectID(t, h, "library")
-	if err := oci.NewManager(h.db).DeleteManifest(ctx, projectID, "alpine", digest, "admin"); err != nil {
+	repoID, projectID := mustRepoIDs(t, h, "library", "images")
+	if err := oci.NewManager(h.db).DeleteManifest(ctx, repoID, projectID, "alpine", digest, "admin"); err != nil {
 		t.Fatalf("DeleteManifest: %v", err)
 	}
 
@@ -631,6 +632,21 @@ func mustProjectID(t *testing.T, h *harness, key string) string {
 		t.Fatalf("resolve project %q: %v", key, err)
 	}
 	return p.ID
+}
+
+// mustRepoIDs resolves a repository to its ID and its project's ID. The
+// repository is auto-created on the push, so it exists by the time a test asks.
+func mustRepoIDs(t *testing.T, h *harness, projectKey, repoKey string) (repoID, projectID string) {
+	t.Helper()
+	p, err := project.NewService(h.db).GetByKey(context.Background(), projectKey)
+	if err != nil {
+		t.Fatalf("resolve project %q: %v", projectKey, err)
+	}
+	repo, err := repository.NewService(h.db).Get(context.Background(), p.ID, repoKey)
+	if err != nil {
+		t.Fatalf("resolve repo %q/%q: %v", projectKey, repoKey, err)
+	}
+	return repo.ID, p.ID
 }
 
 // --- Manager (write side) ---
@@ -674,7 +690,7 @@ type referrersIndex struct {
 
 func TestReferrersAPI(t *testing.T) {
 	h := newHarness(t)
-	const name = "library/alpine"
+	const name = "library/images/alpine"
 	const sigType = "application/vnd.example.signature"
 
 	imgBody, imgDigest := h.buildImage(t, name)
@@ -737,7 +753,7 @@ func TestReferrersAPI(t *testing.T) {
 
 func TestManagerDeleteTagAndManifest(t *testing.T) {
 	h := newHarness(t)
-	const name = "library/alpine"
+	const name = "library/images/alpine"
 	body, digest := h.buildImage(t, name)
 	for _, tag := range []string{"v1.0", "latest"} {
 		if put := h.putManifest(t, name, tag, body); put.Code != http.StatusCreated {
@@ -746,38 +762,38 @@ func TestManagerDeleteTagAndManifest(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	projectID := mustProjectID(t, h, "library")
+	repoID, projectID := mustRepoIDs(t, h, "library", "images")
 	manager := oci.NewManager(h.db)
 	browser := oci.NewBrowser(h.db)
 
 	// Deleting one tag leaves the other and the manifest intact.
-	if err := manager.DeleteTag(ctx, projectID, "alpine", "v1.0", "admin"); err != nil {
+	if err := manager.DeleteTag(ctx, repoID, projectID, "alpine", "v1.0", "admin"); err != nil {
 		t.Fatalf("DeleteTag: %v", err)
 	}
-	tags, err := browser.Tags(ctx, projectID, "alpine")
+	tags, err := browser.Tags(ctx, repoID, "alpine")
 	if err != nil {
 		t.Fatalf("Tags: %v", err)
 	}
 	if len(tags) != 1 || tags[0].Tag != "latest" {
 		t.Fatalf("after tag delete, tags = %+v, want [latest]", tags)
 	}
-	if _, err := browser.Manifest(ctx, projectID, "alpine", digest); err != nil {
+	if _, err := browser.Manifest(ctx, repoID, "alpine", digest); err != nil {
 		t.Fatalf("manifest should survive tag delete: %v", err)
 	}
 
 	// Deleting a missing tag is a not-found.
-	if err := manager.DeleteTag(ctx, projectID, "alpine", "v1.0", "admin"); !errors.Is(err, oci.ErrManifestNotFound) {
+	if err := manager.DeleteTag(ctx, repoID, projectID, "alpine", "v1.0", "admin"); !errors.Is(err, oci.ErrManifestNotFound) {
 		t.Errorf("delete missing tag error = %v, want ErrManifestNotFound", err)
 	}
 
 	// Deleting by digest removes the manifest and its remaining tag.
-	if err := manager.DeleteManifest(ctx, projectID, "alpine", digest, "admin"); err != nil {
+	if err := manager.DeleteManifest(ctx, repoID, projectID, "alpine", digest, "admin"); err != nil {
 		t.Fatalf("DeleteManifest: %v", err)
 	}
-	if _, err := browser.Manifest(ctx, projectID, "alpine", digest); !errors.Is(err, oci.ErrManifestNotFound) {
+	if _, err := browser.Manifest(ctx, repoID, "alpine", digest); !errors.Is(err, oci.ErrManifestNotFound) {
 		t.Errorf("manifest should be gone: err = %v", err)
 	}
-	tags, err = browser.Tags(ctx, projectID, "alpine")
+	tags, err = browser.Tags(ctx, repoID, "alpine")
 	if err != nil {
 		t.Fatalf("Tags after manifest delete: %v", err)
 	}

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/platbor/platbor/internal/core/blob"
+	"github.com/platbor/platbor/internal/core/repository"
+	"github.com/platbor/platbor/internal/registry/proxy"
 )
 
 // serveBlob handles HEAD/GET/DELETE on /v2/<name>/blobs/<digest>.
@@ -252,41 +254,31 @@ func (h *handler) setUploadHeaders(w http.ResponseWriter, name, id string, size 
 }
 
 // maybeCacheBlob fetches a missing blob from the upstream when the name belongs
-// to a proxy project, returning whether the blob is now present locally. It is
+// to a proxy repository, returning whether the blob is now present locally. It is
 // consulted only on a cache miss, so local pulls resolve nothing extra.
 func (h *handler) maybeCacheBlob(ctx context.Context, name, digest string) bool {
-	key, repo, ok := splitName(name)
-	if !ok {
+	repo, image, ok := h.lookupRepo(ctx, name)
+	if !ok || repo.Mode != repository.ModeProxy || repo.Upstream == nil {
 		return false
 	}
-	projectID, err := h.manifests.resolveProject(ctx, key)
-	if err != nil {
-		return false
-	}
-	up, isProxy, err := h.manifests.proxyUpstream(ctx, projectID)
-	if err != nil || !isProxy {
-		return false
-	}
-	if err := h.cacheBlob(ctx, up, repo, digest); err != nil {
+	up := proxy.Upstream{BaseURL: repo.Upstream.URL, Username: repo.Upstream.Username, Password: repo.Upstream.Password}
+	if err := h.cacheBlob(ctx, up, image, digest); err != nil {
 		h.log.Warn("proxy blob fetch failed",
-			slog.String("repo", repo), slog.String("digest", digest), slog.String("error", err.Error()))
+			slog.String("image", image), slog.String("digest", digest), slog.String("error", err.Error()))
 		return false
 	}
 	return true
 }
 
-// denyProxyWriteByName rejects a write when the name's project exists and is a
-// proxy. A non-existent project falls through to the normal flow.
+// denyProxyWriteByName rejects a write when the name's repository exists and is a
+// proxy. A non-existent repository falls through to the normal flow (it is
+// created on the manifest push that follows the blob uploads).
 func (h *handler) denyProxyWriteByName(w http.ResponseWriter, r *http.Request, name string) bool {
-	key, _, ok := splitName(name)
+	repo, _, ok := h.lookupRepo(r.Context(), name)
 	if !ok {
 		return false
 	}
-	projectID, err := h.manifests.resolveProject(r.Context(), key)
-	if err != nil {
-		return false
-	}
-	return h.denyProxyWrite(w, r, projectID)
+	return h.denyProxyWrite(w, repo)
 }
 
 func (h *handler) uploadLookupError(w http.ResponseWriter, err error) {

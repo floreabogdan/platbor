@@ -32,37 +32,28 @@ func newPackageStore(sqlDB *sql.DB) *packageStore {
 	return &packageStore{db: sqlDB, q: db.New(sqlDB), now: func() time.Time { return time.Now().UTC() }}
 }
 
-func (s *packageStore) resolveProject(ctx context.Context, key string) (string, error) {
+func (s *packageStore) resolveProject(ctx context.Context, key string) (id string, allowAutoCreate bool, err error) {
 	row, err := s.q.GetProjectByKey(ctx, key)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", errProjectNotFound
+			return "", false, errProjectNotFound
 		}
-		return "", fmt.Errorf("resolving project %q: %w", key, err)
+		return "", false, fmt.Errorf("resolving project %q: %w", key, err)
 	}
-	return row.ID, nil
-}
-
-func (s *packageStore) isProxy(ctx context.Context, projectID string) (bool, error) {
-	_, err := s.q.GetProxyByProjectID(ctx, projectID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
-		}
-		return false, fmt.Errorf("loading proxy config: %w", err)
-	}
-	return true, nil
+	return row.ID, row.AllowAutoCreate != 0, nil
 }
 
 // pushInput is one `dotnet nuget push`: a single version of one package.
+// RepositoryID scopes storage; ProjectID scopes the audit entry.
 type pushInput struct {
-	ProjectID   string
-	IDOriginal  string
-	Version     string
-	NupkgDigest string
-	NupkgSize   int64
-	Nuspec      []byte
-	Actor       string
+	RepositoryID string
+	ProjectID    string
+	IDOriginal   string
+	Version      string
+	NupkgDigest  string
+	NupkgSize    int64
+	Nuspec       []byte
+	Actor        string
 }
 
 // push stores the package and its new version atomically, with an audit entry.
@@ -74,18 +65,18 @@ func (s *packageStore) push(ctx context.Context, in pushInput) error {
 
 	return s.inTx(ctx, func(qtx *db.Queries) error {
 		pkgID, err := qtx.UpsertNugetPackage(ctx, db.UpsertNugetPackageParams{
-			ID:         id.New("nugetpkg"),
-			ProjectID:  in.ProjectID,
-			IDLower:    idLower,
-			IDOriginal: in.IDOriginal,
-			CreatedAt:  ts,
-			UpdatedAt:  ts,
+			ID:           id.New("nugetpkg"),
+			RepositoryID: in.RepositoryID,
+			IDLower:      idLower,
+			IDOriginal:   in.IDOriginal,
+			CreatedAt:    ts,
+			UpdatedAt:    ts,
 		})
 		if err != nil {
 			return fmt.Errorf("upserting package: %w", err)
 		}
 		exists, err := qtx.NugetVersionExists(ctx, db.NugetVersionExistsParams{
-			ProjectID: in.ProjectID, IDLower: idLower, VersionLower: verLower,
+			RepositoryID: in.RepositoryID, IDLower: idLower, VersionLower: verLower,
 		})
 		if err != nil {
 			return fmt.Errorf("checking version: %w", err)
@@ -123,8 +114,8 @@ type storedVersion struct {
 
 // versions returns every version of a package (oldest first), or
 // ErrPackageNotFound when the package has none.
-func (s *packageStore) versions(ctx context.Context, projectID, idLower string) ([]storedVersion, error) {
-	rows, err := s.q.ListNugetVersions(ctx, db.ListNugetVersionsParams{ProjectID: projectID, IDLower: idLower})
+func (s *packageStore) versions(ctx context.Context, repositoryID, idLower string) ([]storedVersion, error) {
+	rows, err := s.q.ListNugetVersions(ctx, db.ListNugetVersionsParams{RepositoryID: repositoryID, IDLower: idLower})
 	if err != nil {
 		return nil, fmt.Errorf("listing versions: %w", err)
 	}
@@ -147,8 +138,8 @@ func (s *packageStore) versions(ctx context.Context, projectID, idLower string) 
 }
 
 // nupkg returns the blob digest and size for one version's .nupkg.
-func (s *packageStore) nupkg(ctx context.Context, projectID, idLower, versionLower string) (string, int64, error) {
-	row, err := s.q.GetNugetNupkg(ctx, db.GetNugetNupkgParams{ProjectID: projectID, IDLower: idLower, VersionLower: versionLower})
+func (s *packageStore) nupkg(ctx context.Context, repositoryID, idLower, versionLower string) (string, int64, error) {
+	row, err := s.q.GetNugetNupkg(ctx, db.GetNugetNupkgParams{RepositoryID: repositoryID, IDLower: idLower, VersionLower: versionLower})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", 0, ErrPackageNotFound
@@ -166,10 +157,10 @@ type searchResult struct {
 }
 
 // search returns packages in a project whose id contains query (case-insensitive).
-func (s *packageStore) search(ctx context.Context, projectID, query string, take int) ([]searchResult, error) {
+func (s *packageStore) search(ctx context.Context, repositoryID, query string, take int) ([]searchResult, error) {
 	pattern := "%" + strings.ToLower(query) + "%"
 	rows, err := s.q.SearchNugetPackages(ctx, db.SearchNugetPackagesParams{
-		ProjectID: projectID, IDLower: pattern, Limit: int64(take),
+		RepositoryID: repositoryID, IDLower: pattern, Limit: int64(take),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("searching: %w", err)

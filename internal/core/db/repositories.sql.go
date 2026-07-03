@@ -252,6 +252,49 @@ func (q *Queries) ListRepositoriesByProject(ctx context.Context, projectID strin
 	return items, nil
 }
 
+const listRepositoriesWithPolicy = `-- name: ListRepositoriesWithPolicy :many
+SELECT id, project_id, "key", name, format, mode, upstream_url, upstream_username, upstream_password, keep_last, delete_untagged, created_at, updated_at FROM repositories
+WHERE keep_last > 0 OR delete_untagged = 1
+`
+
+// Repositories that have an effective retention policy, for a retention run.
+func (q *Queries) ListRepositoriesWithPolicy(ctx context.Context) ([]Repository, error) {
+	rows, err := q.db.QueryContext(ctx, listRepositoriesWithPolicy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Repository{}
+	for rows.Next() {
+		var i Repository
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Key,
+			&i.Name,
+			&i.Format,
+			&i.Mode,
+			&i.UpstreamUrl,
+			&i.UpstreamUsername,
+			&i.UpstreamPassword,
+			&i.KeepLast,
+			&i.DeleteUntagged,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateRepository = `-- name: UpdateRepository :one
 UPDATE repositories
 SET name = ?, upstream_url = ?, upstream_username = ?, upstream_password = ?,

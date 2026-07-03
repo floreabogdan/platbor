@@ -64,9 +64,14 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 				generics:  generic.NewBrowser(api.DB),
 				manager:   oci.NewManager(api.DB),
 				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB), generic.NewReferencer(api.DB), nuget.NewReferencer(api.DB)),
-				retention: NewRetentionService(api.DB, oci.NewPruner(api.DB), npm.NewPruner(api.DB), nuget.NewPruner(api.DB)),
-				projects:  api.Projects,
-				log:       log,
+				retention: NewRetentionService(api.DB, map[repository.Format]registry.Pruner{
+					repository.FormatOCI:   oci.NewPruner(api.DB),
+					repository.FormatNPM:   npm.NewPruner(api.DB),
+					repository.FormatNuGet: nuget.NewPruner(api.DB),
+				}),
+				repos:    repository.NewService(api.DB),
+				projects: api.Projects,
+				log:      log,
 			}.mount)
 			r.Route("/dashboard", dashboardHandler{
 				projects: api.Projects,
@@ -79,7 +84,7 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 
 	// Format-protocol routes. Each adapter owns its URL prefix and its own
 	// protocol-native auth and errors.
-	deps := registry.Deps{Blobs: api.Blobs, Auth: api.Auth, DB: api.DB, Log: log}
+	deps := registry.Deps{Blobs: api.Blobs, Auth: api.Auth, DB: api.DB, Log: log, Repositories: repository.NewService(api.DB)}
 	r.Route("/v2", func(sub chi.Router) {
 		oci.New().Mount(sub, deps)
 	})

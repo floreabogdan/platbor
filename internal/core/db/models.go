@@ -30,16 +30,16 @@ type AuditLog struct {
 }
 
 type GenericFile struct {
-	ID         string `json:"id"`
-	ProjectID  string `json:"project_id"`
-	Path       string `json:"path"`
-	BlobDigest string `json:"blob_digest"`
-	Size       int64  `json:"size"`
-	Sha256     string `json:"sha256"`
-	Sha1       string `json:"sha1"`
-	Md5        string `json:"md5"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	ID           string `json:"id"`
+	RepositoryID string `json:"repository_id"`
+	Path         string `json:"path"`
+	BlobDigest   string `json:"blob_digest"`
+	Size         int64  `json:"size"`
+	Sha256       string `json:"sha256"`
+	Sha1         string `json:"sha1"`
+	Md5          string `json:"md5"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 type NpmDistTag struct {
@@ -50,11 +50,11 @@ type NpmDistTag struct {
 }
 
 type NpmPackage struct {
-	ID        string `json:"id"`
-	ProjectID string `json:"project_id"`
-	Name      string `json:"name"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ID           string `json:"id"`
+	RepositoryID string `json:"repository_id"`
+	Name         string `json:"name"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 type NpmVersion struct {
@@ -70,12 +70,12 @@ type NpmVersion struct {
 }
 
 type NugetPackage struct {
-	ID         string `json:"id"`
-	ProjectID  string `json:"project_id"`
-	IDLower    string `json:"id_lower"`
-	IDOriginal string `json:"id_original"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	ID           string `json:"id"`
+	RepositoryID string `json:"repository_id"`
+	IDLower      string `json:"id_lower"`
+	IDOriginal   string `json:"id_original"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 type NugetVersion struct {
@@ -91,41 +91,33 @@ type NugetVersion struct {
 
 type OciManifest struct {
 	ID           string `json:"id"`
-	ProjectID    string `json:"project_id"`
+	RepositoryID string `json:"repository_id"`
 	Repository   string `json:"repository"`
 	Digest       string `json:"digest"`
 	MediaType    string `json:"media_type"`
 	Payload      []byte `json:"payload"`
 	Size         int64  `json:"size"`
-	CreatedAt    string `json:"created_at"`
 	Subject      string `json:"subject"`
 	ArtifactType string `json:"artifact_type"`
+	CreatedAt    string `json:"created_at"`
 }
 
 type OciTag struct {
-	ProjectID  string `json:"project_id"`
-	Repository string `json:"repository"`
-	Tag        string `json:"tag"`
-	Digest     string `json:"digest"`
-	UpdatedAt  string `json:"updated_at"`
+	RepositoryID string `json:"repository_id"`
+	Repository   string `json:"repository"`
+	Tag          string `json:"tag"`
+	Digest       string `json:"digest"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 type Project struct {
-	ID          string `json:"id"`
-	Key         string `json:"key"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
-}
-
-type RegistryProxy struct {
-	ProjectID   string `json:"project_id"`
-	UpstreamUrl string `json:"upstream_url"`
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID              string `json:"id"`
+	Key             string `json:"key"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
+	AllowAutoCreate int64  `json:"allow_auto_create"`
 }
 
 type Repository struct {
@@ -142,13 +134,6 @@ type Repository struct {
 	DeleteUntagged   int64  `json:"delete_untagged"`
 	CreatedAt        string `json:"created_at"`
 	UpdatedAt        string `json:"updated_at"`
-}
-
-type RetentionPolicy struct {
-	ProjectID      string `json:"project_id"`
-	KeepLast       int64  `json:"keep_last"`
-	DeleteUntagged int64  `json:"delete_untagged"`
-	UpdatedAt      string `json:"updated_at"`
 }
 
 type Session struct {

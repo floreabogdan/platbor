@@ -9,6 +9,7 @@ import (
 	"log/slog"
 
 	"github.com/platbor/platbor/internal/core/blob"
+	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry/proxy"
 )
 
@@ -19,57 +20,58 @@ import (
 // on each pull and falls back to the cached copy when the upstream is offline.
 
 // loadManifest resolves a manifest for serving, transparently filling the cache
-// for a proxy project. It returns ErrManifestNotFound when neither the local
+// for a proxy repository. It returns ErrManifestNotFound when neither the local
 // cache nor the upstream has the content.
-func (h *handler) loadManifest(ctx context.Context, projectID, repo, ref string) (storedManifest, error) {
-	up, isProxy, err := h.manifests.proxyUpstream(ctx, projectID)
-	if err != nil {
-		return storedManifest{}, err
+func (h *handler) loadManifest(ctx context.Context, repo repository.Repository, image, ref string) (storedManifest, error) {
+	isProxy := repo.Mode == repository.ModeProxy
+	var up proxy.Upstream
+	if isProxy && repo.Upstream != nil {
+		up = proxy.Upstream{BaseURL: repo.Upstream.URL, Username: repo.Upstream.Username, Password: repo.Upstream.Password}
 	}
 
 	if isDigestRef(ref) {
 		// A digest is immutable: a cache hit is authoritative.
-		m, err := h.manifests.getManifest(ctx, projectID, repo, ref)
+		m, err := h.manifests.getManifest(ctx, repo.ID, image, ref)
 		if err == nil || !errors.Is(err, ErrManifestNotFound) {
 			return m, err
 		}
 		if !isProxy {
 			return storedManifest{}, ErrManifestNotFound
 		}
-		return h.cacheManifest(ctx, up, projectID, repo, ref)
+		return h.cacheManifest(ctx, up, repo, image, ref)
 	}
 
 	if !isProxy {
-		digest, err := h.manifests.resolveTag(ctx, projectID, repo, ref)
+		digest, err := h.manifests.resolveTag(ctx, repo.ID, image, ref)
 		if err != nil {
 			return storedManifest{}, err
 		}
-		return h.manifests.getManifest(ctx, projectID, repo, digest)
+		return h.manifests.getManifest(ctx, repo.ID, image, digest)
 	}
 
 	// Proxy tag pull: prefer a fresh copy, fall back to cache when offline.
-	m, err := h.cacheManifest(ctx, up, projectID, repo, ref)
+	m, err := h.cacheManifest(ctx, up, repo, image, ref)
 	if err == nil {
 		return m, nil
 	}
 	if errors.Is(err, proxy.ErrUpstreamNotFound) {
 		return storedManifest{}, ErrManifestNotFound
 	}
-	if cached, ok := h.cachedTag(ctx, projectID, repo, ref); ok {
+	if cached, ok := h.cachedTag(ctx, repo.ID, image, ref); ok {
 		h.log.Warn("serving cached manifest; upstream unreachable",
-			slog.String("repo", repo), slog.String("ref", ref), slog.String("error", err.Error()))
+			slog.String("image", image), slog.String("ref", ref), slog.String("error", err.Error()))
 		return cached, nil
 	}
 	return storedManifest{}, err
 }
 
 // cachedTag returns the last cached manifest a tag pointed at, if any.
-func (h *handler) cachedTag(ctx context.Context, projectID, repo, tag string) (storedManifest, bool) {
-	digest, err := h.manifests.resolveTag(ctx, projectID, repo, tag)
+func (h *handler) cachedTag(ctx context.Context, repositoryID, image, tag string) (storedManifest, bool) {
+	digest, err := h.manifests.resolveTag(ctx, repositoryID, image, tag)
 	if err != nil {
 		return storedManifest{}, false
 	}
-	m, err := h.manifests.getManifest(ctx, projectID, repo, digest)
+	m, err := h.manifests.getManifest(ctx, repositoryID, image, digest)
 	if err != nil {
 		return storedManifest{}, false
 	}
@@ -79,8 +81,8 @@ func (h *handler) cachedTag(ctx context.Context, projectID, repo, tag string) (s
 // cacheManifest fetches a manifest (by tag or digest) from the upstream and
 // stores it. When a tag already resolves to the upstream's current digest and
 // the manifest is present, it serves the cache without a redundant write.
-func (h *handler) cacheManifest(ctx context.Context, up proxy.Upstream, projectID, repo, ref string) (storedManifest, error) {
-	fm, err := h.upstream.FetchManifest(ctx, up, repo, ref)
+func (h *handler) cacheManifest(ctx context.Context, up proxy.Upstream, repo repository.Repository, image, ref string) (storedManifest, error) {
+	fm, err := h.upstream.FetchManifest(ctx, up, image, ref)
 	if err != nil {
 		return storedManifest{}, err
 	}
@@ -98,7 +100,7 @@ func (h *handler) cacheManifest(ctx context.Context, up proxy.Upstream, projectI
 	// Already cached at this exact digest, and (for a tag) the tag already points
 	// here: nothing to write.
 	cachedAtDigest := false
-	if existing, gerr := h.manifests.getManifest(ctx, projectID, repo, digest); gerr == nil {
+	if existing, gerr := h.manifests.getManifest(ctx, repo.ID, image, digest); gerr == nil {
 		cachedAtDigest = true
 		stored = existing
 	}
@@ -106,7 +108,7 @@ func (h *handler) cacheManifest(ctx context.Context, up proxy.Upstream, projectI
 	if !isDigestRef(ref) {
 		tag = ref
 		if cachedAtDigest {
-			if current, rerr := h.manifests.resolveTag(ctx, projectID, repo, tag); rerr == nil && current == digest {
+			if current, rerr := h.manifests.resolveTag(ctx, repo.ID, image, tag); rerr == nil && current == digest {
 				return stored, nil
 			}
 		}
@@ -117,8 +119,9 @@ func (h *handler) cacheManifest(ctx context.Context, up proxy.Upstream, projectI
 	var doc manifestDoc
 	_ = json.Unmarshal(fm.Bytes, &doc)
 	if err := h.manifests.putManifest(ctx, manifestWrite{
-		ProjectID:    projectID,
-		Repository:   repo,
+		RepositoryID: repo.ID,
+		ProjectID:    repo.ProjectID,
+		Repository:   image,
 		Digest:       digest,
 		MediaType:    mediaType,
 		Payload:      fm.Bytes,

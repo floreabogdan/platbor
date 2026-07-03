@@ -21,18 +21,19 @@ func (q *Queries) CountProjects(ctx context.Context) (int64, error) {
 }
 
 const createProject = `-- name: CreateProject :one
-INSERT INTO projects (id, key, name, description, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)
-RETURNING id, "key", name, description, created_at, updated_at
+INSERT INTO projects (id, key, name, description, allow_auto_create, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING id, "key", name, description, created_at, updated_at, allow_auto_create
 `
 
 type CreateProjectParams struct {
-	ID          string `json:"id"`
-	Key         string `json:"key"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID              string `json:"id"`
+	Key             string `json:"key"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	AllowAutoCreate int64  `json:"allow_auto_create"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
@@ -41,6 +42,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		arg.Key,
 		arg.Name,
 		arg.Description,
+		arg.AllowAutoCreate,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -52,12 +54,13 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AllowAutoCreate,
 	)
 	return i, err
 }
 
 const getProjectByID = `-- name: GetProjectByID :one
-SELECT id, "key", name, description, created_at, updated_at FROM projects WHERE id = ?
+SELECT id, "key", name, description, created_at, updated_at, allow_auto_create FROM projects WHERE id = ?
 `
 
 func (q *Queries) GetProjectByID(ctx context.Context, id string) (Project, error) {
@@ -70,12 +73,13 @@ func (q *Queries) GetProjectByID(ctx context.Context, id string) (Project, error
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AllowAutoCreate,
 	)
 	return i, err
 }
 
 const getProjectByKey = `-- name: GetProjectByKey :one
-SELECT id, "key", name, description, created_at, updated_at FROM projects WHERE key = ?
+SELECT id, "key", name, description, created_at, updated_at, allow_auto_create FROM projects WHERE key = ?
 `
 
 func (q *Queries) GetProjectByKey(ctx context.Context, key string) (Project, error) {
@@ -88,12 +92,13 @@ func (q *Queries) GetProjectByKey(ctx context.Context, key string) (Project, err
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AllowAutoCreate,
 	)
 	return i, err
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, "key", name, description, created_at, updated_at FROM projects
+SELECT id, "key", name, description, created_at, updated_at, allow_auto_create FROM projects
 WHERE key > ?
 ORDER BY key ASC
 LIMIT ?
@@ -123,6 +128,7 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AllowAutoCreate,
 		); err != nil {
 			return nil, err
 		}
@@ -135,4 +141,19 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 		return nil, err
 	}
 	return items, nil
+}
+
+const setProjectAutoCreate = `-- name: SetProjectAutoCreate :exec
+UPDATE projects SET allow_auto_create = ?, updated_at = ? WHERE key = ?
+`
+
+type SetProjectAutoCreateParams struct {
+	AllowAutoCreate int64  `json:"allow_auto_create"`
+	UpdatedAt       string `json:"updated_at"`
+	Key             string `json:"key"`
+}
+
+func (q *Queries) SetProjectAutoCreate(ctx context.Context, arg SetProjectAutoCreateParams) error {
+	_, err := q.db.ExecContext(ctx, setProjectAutoCreate, arg.AllowAutoCreate, arg.UpdatedAt, arg.Key)
+	return err
 }

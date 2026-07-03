@@ -10,12 +10,15 @@ import (
 	"github.com/platbor/platbor/internal/core/config"
 	"github.com/platbor/platbor/internal/core/db"
 	"github.com/platbor/platbor/internal/core/project"
+	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/httpapi"
+	"github.com/platbor/platbor/internal/registry"
 	"github.com/platbor/platbor/internal/registry/npm"
 )
 
-// TestRetentionKeepLast seeds a package with five versions, sets keep-last-2, and
-// checks a dry run reports three prunable while a real run deletes exactly three.
+// TestRetentionKeepLast seeds an npm repository with five versions of a package,
+// gives it keep-last-2, and checks a dry run reports three prunable while a real
+// run deletes exactly three (the oldest).
 func TestRetentionKeepLast(t *testing.T) {
 	cfg := config.Default()
 	cfg.DataDir = t.TempDir()
@@ -33,11 +36,20 @@ func TestRetentionKeepLast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
+	// An npm repository with a keep-last-2 policy.
+	repo, err := repository.NewService(sqlDB).Create(ctx, repository.CreateInput{
+		ProjectID: proj.ID, Key: "npm-local", Name: "npm-local",
+		Format: repository.FormatNPM, Mode: repository.ModeLocal,
+		Retention: repository.Retention{KeepLast: 2}, Actor: "admin",
+	})
+	if err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
 
-	// Seed an npm package with five versions, oldest to newest by created_at.
+	// Seed a package with five versions, oldest to newest by created_at.
 	q := db.New(sqlDB)
 	pkgID, err := q.UpsertNpmPackage(ctx, db.UpsertNpmPackageParams{
-		ID: "pkg1", ProjectID: proj.ID, Name: "widget", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
+		ID: "pkg1", RepositoryID: repo.ID, Name: "widget", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
 	})
 	if err != nil {
 		t.Fatalf("UpsertNpmPackage: %v", err)
@@ -52,12 +64,9 @@ func TestRetentionKeepLast(t *testing.T) {
 		}
 	}
 
-	if err := q.UpsertRetentionPolicy(ctx, db.UpsertRetentionPolicyParams{
-		ProjectID: proj.ID, KeepLast: 2, DeleteUntagged: 0, UpdatedAt: "2026-01-06T00:00:00Z",
-	}); err != nil {
-		t.Fatalf("set policy: %v", err)
-	}
-	svc := httpapi.NewRetentionService(sqlDB, npm.NewPruner(sqlDB))
+	svc := httpapi.NewRetentionService(sqlDB, map[repository.Format]registry.Pruner{
+		repository.FormatNPM: npm.NewPruner(sqlDB),
+	})
 
 	// Dry run reports three prunable, deletes nothing.
 	rep, err := svc.Run(ctx, true, "admin")
@@ -67,7 +76,7 @@ func TestRetentionKeepLast(t *testing.T) {
 	if rep.Deleted != 3 {
 		t.Errorf("dry run deleted = %d, want 3", rep.Deleted)
 	}
-	if n := countVersions(t, ctx, q, proj.ID); n != 5 {
+	if n := countVersions(t, ctx, q, repo.ID); n != 5 {
 		t.Errorf("after dry run %d versions remain, want 5", n)
 	}
 
@@ -79,7 +88,7 @@ func TestRetentionKeepLast(t *testing.T) {
 	if rep.Deleted != 3 {
 		t.Errorf("run deleted = %d, want 3", rep.Deleted)
 	}
-	rows, _ := q.ListNpmVersionsForRetention(ctx, proj.ID)
+	rows, _ := q.ListNpmVersionsForRetention(ctx, repo.ID)
 	if len(rows) != 2 {
 		t.Fatalf("after prune %d versions remain, want 2", len(rows))
 	}
@@ -95,9 +104,9 @@ func TestRetentionKeepLast(t *testing.T) {
 	}
 }
 
-func countVersions(t *testing.T, ctx context.Context, q *db.Queries, projectID string) int {
+func countVersions(t *testing.T, ctx context.Context, q *db.Queries, repositoryID string) int {
 	t.Helper()
-	rows, err := q.ListNpmVersionsForRetention(ctx, projectID)
+	rows, err := q.ListNpmVersionsForRetention(ctx, repositoryID)
 	if err != nil {
 		t.Fatalf("ListNpmVersionsForRetention: %v", err)
 	}

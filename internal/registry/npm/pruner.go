@@ -25,11 +25,15 @@ func NewPruner(sqlDB *sql.DB) *Pruner {
 }
 
 // Prune implements registry.Pruner.
-func (p *Pruner) Prune(ctx context.Context, projectID string, keepLast int, _ bool, dryRun bool, actor string) (int, error) {
+func (p *Pruner) Prune(ctx context.Context, repositoryID string, keepLast int, _ bool, dryRun bool, actor string) (int, error) {
 	if keepLast <= 0 {
 		return 0, nil
 	}
-	rows, err := p.q.ListNpmVersionsForRetention(ctx, projectID)
+	repo, err := p.q.GetRepositoryByID(ctx, repositoryID)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := p.q.ListNpmVersionsForRetention(ctx, repositoryID)
 	if err != nil {
 		return 0, err
 	}
@@ -46,7 +50,7 @@ func (p *Pruner) Prune(ctx context.Context, projectID string, keepLast int, _ bo
 		if dryRun {
 			continue
 		}
-		if err := p.deleteVersion(ctx, projectID, r.Name, r.Version, actor); err != nil {
+		if err := p.deleteVersion(ctx, repositoryID, repo.ProjectID, r.Name, r.Version, actor); err != nil {
 			return deleted, err
 		}
 	}
@@ -54,7 +58,7 @@ func (p *Pruner) Prune(ctx context.Context, projectID string, keepLast int, _ bo
 }
 
 // deleteVersion removes one version and audits it, transactionally.
-func (p *Pruner) deleteVersion(ctx context.Context, projectID, name, version, actor string) error {
+func (p *Pruner) deleteVersion(ctx context.Context, repositoryID, projectID, name, version, actor string) error {
 	ts := p.now().Format(time.RFC3339Nano)
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -63,7 +67,7 @@ func (p *Pruner) deleteVersion(ctx context.Context, projectID, name, version, ac
 	defer func() { _ = tx.Rollback() }()
 	qtx := p.q.WithTx(tx)
 
-	if _, err := qtx.DeleteNpmVersion(ctx, db.DeleteNpmVersionParams{ProjectID: projectID, Name: name, Version: version}); err != nil {
+	if _, err := qtx.DeleteNpmVersion(ctx, db.DeleteNpmVersionParams{RepositoryID: repositoryID, Name: name, Version: version}); err != nil {
 		return fmt.Errorf("deleting version: %w", err)
 	}
 	if _, err := qtx.InsertAuditEntry(ctx, db.InsertAuditEntryParams{

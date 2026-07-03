@@ -24,6 +24,7 @@ func (h repositoriesHandler) mount(r chi.Router) {
 	r.Get("/", h.list)
 	r.With(requireAdmin).Post("/", h.create)
 	r.Get("/{repo}", h.get)
+	r.With(requireAdmin).Put("/{repo}", h.update)
 	r.With(requireAdmin).Delete("/{repo}", h.delete)
 }
 
@@ -151,6 +152,49 @@ func (h repositoriesHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, h.log, http.StatusCreated, toRepoConfigResponse(repo))
+}
+
+// updateRepositoryRequest is the mutable repository configuration: its name,
+// upstream (for proxy repos), and retention policy. Format and mode are
+// immutable and are not accepted here.
+type updateRepositoryRequest struct {
+	Name      string           `json:"name"`
+	Upstream  *upstreamPayload `json:"upstream"`
+	Retention retentionPayload `json:"retention"`
+}
+
+func (h repositoriesHandler) update(w http.ResponseWriter, r *http.Request) {
+	proj, ok := h.resolveProject(w, r)
+	if !ok {
+		return
+	}
+	var req updateRepositoryRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	in := repository.UpdateInput{
+		Name:      req.Name,
+		Retention: repository.Retention{KeepLast: req.Retention.KeepLast, DeleteUntagged: req.Retention.DeleteUntagged},
+	}
+	if req.Upstream != nil {
+		in.Upstream = &repository.Upstream{URL: req.Upstream.URL, Username: req.Upstream.Username, Password: req.Upstream.Password}
+	}
+	repo, err := h.repos.Update(r.Context(), proj.ID, chi.URLParam(r, "repo"), in, actorFrom(r))
+	if err != nil {
+		var ve *repository.ValidationError
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
+			writeProblem(w, http.StatusNotFound, "Repository not found", "")
+		case errors.As(err, &ve):
+			writeProblem(w, http.StatusBadRequest, "Invalid repository", ve.Msg)
+		default:
+			h.log.Error("updating repository", slog.String("error", err.Error()))
+			writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		}
+		return
+	}
+	writeJSON(w, h.log, http.StatusOK, toRepoConfigResponse(repo))
 }
 
 func (h repositoriesHandler) delete(w http.ResponseWriter, r *http.Request) {

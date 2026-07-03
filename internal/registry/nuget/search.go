@@ -10,11 +10,10 @@ import (
 // search serves the SearchQueryService: a minimal search over package ids in the
 // feed. Supports ?q=, ?take=, and returns each package's versions.
 func (h *handler) search(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.resolveProject(w, r)
+	repo, ok := h.resolveRepo(w, r, false)
 	if !ok {
 		return
 	}
-	project := chi.URLParam(r, "project")
 	query := r.URL.Query().Get("q")
 	take := 20
 	if t := r.URL.Query().Get("take"); t != "" {
@@ -23,16 +22,16 @@ func (h *handler) search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	hits, err := h.store.search(r.Context(), projectID, query, take)
+	hits, err := h.store.search(r.Context(), repo.ID, query, take)
 	if err != nil {
 		h.internalError(w, "searching", err)
 		return
 	}
 
-	base := baseURL(r, project)
+	base := baseURL(r, chi.URLParam(r, "project"), chi.URLParam(r, "repo"))
 	data := make([]map[string]any, 0, len(hits))
 	for _, hit := range hits {
-		versions, err := h.store.versions(r.Context(), projectID, hit.IDLower)
+		versions, err := h.store.versions(r.Context(), repo.ID, hit.IDLower)
 		if err != nil {
 			continue
 		}

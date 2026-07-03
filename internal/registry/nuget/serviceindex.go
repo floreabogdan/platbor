@@ -9,8 +9,7 @@ import (
 // serviceIndex advertises the feed's V3 resources. A client fetches this first
 // to discover where to publish, restore, read metadata, and search.
 func (h *handler) serviceIndex(w http.ResponseWriter, r *http.Request) {
-	project := chi.URLParam(r, "project")
-	base := baseURL(r, project)
+	base := baseURL(r, chi.URLParam(r, "project"), chi.URLParam(r, "repo"))
 
 	index := map[string]any{
 		"version": "3.0.0",

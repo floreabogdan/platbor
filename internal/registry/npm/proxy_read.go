@@ -25,21 +25,21 @@ import (
 // proxyPackument fetches a package document from the upstream, rewrites its
 // tarball URLs to point at this registry, and serves it. On an upstream failure
 // it falls back to whatever versions have already been cached locally.
-func (h *handler) proxyPackument(w http.ResponseWriter, r *http.Request, up upstream, projectID, project, pkg string) {
+func (h *handler) proxyPackument(w http.ResponseWriter, r *http.Request, up upstream, repositoryID, project, repoKey, pkg string) {
 	body, err := h.upstream.fetchPackument(r.Context(), up, pkg)
 	if err != nil {
 		if errors.Is(err, errUpstreamNotFound) {
 			// Nothing upstream; the local cache is the last word.
-			h.getLocalPackument(w, r, projectID, project, pkg, http.StatusNotFound)
+			h.getLocalPackument(w, r, repositoryID, project, repoKey, pkg, http.StatusNotFound)
 			return
 		}
 		h.log.Warn("npm upstream packument unreachable; trying cache",
 			slog.String("pkg", pkg), slog.String("error", err.Error()))
-		h.getLocalPackument(w, r, projectID, project, pkg, http.StatusBadGateway)
+		h.getLocalPackument(w, r, repositoryID, project, repoKey, pkg, http.StatusBadGateway)
 		return
 	}
 
-	rewritten, err := rewritePackument(body, registryBase(r, project), pkg)
+	rewritten, err := rewritePackument(body, registryBase(r, project, repoKey), pkg)
 	if err != nil {
 		h.internalError(w, "rewriting packument", err)
 		return
@@ -50,8 +50,8 @@ func (h *handler) proxyPackument(w http.ResponseWriter, r *http.Request, up upst
 
 // getLocalPackument serves the locally cached packument, used as the offline
 // fallback for a proxy. notFoundStatus is what to return when nothing is cached.
-func (h *handler) getLocalPackument(w http.ResponseWriter, r *http.Request, projectID, project, pkg string, notFoundStatus int) {
-	versions, distTags, err := h.store.packument(r.Context(), projectID, pkg)
+func (h *handler) getLocalPackument(w http.ResponseWriter, r *http.Request, repositoryID, project, repoKey, pkg string, notFoundStatus int) {
+	versions, distTags, err := h.store.packument(r.Context(), repositoryID, pkg)
 	if err != nil {
 		if errors.Is(err, ErrPackageNotFound) {
 			writeError(w, h.log, notFoundStatus, "package not found: "+pkg)
@@ -60,12 +60,12 @@ func (h *handler) getLocalPackument(w http.ResponseWriter, r *http.Request, proj
 		h.internalError(w, "reading cached packument", err)
 		return
 	}
-	h.writePackument(w, r, project, pkg, versions, distTags)
+	h.writePackument(w, r, project, repoKey, pkg, versions, distTags)
 }
 
 // proxyTarball serves a tarball from the local cache, filling it from the
 // upstream on a miss. Cached tarballs are immutable, so a hit is authoritative.
-func (h *handler) proxyTarball(w http.ResponseWriter, r *http.Request, up upstream, projectID, pkg, filename string) {
+func (h *handler) proxyTarball(w http.ResponseWriter, r *http.Request, up upstream, repositoryID, pkg, filename string) {
 	version, ok := versionFromFilename(pkg, filename)
 	if !ok {
 		writeError(w, h.log, http.StatusNotFound, "not found")
@@ -73,7 +73,7 @@ func (h *handler) proxyTarball(w http.ResponseWriter, r *http.Request, up upstre
 	}
 
 	// Cache hit: serve locally.
-	if digest, size, err := h.store.tarball(r.Context(), projectID, pkg, version); err == nil {
+	if digest, size, err := h.store.tarball(r.Context(), repositoryID, pkg, version); err == nil {
 		h.streamBlob(w, r, digest, size)
 		return
 	} else if !errors.Is(err, ErrPackageNotFound) {
@@ -82,7 +82,7 @@ func (h *handler) proxyTarball(w http.ResponseWriter, r *http.Request, up upstre
 	}
 
 	// Cache miss: fetch from upstream, store, then serve.
-	digest, size, err := h.cacheTarball(r.Context(), up, projectID, pkg, version, filename)
+	digest, size, err := h.cacheTarball(r.Context(), up, repositoryID, pkg, version, filename)
 	if err != nil {
 		if errors.Is(err, errUpstreamNotFound) {
 			writeError(w, h.log, http.StatusNotFound, "not found")
@@ -97,7 +97,7 @@ func (h *handler) proxyTarball(w http.ResponseWriter, r *http.Request, up upstre
 // cacheTarball fetches a tarball from the upstream, commits it to the blob
 // store, and records a cached version row (so it is GC-safe and future hits are
 // local). It returns the stored digest and size.
-func (h *handler) cacheTarball(ctx context.Context, up upstream, projectID, pkg, version, filename string) (string, int64, error) {
+func (h *handler) cacheTarball(ctx context.Context, up upstream, repositoryID, pkg, version, filename string) (string, int64, error) {
 	rc, err := h.upstream.fetchTarball(ctx, up, pkg, filename)
 	if err != nil {
 		return "", 0, err
@@ -134,7 +134,7 @@ func (h *handler) cacheTarball(ctx context.Context, up upstream, projectID, pkg,
 		TarballSize:   desc.Size,
 		Shasum:        shasum,
 		Integrity:     integrity,
-	}, projectID, pkg); err != nil {
+	}, repositoryID, pkg); err != nil {
 		return "", 0, err
 	}
 	return desc.Digest, desc.Size, nil
@@ -215,17 +215,4 @@ func hexSHA1(data []byte) string {
 func sha512Sum(data []byte) []byte {
 	sum := sha512.Sum512(data)
 	return sum[:]
-}
-
-// proxyUpstreamFor resolves whether a project is a proxy and its upstream,
-// mapping the local-project case to ok=false.
-func (h *handler) proxyUpstreamFor(ctx context.Context, projectID string) (upstream, bool, error) {
-	up, _, err := h.store.proxyUpstream(ctx, projectID)
-	if errors.Is(err, errNotProxy) {
-		return upstream{}, false, nil
-	}
-	if err != nil {
-		return upstream{}, false, err
-	}
-	return up, true, nil
 }

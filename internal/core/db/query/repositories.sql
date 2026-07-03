@@ -26,6 +26,11 @@ FROM repositories r
 JOIN projects p ON p.id = r.project_id
 ORDER BY p.key ASC, r.key ASC;
 
+-- name: ListRepositoriesWithPolicy :many
+-- Repositories that have an effective retention policy, for a retention run.
+SELECT * FROM repositories
+WHERE keep_last > 0 OR delete_untagged = 1;
+
 -- name: UpdateRepository :one
 UPDATE repositories
 SET name = ?, upstream_url = ?, upstream_username = ?, upstream_password = ?,

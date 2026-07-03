@@ -24,6 +24,7 @@ import (
 
 	"github.com/platbor/platbor/internal/core/auth"
 	"github.com/platbor/platbor/internal/core/blob"
+	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry"
 )
 
@@ -39,15 +40,17 @@ func New() *Adapter { return &Adapter{} }
 // Key implements registry.Adapter.
 func (a *Adapter) Key() string { return "generic" }
 
-// Mount registers the generic routes. r is already scoped to /generic.
+// Mount registers the generic routes. r is already scoped to /generic. The path
+// is /generic/<project>/<repo>/<path>.
 func (a *Adapter) Mount(r chi.Router, deps registry.Deps) {
 	h := &handler{
 		blobs: deps.Blobs,
 		auth:  deps.Auth,
 		store: newFileStore(deps.DB),
+		repos: deps.Repositories,
 		log:   deps.Log,
 	}
-	r.Route("/{project}", func(sub chi.Router) {
+	r.Route("/{project}/{repo}", func(sub chi.Router) {
 		sub.Handle("/*", http.HandlerFunc(h.serve))
 	})
 }
@@ -56,6 +59,7 @@ type handler struct {
 	blobs blob.Store
 	auth  *auth.Service
 	store *fileStore
+	repos *repository.Service
 	log   *slog.Logger
 }
 
@@ -64,6 +68,7 @@ var checksumSuffixes = []string{".sha256", ".sha1", ".md5"}
 
 func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 	project := chi.URLParam(r, "project")
+	repoKey := chi.URLParam(r, "repo")
 	path := chi.URLParam(r, "*")
 	if dec, err := url.PathUnescape(path); err == nil {
 		path = dec
@@ -82,36 +87,62 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projectID, err := h.store.resolveProject(r.Context(), project)
-	if err != nil {
-		if errors.Is(err, errProjectNotFound) {
-			writeError(w, http.StatusNotFound, "project not found: "+project)
-			return
-		}
-		h.internalError(w, "resolving project", err)
+	repo, ok := h.resolveRepo(w, r, project, repoKey, r.Method == http.MethodPut || r.Method == http.MethodDelete)
+	if !ok {
 		return
 	}
 
 	switch r.Method {
 	case http.MethodPut:
-		h.upload(w, r, projectID, path)
+		h.upload(w, r, repo, path)
 	case http.MethodGet, http.MethodHead:
-		h.download(w, r, projectID, path)
+		h.download(w, r, repo.ID, path)
 	case http.MethodDelete:
-		h.remove(w, r, projectID, path)
+		h.remove(w, r, repo, path)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
+// resolveRepo resolves (project, repo) to a generic repository. On a write it
+// auto-creates a local repo when the project allows it; on a read it 404s if
+// missing. A format mismatch (repo holds another format) is rejected.
+func (h *handler) resolveRepo(w http.ResponseWriter, r *http.Request, project, repoKey string, write bool) (repository.Repository, bool) {
+	projectID, allowAutoCreate, err := h.store.resolveProject(r.Context(), project)
+	if err != nil {
+		if errors.Is(err, errProjectNotFound) {
+			writeError(w, http.StatusNotFound, "project not found: "+project)
+			return repository.Repository{}, false
+		}
+		h.internalError(w, "resolving project", err)
+		return repository.Repository{}, false
+	}
+	var repo repository.Repository
+	if write {
+		repo, err = h.repos.ResolveOrCreate(r.Context(), projectID, repoKey, repository.FormatGeneric, actorFrom(r), allowAutoCreate)
+	} else {
+		repo, err = h.repos.GetForFormat(r.Context(), projectID, repoKey, repository.FormatGeneric)
+	}
+	switch {
+	case err == nil:
+		return repo, true
+	case errors.Is(err, repository.ErrNotFound):
+		writeError(w, http.StatusNotFound, "repository not found: "+repoKey)
+	case errors.Is(err, repository.ErrFormatMismatch):
+		writeError(w, http.StatusBadRequest, "repository "+repoKey+" is not a generic repository")
+	case errors.As(err, new(*repository.ValidationError)):
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		h.internalError(w, "resolving repository", err)
+	}
+	return repository.Repository{}, false
+}
+
 // upload streams the request body into the blob store while computing its
-// checksums, then records the file at its path. Proxy projects are read-only.
-func (h *handler) upload(w http.ResponseWriter, r *http.Request, projectID, path string) {
-	if proxy, err := h.store.isProxy(r.Context(), projectID); err != nil {
-		h.internalError(w, "checking proxy", err)
-		return
-	} else if proxy {
-		writeError(w, http.StatusForbidden, "cannot upload to a proxy project")
+// checksums, then records the file at its path. Proxy repos are read-only.
+func (h *handler) upload(w http.ResponseWriter, r *http.Request, repo repository.Repository, path string) {
+	if repo.Mode == repository.ModeProxy {
+		writeError(w, http.StatusForbidden, "cannot upload to a proxy repository")
 		return
 	}
 
@@ -137,14 +168,15 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request, projectID, path
 	}
 
 	if err := h.store.put(r.Context(), filePut{
-		ProjectID:  projectID,
-		Path:       path,
-		BlobDigest: desc.Digest,
-		Size:       size,
-		SHA256:     hex.EncodeToString(h256.Sum(nil)),
-		SHA1:       hex.EncodeToString(h1.Sum(nil)),
-		MD5:        hex.EncodeToString(hm.Sum(nil)),
-		Actor:      actorFrom(r),
+		RepositoryID: repo.ID,
+		ProjectID:    repo.ProjectID,
+		Path:         path,
+		BlobDigest:   desc.Digest,
+		Size:         size,
+		SHA256:       hex.EncodeToString(h256.Sum(nil)),
+		SHA1:         hex.EncodeToString(h1.Sum(nil)),
+		MD5:          hex.EncodeToString(hm.Sum(nil)),
+		Actor:        actorFrom(r),
 	}); err != nil {
 		h.internalError(w, "recording file", err)
 		return
@@ -158,8 +190,8 @@ func (h *handler) upload(w http.ResponseWriter, r *http.Request, projectID, path
 
 // download serves a file, or a checksum when the path is a "<file>.sha256"-style
 // sibling of a stored file (and no real file exists at that exact path).
-func (h *handler) download(w http.ResponseWriter, r *http.Request, projectID, path string) {
-	file, err := h.store.get(r.Context(), projectID, path)
+func (h *handler) download(w http.ResponseWriter, r *http.Request, repositoryID, path string) {
+	file, err := h.store.get(r.Context(), repositoryID, path)
 	if err == nil {
 		h.serveFile(w, r, file)
 		return
@@ -172,7 +204,7 @@ func (h *handler) download(w http.ResponseWriter, r *http.Request, projectID, pa
 	// Not a real file: maybe a checksum sibling of one.
 	for _, suf := range checksumSuffixes {
 		if base, ok := strings.CutSuffix(path, suf); ok {
-			if sum, ok := h.checksum(r, projectID, base, suf); ok {
+			if sum, ok := h.checksum(r, repositoryID, base, suf); ok {
 				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 				_, _ = io.WriteString(w, sum+"\n")
 				return
@@ -183,8 +215,8 @@ func (h *handler) download(w http.ResponseWriter, r *http.Request, projectID, pa
 }
 
 // checksum returns the stored checksum of base for the given suffix.
-func (h *handler) checksum(r *http.Request, projectID, base, suffix string) (string, bool) {
-	file, err := h.store.get(r.Context(), projectID, base)
+func (h *handler) checksum(r *http.Request, repositoryID, base, suffix string) (string, bool) {
+	file, err := h.store.get(r.Context(), repositoryID, base)
 	if err != nil {
 		return "", false
 	}
@@ -227,15 +259,12 @@ func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, file storedF
 	}
 }
 
-func (h *handler) remove(w http.ResponseWriter, r *http.Request, projectID, path string) {
-	if proxy, err := h.store.isProxy(r.Context(), projectID); err != nil {
-		h.internalError(w, "checking proxy", err)
-		return
-	} else if proxy {
-		writeError(w, http.StatusForbidden, "cannot delete from a proxy project")
+func (h *handler) remove(w http.ResponseWriter, r *http.Request, repo repository.Repository, path string) {
+	if repo.Mode == repository.ModeProxy {
+		writeError(w, http.StatusForbidden, "cannot delete from a proxy repository")
 		return
 	}
-	if err := h.store.delete(r.Context(), projectID, path, actorFrom(r)); err != nil {
+	if err := h.store.delete(r.Context(), repo.ID, repo.ProjectID, path, actorFrom(r)); err != nil {
 		if errors.Is(err, ErrFileNotFound) {
 			writeError(w, http.StatusNotFound, "not found")
 			return

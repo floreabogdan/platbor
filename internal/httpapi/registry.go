@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/platbor/platbor/internal/core/project"
+	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry/generic"
 	"github.com/platbor/platbor/internal/registry/npm"
 	"github.com/platbor/platbor/internal/registry/nuget"
@@ -31,6 +32,7 @@ type registryHandler struct {
 	manager   *oci.Manager
 	collector *oci.Collector
 	retention *RetentionService
+	repos     *repository.Service
 	projects  *project.Service
 	log       *slog.Logger
 }
@@ -43,19 +45,17 @@ func (h registryHandler) mount(r chi.Router) {
 	r.Get("/generic-files", h.listGenericFiles) // generic files
 	// Garbage collection is instance-wide and destructive: admins only.
 	r.With(requireAdmin).Post("/gc", h.runGC) // ?dryRun=true|false
-	// Retention: an admin-triggered run across all policied projects. The
-	// per-project policy config lives under /{project}/retention below.
+	// Retention: an admin-triggered run across all policied repositories. The
+	// per-repository policy config lives on the repository (PUT under projects).
 	r.With(requireAdmin).Post("/retention", h.runRetention) // ?dryRun=true|false
-	// Everything below is scoped to one project.
+	// Everything below is scoped to one project and repository (?repo=<repoKey>).
 	r.Route("/{project}", func(r chi.Router) {
-		r.Get("/tags", h.listTags)               // ?repository=<repo>
-		r.Get("/manifests", h.getManifest)       // ?repository=<repo>&reference=<tag|digest>
-		r.Delete("/manifests", h.deleteManifest) // ?repository=<repo>&reference=<tag|digest>
-		r.Get("/referrers", h.listReferrers)     // ?repository=<repo>&subject=<digest>
-		r.Get("/package", h.getPackage)          // ?name=<pkg> (npm detail)
-		r.Get("/nuget-package", h.getNuget)      // ?id=<id> (NuGet detail)
-		r.Get("/retention", h.getRetention)      // retention policy for this project
-		r.With(requireAdmin).Put("/retention", h.setRetention)
+		r.Get("/tags", h.listTags)               // ?repo=<repo>&image=<image>
+		r.Get("/manifests", h.getManifest)       // ?repo=<repo>&image=<image>&reference=<tag|digest>
+		r.Delete("/manifests", h.deleteManifest) // ?repo=<repo>&image=<image>&reference=<tag|digest>
+		r.Get("/referrers", h.listReferrers)     // ?repo=<repo>&image=<image>&subject=<digest>
+		r.Get("/package", h.getPackage)          // ?repo=<repo>&name=<pkg> (npm detail)
+		r.Get("/nuget-package", h.getNuget)      // ?repo=<repo>&id=<id> (NuGet detail)
 	})
 }
 
@@ -64,6 +64,7 @@ func (h registryHandler) mount(r chi.Router) {
 type repositoryResponse struct {
 	ProjectKey    string    `json:"projectKey"`
 	ProjectName   string    `json:"projectName"`
+	RepoKey       string    `json:"repoKey"`
 	Repository    string    `json:"repository"`
 	Kind          string    `json:"kind"` // "local" or "proxy"
 	TagCount      int       `json:"tagCount"`
@@ -140,6 +141,7 @@ func (h registryHandler) listRepositories(w http.ResponseWriter, r *http.Request
 		items = append(items, repositoryResponse{
 			ProjectKey:    repo.ProjectKey,
 			ProjectName:   repo.ProjectName,
+			RepoKey:       repo.RepoKey,
 			Repository:    repo.Repository,
 			Kind:          repoKind(repo.IsProxy),
 			TagCount:      repo.TagCount,
@@ -162,6 +164,7 @@ func repoKind(isProxy bool) string {
 type packageResponse struct {
 	ProjectKey   string    `json:"projectKey"`
 	ProjectName  string    `json:"projectName"`
+	RepoKey      string    `json:"repoKey"`
 	Name         string    `json:"name"`
 	Kind         string    `json:"kind"` // "local" or "proxy"
 	VersionCount int       `json:"versionCount"`
@@ -187,6 +190,7 @@ func (h registryHandler) listPackages(w http.ResponseWriter, r *http.Request) {
 		items = append(items, packageResponse{
 			ProjectKey:   p.ProjectKey,
 			ProjectName:  p.ProjectName,
+			RepoKey:      p.RepoKey,
 			Name:         p.Name,
 			Kind:         repoKind(p.IsProxy),
 			VersionCount: p.VersionCount,
@@ -215,13 +219,14 @@ type packageDetailResponse struct {
 // page. The project comes from the path; the package name is a query param.
 func (h registryHandler) getPackage(w http.ResponseWriter, r *http.Request) {
 	projectKey := chi.URLParam(r, "project")
+	repoKey := r.URL.Query().Get("repo")
 	name := r.URL.Query().Get("name")
-	if name == "" {
-		writeProblem(w, http.StatusBadRequest, "Missing parameter", "name is required")
+	if repoKey == "" || name == "" {
+		writeProblem(w, http.StatusBadRequest, "Missing parameter", "repo and name are required")
 		return
 	}
 
-	detail, err := h.packages.Package(r.Context(), projectKey, name)
+	detail, err := h.packages.Package(r.Context(), projectKey, repoKey, name)
 	if err != nil {
 		if errors.Is(err, npm.ErrPackageNotFound) {
 			writeProblem(w, http.StatusNotFound, "Package not found", "no such package in that project")
@@ -254,6 +259,7 @@ func (h registryHandler) getPackage(w http.ResponseWriter, r *http.Request) {
 type nugetResponse struct {
 	ProjectKey   string    `json:"projectKey"`
 	ProjectName  string    `json:"projectName"`
+	RepoKey      string    `json:"repoKey"`
 	ID           string    `json:"id"`
 	Kind         string    `json:"kind"`
 	VersionCount int       `json:"versionCount"`
@@ -278,6 +284,7 @@ func (h registryHandler) listNugets(w http.ResponseWriter, r *http.Request) {
 		items = append(items, nugetResponse{
 			ProjectKey:   p.ProjectKey,
 			ProjectName:  p.ProjectName,
+			RepoKey:      p.RepoKey,
 			ID:           p.ID,
 			Kind:         repoKind(p.IsProxy),
 			VersionCount: p.VersionCount,
@@ -302,12 +309,13 @@ type nugetDetailResponse struct {
 // getNuget returns one NuGet package's versions for the detail page.
 func (h registryHandler) getNuget(w http.ResponseWriter, r *http.Request) {
 	projectKey := chi.URLParam(r, "project")
+	repoKey := r.URL.Query().Get("repo")
 	pkgID := r.URL.Query().Get("id")
-	if pkgID == "" {
-		writeProblem(w, http.StatusBadRequest, "Missing parameter", "id is required")
+	if repoKey == "" || pkgID == "" {
+		writeProblem(w, http.StatusBadRequest, "Missing parameter", "repo and id are required")
 		return
 	}
-	detail, err := h.nugets.Package(r.Context(), projectKey, pkgID)
+	detail, err := h.nugets.Package(r.Context(), projectKey, repoKey, pkgID)
 	if err != nil {
 		if errors.Is(err, nuget.ErrPackageNotFound) {
 			writeProblem(w, http.StatusNotFound, "Package not found", "no such package in that project")
@@ -329,6 +337,7 @@ func (h registryHandler) getNuget(w http.ResponseWriter, r *http.Request) {
 type genericFileResponse struct {
 	ProjectKey  string    `json:"projectKey"`
 	ProjectName string    `json:"projectName"`
+	RepoKey     string    `json:"repoKey"`
 	Path        string    `json:"path"`
 	Kind        string    `json:"kind"`
 	SizeBytes   int64     `json:"sizeBytes"`
@@ -352,6 +361,7 @@ func (h registryHandler) listGenericFiles(w http.ResponseWriter, r *http.Request
 		items = append(items, genericFileResponse{
 			ProjectKey:  f.ProjectKey,
 			ProjectName: f.ProjectName,
+			RepoKey:     f.RepoKey,
 			Path:        f.Path,
 			Kind:        repoKind(f.IsProxy),
 			SizeBytes:   f.SizeBytes,
@@ -362,11 +372,11 @@ func (h registryHandler) listGenericFiles(w http.ResponseWriter, r *http.Request
 }
 
 func (h registryHandler) listTags(w http.ResponseWriter, r *http.Request) {
-	proj, repo, ok := h.resolveScope(w, r)
+	repo, image, ok := h.resolveScope(w, r)
 	if !ok {
 		return
 	}
-	tags, err := h.browser.Tags(r.Context(), proj.ID, repo)
+	tags, err := h.browser.Tags(r.Context(), repo.ID, image)
 	if err != nil {
 		h.log.Error("listing tags", slog.String("error", err.Error()))
 		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
@@ -384,11 +394,11 @@ func (h registryHandler) listTags(w http.ResponseWriter, r *http.Request) {
 			PushedAt:  t.PushedAt,
 		})
 	}
-	writeJSON(w, h.log, http.StatusOK, listTagsResponse{Repository: repo, Tags: items})
+	writeJSON(w, h.log, http.StatusOK, listTagsResponse{Repository: image, Tags: items})
 }
 
 func (h registryHandler) getManifest(w http.ResponseWriter, r *http.Request) {
-	proj, repo, ok := h.resolveScope(w, r)
+	repo, image, ok := h.resolveScope(w, r)
 	if !ok {
 		return
 	}
@@ -398,7 +408,7 @@ func (h registryHandler) getManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view, err := h.browser.Manifest(r.Context(), proj.ID, repo, reference)
+	view, err := h.browser.Manifest(r.Context(), repo.ID, image, reference)
 	if err != nil {
 		if errors.Is(err, oci.ErrManifestNotFound) {
 			writeProblem(w, http.StatusNotFound, "Manifest not found", "no manifest for that reference")
@@ -442,7 +452,7 @@ func (h registryHandler) runGC(w http.ResponseWriter, r *http.Request) {
 // listReferrers returns the artifacts (signatures, SBOMs, attestations) whose
 // subject is the given manifest digest.
 func (h registryHandler) listReferrers(w http.ResponseWriter, r *http.Request) {
-	proj, repo, ok := h.resolveScope(w, r)
+	repo, image, ok := h.resolveScope(w, r)
 	if !ok {
 		return
 	}
@@ -452,7 +462,7 @@ func (h registryHandler) listReferrers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	refs, err := h.browser.Referrers(r.Context(), proj.ID, repo, subject)
+	refs, err := h.browser.Referrers(r.Context(), repo.ID, image, subject)
 	if err != nil {
 		h.log.Error("listing referrers", slog.String("error", err.Error()))
 		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
@@ -475,7 +485,7 @@ func (h registryHandler) listReferrers(w http.ResponseWriter, r *http.Request) {
 // its tags (reference is a digest). Deletion is audited by the store as the
 // authenticated user.
 func (h registryHandler) deleteManifest(w http.ResponseWriter, r *http.Request) {
-	proj, repo, ok := h.resolveScope(w, r)
+	repo, image, ok := h.resolveScope(w, r)
 	if !ok {
 		return
 	}
@@ -489,9 +499,9 @@ func (h registryHandler) deleteManifest(w http.ResponseWriter, r *http.Request) 
 	var err error
 	if strings.Contains(reference, ":") {
 		// A digest reference deletes the manifest and every tag pointing at it.
-		err = h.manager.DeleteManifest(r.Context(), proj.ID, repo, reference, actor)
+		err = h.manager.DeleteManifest(r.Context(), repo.ID, repo.ProjectID, image, reference, actor)
 	} else {
-		err = h.manager.DeleteTag(r.Context(), proj.ID, repo, reference, actor)
+		err = h.manager.DeleteTag(r.Context(), repo.ID, repo.ProjectID, image, reference, actor)
 	}
 	if err != nil {
 		if errors.Is(err, oci.ErrManifestNotFound) {
@@ -505,28 +515,38 @@ func (h registryHandler) deleteManifest(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// resolveScope validates the {project} path param and the required repository
-// query param, returning the resolved project and repository. It writes the
-// error response itself when either is missing.
-func (h registryHandler) resolveScope(w http.ResponseWriter, r *http.Request) (project.Project, string, bool) {
-	key := chi.URLParam(r, "project")
-	repo := r.URL.Query().Get("repository")
-	if repo == "" {
-		writeProblem(w, http.StatusBadRequest, "Missing repository", "the repository query parameter is required")
-		return project.Project{}, "", false
+// resolveScope resolves the {project} path param plus the ?repo (typed
+// repository key) and ?image (OCI image name) query params to an OCI repository
+// and the image within it. It writes the error response itself on any problem.
+func (h registryHandler) resolveScope(w http.ResponseWriter, r *http.Request) (repository.Repository, string, bool) {
+	projectKey := chi.URLParam(r, "project")
+	repoKey := r.URL.Query().Get("repo")
+	image := r.URL.Query().Get("image")
+	if repoKey == "" || image == "" {
+		writeProblem(w, http.StatusBadRequest, "Missing parameter", "the repo and image query parameters are required")
+		return repository.Repository{}, "", false
 	}
-
-	proj, err := h.projects.GetByKey(r.Context(), key)
+	proj, err := h.projects.GetByKey(r.Context(), projectKey)
 	if err != nil {
 		if errors.Is(err, project.ErrNotFound) {
-			writeProblem(w, http.StatusNotFound, "Project not found", "no project with key "+key)
-			return project.Project{}, "", false
+			writeProblem(w, http.StatusNotFound, "Project not found", "no project with key "+projectKey)
+			return repository.Repository{}, "", false
 		}
 		h.log.Error("resolving project", slog.String("error", err.Error()))
 		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
-		return project.Project{}, "", false
+		return repository.Repository{}, "", false
 	}
-	return proj, repo, true
+	repo, err := h.repos.GetForFormat(r.Context(), proj.ID, repoKey, repository.FormatOCI)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) || errors.Is(err, repository.ErrFormatMismatch) {
+			writeProblem(w, http.StatusNotFound, "Repository not found", "no OCI repository "+repoKey+" in "+projectKey)
+			return repository.Repository{}, "", false
+		}
+		h.log.Error("resolving repository", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return repository.Repository{}, "", false
+	}
+	return repo, image, true
 }
 
 func toManifestResponse(v oci.ManifestView) manifestResponse {

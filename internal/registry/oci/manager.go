@@ -17,12 +17,12 @@ func NewManager(sqlDB *sql.DB) *Manager { return &Manager{store: newManifestStor
 
 // DeleteTag removes a single tag, leaving the manifest it referenced in place.
 // Returns ErrManifestNotFound when the tag does not exist.
-func (m *Manager) DeleteTag(ctx context.Context, projectID, repo, tag, actor string) error {
-	return m.store.deleteTag(ctx, projectID, repo, tag, actor)
+func (m *Manager) DeleteTag(ctx context.Context, repositoryID, projectID, image, tag, actor string) error {
+	return m.store.deleteTag(ctx, repositoryID, projectID, image, tag, actor)
 }
 
 // DeleteManifest removes a manifest by digest along with every tag pointing at
 // it. Returns ErrManifestNotFound when the manifest does not exist.
-func (m *Manager) DeleteManifest(ctx context.Context, projectID, repo, digest, actor string) error {
-	return m.store.deleteManifest(ctx, projectID, repo, digest, actor)
+func (m *Manager) DeleteManifest(ctx context.Context, repositoryID, projectID, image, digest, actor string) error {
+	return m.store.deleteManifest(ctx, repositoryID, projectID, image, digest, actor)
 }

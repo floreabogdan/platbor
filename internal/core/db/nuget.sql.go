@@ -11,18 +11,18 @@ import (
 
 const deleteNugetVersion = `-- name: DeleteNugetVersion :execrows
 DELETE FROM nuget_versions
-WHERE package_id = (SELECT id FROM nuget_packages WHERE project_id = ? AND id_lower = ?)
+WHERE package_id = (SELECT id FROM nuget_packages WHERE repository_id = ? AND id_lower = ?)
   AND version_lower = ?
 `
 
 type DeleteNugetVersionParams struct {
-	ProjectID    string `json:"project_id"`
+	RepositoryID string `json:"repository_id"`
 	IDLower      string `json:"id_lower"`
 	VersionLower string `json:"version_lower"`
 }
 
 func (q *Queries) DeleteNugetVersion(ctx context.Context, arg DeleteNugetVersionParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteNugetVersion, arg.ProjectID, arg.IDLower, arg.VersionLower)
+	result, err := q.db.ExecContext(ctx, deleteNugetVersion, arg.RepositoryID, arg.IDLower, arg.VersionLower)
 	if err != nil {
 		return 0, err
 	}
@@ -33,11 +33,11 @@ const getNugetNupkg = `-- name: GetNugetNupkg :one
 SELECT v.nupkg_digest, v.nupkg_size
 FROM nuget_versions v
 JOIN nuget_packages p ON p.id = v.package_id
-WHERE p.project_id = ? AND p.id_lower = ? AND v.version_lower = ?
+WHERE p.repository_id = ? AND p.id_lower = ? AND v.version_lower = ?
 `
 
 type GetNugetNupkgParams struct {
-	ProjectID    string `json:"project_id"`
+	RepositoryID string `json:"repository_id"`
 	IDLower      string `json:"id_lower"`
 	VersionLower string `json:"version_lower"`
 }
@@ -49,28 +49,28 @@ type GetNugetNupkgRow struct {
 
 // The blob digest and size for one version's .nupkg, to serve it.
 func (q *Queries) GetNugetNupkg(ctx context.Context, arg GetNugetNupkgParams) (GetNugetNupkgRow, error) {
-	row := q.db.QueryRowContext(ctx, getNugetNupkg, arg.ProjectID, arg.IDLower, arg.VersionLower)
+	row := q.db.QueryRowContext(ctx, getNugetNupkg, arg.RepositoryID, arg.IDLower, arg.VersionLower)
 	var i GetNugetNupkgRow
 	err := row.Scan(&i.NupkgDigest, &i.NupkgSize)
 	return i, err
 }
 
 const getNugetPackage = `-- name: GetNugetPackage :one
-SELECT id, project_id, id_lower, id_original, created_at, updated_at FROM nuget_packages
-WHERE project_id = ? AND id_lower = ?
+SELECT id, repository_id, id_lower, id_original, created_at, updated_at FROM nuget_packages
+WHERE repository_id = ? AND id_lower = ?
 `
 
 type GetNugetPackageParams struct {
-	ProjectID string `json:"project_id"`
-	IDLower   string `json:"id_lower"`
+	RepositoryID string `json:"repository_id"`
+	IDLower      string `json:"id_lower"`
 }
 
 func (q *Queries) GetNugetPackage(ctx context.Context, arg GetNugetPackageParams) (NugetPackage, error) {
-	row := q.db.QueryRowContext(ctx, getNugetPackage, arg.ProjectID, arg.IDLower)
+	row := q.db.QueryRowContext(ctx, getNugetPackage, arg.RepositoryID, arg.IDLower)
 	var i NugetPackage
 	err := row.Scan(
 		&i.ID,
-		&i.ProjectID,
+		&i.RepositoryID,
 		&i.IDLower,
 		&i.IDOriginal,
 		&i.CreatedAt,
@@ -114,22 +114,24 @@ const listAllNugetPackages = `-- name: ListAllNugetPackages :many
 SELECT
     p.key         AS project_key,
     p.name        AS project_name,
+    r.key         AS repo_key,
     pkg.id_original AS package_id,
     COUNT(v.id)   AS version_count,
     CAST(COALESCE(SUM(v.nupkg_size), 0) AS INTEGER) AS size_bytes,
-    CAST(rp.project_id IS NOT NULL AS INTEGER) AS is_proxy,
+    CAST(r.mode = 'proxy' AS INTEGER) AS is_proxy,
     pkg.updated_at AS updated_at
 FROM nuget_packages pkg
-JOIN projects p ON p.id = pkg.project_id
-LEFT JOIN registry_proxies rp ON rp.project_id = pkg.project_id
+JOIN repositories r ON r.id = pkg.repository_id
+JOIN projects p ON p.id = r.project_id
 LEFT JOIN nuget_versions v ON v.package_id = pkg.id
 GROUP BY pkg.id
-ORDER BY p.key ASC, pkg.id_lower ASC
+ORDER BY p.key ASC, r.key ASC, pkg.id_lower ASC
 `
 
 type ListAllNugetPackagesRow struct {
 	ProjectKey   string `json:"project_key"`
 	ProjectName  string `json:"project_name"`
+	RepoKey      string `json:"repo_key"`
 	PackageID    string `json:"package_id"`
 	VersionCount int64  `json:"version_count"`
 	SizeBytes    int64  `json:"size_bytes"`
@@ -137,8 +139,8 @@ type ListAllNugetPackagesRow struct {
 	UpdatedAt    string `json:"updated_at"`
 }
 
-// Every NuGet package across all projects, with version count, total nupkg size,
-// and a proxy flag, for the registry browser's package index.
+// Every NuGet package across all repositories, joined to its repository and
+// project, with version count, total nupkg size, and a proxy flag.
 func (q *Queries) ListAllNugetPackages(ctx context.Context) ([]ListAllNugetPackagesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAllNugetPackages)
 	if err != nil {
@@ -151,6 +153,7 @@ func (q *Queries) ListAllNugetPackages(ctx context.Context) ([]ListAllNugetPacka
 		if err := rows.Scan(
 			&i.ProjectKey,
 			&i.ProjectName,
+			&i.RepoKey,
 			&i.PackageID,
 			&i.VersionCount,
 			&i.SizeBytes,
@@ -203,13 +206,13 @@ const listNugetVersions = `-- name: ListNugetVersions :many
 SELECT v.version, v.version_lower, v.nupkg_digest, v.nupkg_size, v.nuspec, v.created_at
 FROM nuget_versions v
 JOIN nuget_packages p ON p.id = v.package_id
-WHERE p.project_id = ? AND p.id_lower = ?
+WHERE p.repository_id = ? AND p.id_lower = ?
 ORDER BY v.created_at ASC
 `
 
 type ListNugetVersionsParams struct {
-	ProjectID string `json:"project_id"`
-	IDLower   string `json:"id_lower"`
+	RepositoryID string `json:"repository_id"`
+	IDLower      string `json:"id_lower"`
 }
 
 type ListNugetVersionsRow struct {
@@ -224,7 +227,7 @@ type ListNugetVersionsRow struct {
 // Every version of a package, oldest first, with the nuspec and nupkg pointer,
 // for the flat-container index, registration, and downloads.
 func (q *Queries) ListNugetVersions(ctx context.Context, arg ListNugetVersionsParams) ([]ListNugetVersionsRow, error) {
-	rows, err := q.db.QueryContext(ctx, listNugetVersions, arg.ProjectID, arg.IDLower)
+	rows, err := q.db.QueryContext(ctx, listNugetVersions, arg.RepositoryID, arg.IDLower)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +260,7 @@ const listNugetVersionsForRetention = `-- name: ListNugetVersionsForRetention :m
 SELECT p.id_lower AS id_lower, v.version_lower AS version_lower, v.created_at AS created_at
 FROM nuget_versions v
 JOIN nuget_packages p ON p.id = v.package_id
-WHERE p.project_id = ?
+WHERE p.repository_id = ?
 ORDER BY p.id_lower ASC, v.created_at DESC
 `
 
@@ -267,10 +270,10 @@ type ListNugetVersionsForRetentionRow struct {
 	CreatedAt    string `json:"created_at"`
 }
 
-// Every version in a project, grouped by package and newest first, for
+// Every version in a repository, grouped by package and newest first, for
 // keep-last-N pruning.
-func (q *Queries) ListNugetVersionsForRetention(ctx context.Context, projectID string) ([]ListNugetVersionsForRetentionRow, error) {
-	rows, err := q.db.QueryContext(ctx, listNugetVersionsForRetention, projectID)
+func (q *Queries) ListNugetVersionsForRetention(ctx context.Context, repositoryID string) ([]ListNugetVersionsForRetentionRow, error) {
+	rows, err := q.db.QueryContext(ctx, listNugetVersionsForRetention, repositoryID)
 	if err != nil {
 		return nil, err
 	}
@@ -295,11 +298,11 @@ func (q *Queries) ListNugetVersionsForRetention(ctx context.Context, projectID s
 const nugetVersionExists = `-- name: NugetVersionExists :one
 SELECT COUNT(*) FROM nuget_versions v
 JOIN nuget_packages p ON p.id = v.package_id
-WHERE p.project_id = ? AND p.id_lower = ? AND v.version_lower = ?
+WHERE p.repository_id = ? AND p.id_lower = ? AND v.version_lower = ?
 `
 
 type NugetVersionExistsParams struct {
-	ProjectID    string `json:"project_id"`
+	RepositoryID string `json:"repository_id"`
 	IDLower      string `json:"id_lower"`
 	VersionLower string `json:"version_lower"`
 }
@@ -307,7 +310,7 @@ type NugetVersionExistsParams struct {
 // Whether a specific version is already pushed. NuGet forbids overwriting a
 // published version, so the handler rejects a re-push before inserting.
 func (q *Queries) NugetVersionExists(ctx context.Context, arg NugetVersionExistsParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, nugetVersionExists, arg.ProjectID, arg.IDLower, arg.VersionLower)
+	row := q.db.QueryRowContext(ctx, nugetVersionExists, arg.RepositoryID, arg.IDLower, arg.VersionLower)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -321,16 +324,16 @@ SELECT
     pkg.updated_at  AS updated_at
 FROM nuget_packages pkg
 LEFT JOIN nuget_versions v ON v.package_id = pkg.id
-WHERE pkg.project_id = ? AND pkg.id_lower LIKE ?
+WHERE pkg.repository_id = ? AND pkg.id_lower LIKE ?
 GROUP BY pkg.id
 ORDER BY pkg.updated_at DESC
 LIMIT ?
 `
 
 type SearchNugetPackagesParams struct {
-	ProjectID string `json:"project_id"`
-	IDLower   string `json:"id_lower"`
-	Limit     int64  `json:"limit"`
+	RepositoryID string `json:"repository_id"`
+	IDLower      string `json:"id_lower"`
+	Limit        int64  `json:"limit"`
 }
 
 type SearchNugetPackagesRow struct {
@@ -340,10 +343,10 @@ type SearchNugetPackagesRow struct {
 	UpdatedAt    string `json:"updated_at"`
 }
 
-// Packages in a project whose id contains the (lowercased) query, newest first,
-// for the search resource. An empty query matches all.
+// Packages in a repository whose id contains the (lowercased) query, newest
+// first, for the search resource. An empty query matches all.
 func (q *Queries) SearchNugetPackages(ctx context.Context, arg SearchNugetPackagesParams) ([]SearchNugetPackagesRow, error) {
-	rows, err := q.db.QueryContext(ctx, searchNugetPackages, arg.ProjectID, arg.IDLower, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, searchNugetPackages, arg.RepositoryID, arg.IDLower, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -371,28 +374,28 @@ func (q *Queries) SearchNugetPackages(ctx context.Context, arg SearchNugetPackag
 }
 
 const upsertNugetPackage = `-- name: UpsertNugetPackage :one
-INSERT INTO nuget_packages (id, project_id, id_lower, id_original, created_at, updated_at)
+INSERT INTO nuget_packages (id, repository_id, id_lower, id_original, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)
-ON CONFLICT (project_id, id_lower)
+ON CONFLICT (repository_id, id_lower)
 DO UPDATE SET updated_at = excluded.updated_at
 RETURNING id
 `
 
 type UpsertNugetPackageParams struct {
-	ID         string `json:"id"`
-	ProjectID  string `json:"project_id"`
-	IDLower    string `json:"id_lower"`
-	IDOriginal string `json:"id_original"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	ID           string `json:"id"`
+	RepositoryID string `json:"repository_id"`
+	IDLower      string `json:"id_lower"`
+	IDOriginal   string `json:"id_original"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
-// Ensure the package row for (project, id_lower) exists, returning its id.
+// Ensure the package row for (repository, id_lower) exists, returning its id.
 // Pushing a new version of an existing package bumps updated_at.
 func (q *Queries) UpsertNugetPackage(ctx context.Context, arg UpsertNugetPackageParams) (string, error) {
 	row := q.db.QueryRowContext(ctx, upsertNugetPackage,
 		arg.ID,
-		arg.ProjectID,
+		arg.RepositoryID,
 		arg.IDLower,
 		arg.IDOriginal,
 		arg.CreatedAt,

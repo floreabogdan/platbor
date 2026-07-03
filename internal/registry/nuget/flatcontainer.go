@@ -17,7 +17,7 @@ import (
 //	<id-lower>/index.json                          -> the version list
 //	<id-lower>/<version>/<id-lower>.<version>.nupkg -> the package download
 func (h *handler) flatContainer(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.resolveProject(w, r)
+	repo, ok := h.resolveRepo(w, r, false)
 	if !ok {
 		return
 	}
@@ -26,17 +26,17 @@ func (h *handler) flatContainer(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case len(parts) == 2 && parts[1] == "index.json":
-		h.flatVersions(w, r, projectID, strings.ToLower(parts[0]))
+		h.flatVersions(w, r, repo.ID, strings.ToLower(parts[0]))
 	case len(parts) == 3 && strings.HasSuffix(strings.ToLower(parts[2]), ".nupkg"):
-		h.flatDownload(w, r, projectID, strings.ToLower(parts[0]), strings.ToLower(parts[1]))
+		h.flatDownload(w, r, repo.ID, strings.ToLower(parts[0]), strings.ToLower(parts[1]))
 	default:
 		writeError(w, http.StatusNotFound, "not found")
 	}
 }
 
 // flatVersions returns the normalized version list for a package.
-func (h *handler) flatVersions(w http.ResponseWriter, r *http.Request, projectID, idLower string) {
-	versions, err := h.store.versions(r.Context(), projectID, idLower)
+func (h *handler) flatVersions(w http.ResponseWriter, r *http.Request, repositoryID, idLower string) {
+	versions, err := h.store.versions(r.Context(), repositoryID, idLower)
 	if err != nil {
 		if errors.Is(err, ErrPackageNotFound) {
 			writeError(w, http.StatusNotFound, "package not found")
@@ -53,8 +53,8 @@ func (h *handler) flatVersions(w http.ResponseWriter, r *http.Request, projectID
 }
 
 // flatDownload streams a version's .nupkg from the blob store.
-func (h *handler) flatDownload(w http.ResponseWriter, r *http.Request, projectID, idLower, versionLower string) {
-	digest, size, err := h.store.nupkg(r.Context(), projectID, idLower, versionLower)
+func (h *handler) flatDownload(w http.ResponseWriter, r *http.Request, repositoryID, idLower, versionLower string) {
+	digest, size, err := h.store.nupkg(r.Context(), repositoryID, idLower, versionLower)
 	if err != nil {
 		if errors.Is(err, ErrPackageNotFound) {
 			writeError(w, http.StatusNotFound, "not found")

@@ -5,7 +5,9 @@
 package oci
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -13,6 +15,7 @@ import (
 
 	"github.com/platbor/platbor/internal/core/auth"
 	"github.com/platbor/platbor/internal/core/blob"
+	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry"
 	"github.com/platbor/platbor/internal/registry/proxy"
 )
@@ -34,6 +37,7 @@ func (a *Adapter) Mount(r chi.Router, deps registry.Deps) {
 		blobs:     deps.Blobs,
 		auth:      deps.Auth,
 		manifests: newManifestStore(deps.DB),
+		repos:     deps.Repositories,
 		upstream:  proxy.New(),
 		log:       deps.Log,
 	}
@@ -46,6 +50,7 @@ type handler struct {
 	blobs     blob.Store
 	auth      *auth.Service
 	manifests *manifestStore
+	repos     *repository.Service
 	upstream  *proxy.Client
 	log       *slog.Logger
 }
@@ -79,6 +84,67 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, h.log, http.StatusNotFound, codeNameInvalid, "unsupported path")
 	}
+}
+
+// resolveRepo splits the OCI name into <project>/<repo>/<image> and resolves the
+// typed repository. On a write it auto-creates a local OCI repo when the project
+// allows it; on a read a missing repo is 404. A format mismatch (the repo holds
+// another format) is rejected. It returns the resolved repository and the image
+// name within it.
+func (h *handler) resolveRepo(w http.ResponseWriter, r *http.Request, name string, write bool) (repository.Repository, string, bool) {
+	project, repoKey, image, ok := splitName(name)
+	if !ok {
+		writeError(w, h.log, http.StatusNotFound, codeNameUnknown, "repository name must be <project>/<repository>/<image>")
+		return repository.Repository{}, "", false
+	}
+	projectID, allowAutoCreate, err := h.manifests.resolveProject(r.Context(), project)
+	if err != nil {
+		if errors.Is(err, errProjectNotFound) {
+			writeError(w, h.log, http.StatusNotFound, codeNameUnknown, fmt.Sprintf("project %q does not exist", project))
+			return repository.Repository{}, "", false
+		}
+		h.internalError(w, "resolving project", err)
+		return repository.Repository{}, "", false
+	}
+	var repo repository.Repository
+	if write {
+		repo, err = h.repos.ResolveOrCreate(r.Context(), projectID, repoKey, repository.FormatOCI, usernameFromContext(r.Context()), allowAutoCreate)
+	} else {
+		repo, err = h.repos.GetForFormat(r.Context(), projectID, repoKey, repository.FormatOCI)
+	}
+	switch {
+	case err == nil:
+		return repo, image, true
+	case errors.Is(err, repository.ErrNotFound):
+		writeError(w, h.log, http.StatusNotFound, codeNameUnknown, fmt.Sprintf("repository %q does not exist", repoKey))
+	case errors.Is(err, repository.ErrFormatMismatch):
+		writeError(w, h.log, http.StatusBadRequest, codeNameInvalid, fmt.Sprintf("repository %q is not an OCI repository", repoKey))
+	case errors.As(err, new(*repository.ValidationError)):
+		writeError(w, h.log, http.StatusBadRequest, codeNameInvalid, err.Error())
+	default:
+		h.internalError(w, "resolving repository", err)
+	}
+	return repository.Repository{}, "", false
+}
+
+// lookupRepo resolves the repository for a name without writing any response,
+// returning ok=false when the project or repository is absent or not OCI. Used
+// by the blob path, where storage is global (by digest) but the repository still
+// determines proxy behaviour.
+func (h *handler) lookupRepo(ctx context.Context, name string) (repository.Repository, string, bool) {
+	project, repoKey, image, ok := splitName(name)
+	if !ok {
+		return repository.Repository{}, "", false
+	}
+	projectID, _, err := h.manifests.resolveProject(ctx, project)
+	if err != nil {
+		return repository.Repository{}, "", false
+	}
+	repo, err := h.repos.GetForFormat(ctx, projectID, repoKey, repository.FormatOCI)
+	if err != nil {
+		return repository.Repository{}, "", false
+	}
+	return repo, image, true
 }
 
 // requireAuth enforces HTTP Basic auth on every /v2 route, challenging

@@ -1,6 +1,7 @@
-// Package project owns the root scoping entity. Every artifact and catalog
-// record hangs off a project, so this is the first domain service: it creates
-// and lists projects and writes an audit entry for each mutation, transactionally.
+// Package project owns the root scoping entity: the tenant boundary that
+// contains typed repositories. Every artifact hangs off a repository, which
+// hangs off a project. This is the first domain service: it creates and lists
+// projects and writes an audit entry for each mutation, transactionally.
 package project
 
 import (
@@ -8,7 +9,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
 	"regexp"
 	"time"
 
@@ -39,29 +39,19 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Field, e.Message)
 }
 
-// Upstream is a proxied registry a project mirrors. Password is write-only: it
-// is accepted on create but never returned, so it must not leak through the API.
-type Upstream struct {
-	URL      string
-	Username string
-	Password string
-}
-
-// Project is the domain view: timestamps are real time.Time, not the strings
-// the store keeps. Upstream is set only for pull-through proxy projects; it is
-// nil for ordinary local projects.
+// Project is the domain view: timestamps are real time.Time. AllowAutoCreate
+// governs whether a push to an unknown repository path auto-creates a local
+// repository of that format (true, the default) or is rejected (false, so
+// repositories must be created deliberately).
 type Project struct {
-	ID          string
-	Key         string
-	Name        string
-	Description string
-	Upstream    *Upstream
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID              string
+	Key             string
+	Name            string
+	Description     string
+	AllowAutoCreate bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
-
-// IsProxy reports whether the project is a pull-through proxy.
-func (p Project) IsProxy() bool { return p.Upstream != nil }
 
 // Service provides project operations backed by the metadata store.
 type Service struct {
@@ -82,12 +72,11 @@ func NewService(sqlDB *sql.DB) *Service {
 // CreateInput is the data needed to create a project. Actor identifies who is
 // performing the action for the audit log.
 type CreateInput struct {
-	Key         string
-	Name        string
-	Description string
-	// Upstream, when set, makes the project a pull-through proxy of that registry.
-	Upstream *Upstream
-	Actor    string
+	Key             string
+	Name            string
+	Description     string
+	AllowAutoCreate bool
+	Actor           string
 }
 
 // Create validates the input and, in a single transaction, inserts the project
@@ -110,12 +99,13 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Project, error) {
 	qtx := s.q.WithTx(tx)
 
 	row, err := qtx.CreateProject(ctx, db.CreateProjectParams{
-		ID:          projectID,
-		Key:         in.Key,
-		Name:        in.Name,
-		Description: in.Description,
-		CreatedAt:   ts,
-		UpdatedAt:   ts,
+		ID:              projectID,
+		Key:             in.Key,
+		Name:            in.Name,
+		Description:     in.Description,
+		AllowAutoCreate: boolToInt(in.AllowAutoCreate),
+		CreatedAt:       ts,
+		UpdatedAt:       ts,
 	})
 	if err != nil {
 		if db.IsUniqueViolation(err) {
@@ -124,33 +114,14 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Project, error) {
 		return Project{}, fmt.Errorf("creating project: %w", err)
 	}
 
-	if in.Upstream != nil {
-		if err := qtx.CreateProxy(ctx, db.CreateProxyParams{
-			ProjectID:   projectID,
-			UpstreamUrl: in.Upstream.URL,
-			Username:    in.Upstream.Username,
-			Password:    in.Upstream.Password,
-			CreatedAt:   ts,
-			UpdatedAt:   ts,
-		}); err != nil {
-			return Project{}, fmt.Errorf("configuring proxy: %w", err)
-		}
-	}
-
-	action := "project.create"
-	metadata := "{}"
-	if in.Upstream != nil {
-		action = "project.create.proxy"
-		metadata = fmt.Sprintf(`{"upstream":%q}`, in.Upstream.URL)
-	}
 	if _, err := qtx.InsertAuditEntry(ctx, db.InsertAuditEntryParams{
 		ID:         id.New("audit"),
 		ProjectID:  sql.NullString{String: projectID, Valid: true},
 		Actor:      actorOrSystem(in.Actor),
-		Action:     action,
+		Action:     "project.create",
 		TargetType: "project",
 		TargetID:   projectID,
-		Metadata:   metadata,
+		Metadata:   "{}",
 		CreatedAt:  ts,
 	}); err != nil {
 		return Project{}, fmt.Errorf("writing audit entry: %w", err)
@@ -159,17 +130,10 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Project, error) {
 	if err := tx.Commit(); err != nil {
 		return Project{}, fmt.Errorf("commit: %w", err)
 	}
-
-	created, err := toDomain(row)
-	if err != nil {
-		return Project{}, err
-	}
-	created.Upstream = in.Upstream
-	return created, nil
+	return toDomain(row)
 }
 
-// GetByKey returns a single project, or ErrNotFound. A proxy project carries its
-// upstream URL and username, but never the stored password.
+// GetByKey returns a single project, or ErrNotFound.
 func (s *Service) GetByKey(ctx context.Context, key string) (Project, error) {
 	row, err := s.q.GetProjectByKey(ctx, key)
 	if err != nil {
@@ -178,24 +142,18 @@ func (s *Service) GetByKey(ctx context.Context, key string) (Project, error) {
 		}
 		return Project{}, fmt.Errorf("getting project %s: %w", key, err)
 	}
-	p, err := toDomain(row)
-	if err != nil {
-		return Project{}, err
-	}
-	proxyRow, err := s.q.GetProxyByProjectID(ctx, row.ID)
-	switch {
-	case err == nil:
-		p.Upstream = upstreamFromRow(proxyRow)
-	case !errors.Is(err, sql.ErrNoRows):
-		return Project{}, fmt.Errorf("loading proxy config for %s: %w", key, err)
-	}
-	return p, nil
+	return toDomain(row)
 }
 
-// upstreamFromRow maps a stored proxy row to the display view, deliberately
-// dropping the password so it cannot leak through a read path.
-func upstreamFromRow(row db.RegistryProxy) *Upstream {
-	return &Upstream{URL: row.UpstreamUrl, Username: row.Username}
+// SetAutoCreate toggles a project's auto-create governance flag.
+func (s *Service) SetAutoCreate(ctx context.Context, key string, allow bool) error {
+	ts := s.now().Format(time.RFC3339Nano)
+	if err := s.q.SetProjectAutoCreate(ctx, db.SetProjectAutoCreateParams{
+		AllowAutoCreate: boolToInt(allow), UpdatedAt: ts, Key: key,
+	}); err != nil {
+		return fmt.Errorf("setting auto-create: %w", err)
+	}
+	return nil
 }
 
 // Count returns the total number of projects (for the dashboard summary).
@@ -234,24 +192,12 @@ func (s *Service) List(ctx context.Context, cursor string, limit int) (Page, err
 		rows = rows[:limit]
 	}
 
-	// One lookup marks which of these projects are proxies, instead of a query
-	// per row.
-	proxyRows, err := s.q.ListProxies(ctx)
-	if err != nil {
-		return Page{}, fmt.Errorf("listing proxies: %w", err)
-	}
-	upstreams := make(map[string]*Upstream, len(proxyRows))
-	for _, pr := range proxyRows {
-		upstreams[pr.ProjectID] = upstreamFromRow(pr)
-	}
-
 	projects := make([]Project, 0, len(rows))
 	for _, row := range rows {
 		p, err := toDomain(row)
 		if err != nil {
 			return Page{}, err
 		}
-		p.Upstream = upstreams[row.ID]
 		projects = append(projects, p)
 	}
 	return Page{Projects: projects, NextCursor: next}, nil
@@ -269,22 +215,6 @@ func validateCreate(in CreateInput) error {
 	}
 	if len(in.Name) > 100 {
 		return &ValidationError{Field: "name", Message: "must be at most 100 characters"}
-	}
-	if in.Upstream != nil {
-		if err := validateUpstream(in.Upstream); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// validateUpstream checks a proxy's upstream URL is an absolute http(s) URL. A
-// password without a username (or vice versa) is allowed — some registries take
-// a token in one field — but the URL must be well-formed.
-func validateUpstream(u *Upstream) error {
-	parsed, err := url.Parse(u.URL)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return &ValidationError{Field: "upstream.url", Message: "must be an absolute http(s) URL, e.g. https://registry-1.docker.io"}
 	}
 	return nil
 }
@@ -311,6 +241,13 @@ func actorOrSystem(actor string) string {
 	return actor
 }
 
+func boolToInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func toDomain(row db.Project) (Project, error) {
 	created, err := time.Parse(time.RFC3339Nano, row.CreatedAt)
 	if err != nil {
@@ -321,11 +258,12 @@ func toDomain(row db.Project) (Project, error) {
 		return Project{}, fmt.Errorf("parsing updated_at for project %s: %w", row.ID, err)
 	}
 	return Project{
-		ID:          row.ID,
-		Key:         row.Key,
-		Name:        row.Name,
-		Description: row.Description,
-		CreatedAt:   created,
-		UpdatedAt:   updated,
+		ID:              row.ID,
+		Key:             row.Key,
+		Name:            row.Name,
+		Description:     row.Description,
+		AllowAutoCreate: row.AllowAutoCreate != 0,
+		CreatedAt:       created,
+		UpdatedAt:       updated,
 	}, nil
 }

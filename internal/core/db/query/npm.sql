@@ -1,22 +1,22 @@
 -- name: UpsertNpmPackage :one
--- Ensure the package row for (project, name) exists, returning its id.
+-- Ensure the package row for (repository, name) exists, returning its id.
 -- Publishing a new version of an existing package just bumps updated_at.
-INSERT INTO npm_packages (id, project_id, name, created_at, updated_at)
+INSERT INTO npm_packages (id, repository_id, name, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?)
-ON CONFLICT (project_id, name)
+ON CONFLICT (repository_id, name)
 DO UPDATE SET updated_at = excluded.updated_at
 RETURNING id;
 
 -- name: GetNpmPackage :one
 SELECT * FROM npm_packages
-WHERE project_id = ? AND name = ?;
+WHERE repository_id = ? AND name = ?;
 
 -- name: NpmVersionExists :one
 -- Whether a specific version is already published. npm forbids overwriting a
 -- published version, so the handler rejects a re-publish before inserting.
 SELECT COUNT(*) FROM npm_versions v
 JOIN npm_packages p ON p.id = v.package_id
-WHERE p.project_id = ? AND p.name = ? AND v.version = ?;
+WHERE p.repository_id = ? AND p.name = ? AND v.version = ?;
 
 -- name: InsertNpmVersion :exec
 -- Store a published version. First-writer-wins: a duplicate (already rejected at
@@ -31,7 +31,7 @@ ON CONFLICT (package_id, version) DO NOTHING;
 SELECT v.version, v.manifest, v.tarball_digest, v.tarball_size, v.shasum, v.integrity, v.created_at
 FROM npm_versions v
 JOIN npm_packages p ON p.id = v.package_id
-WHERE p.project_id = ? AND p.name = ?
+WHERE p.repository_id = ? AND p.name = ?
 ORDER BY v.created_at ASC;
 
 -- name: GetNpmTarball :one
@@ -39,13 +39,13 @@ ORDER BY v.created_at ASC;
 SELECT v.tarball_digest, v.tarball_size
 FROM npm_versions v
 JOIN npm_packages p ON p.id = v.package_id
-WHERE p.project_id = ? AND p.name = ? AND v.version = ?;
+WHERE p.repository_id = ? AND p.name = ? AND v.version = ?;
 
 -- name: ListNpmDistTags :many
 SELECT t.tag, t.version
 FROM npm_dist_tags t
 JOIN npm_packages p ON p.id = t.package_id
-WHERE p.project_id = ? AND p.name = ?;
+WHERE p.repository_id = ? AND p.name = ?;
 
 -- name: UpsertNpmDistTag :exec
 INSERT INTO npm_dist_tags (package_id, tag, version, updated_at)
@@ -58,17 +58,17 @@ DELETE FROM npm_dist_tags
 WHERE package_id = ? AND tag = ?;
 
 -- name: ListNpmVersionsForRetention :many
--- Every version in a project, grouped by package and newest first, for
+-- Every version in a repository, grouped by package and newest first, for
 -- keep-last-N pruning.
 SELECT p.name AS name, v.version AS version, v.created_at AS created_at
 FROM npm_versions v
 JOIN npm_packages p ON p.id = v.package_id
-WHERE p.project_id = ?
+WHERE p.repository_id = ?
 ORDER BY p.name ASC, v.created_at DESC;
 
 -- name: DeleteNpmVersion :execrows
 DELETE FROM npm_versions
-WHERE package_id = (SELECT id FROM npm_packages WHERE project_id = ? AND name = ?)
+WHERE package_id = (SELECT id FROM npm_packages WHERE repository_id = ? AND name = ?)
   AND version = ?;
 
 -- name: ListNpmTarballDigests :many
@@ -77,20 +77,20 @@ WHERE package_id = (SELECT id FROM npm_packages WHERE project_id = ? AND name = 
 SELECT DISTINCT tarball_digest FROM npm_versions;
 
 -- name: ListAllNpmPackages :many
--- Every npm package across all projects, with version count, total tarball size,
--- and a proxy flag, for the registry browser's package index. is_proxy is 1 when
--- the package's project is a pull-through mirror.
+-- Every npm package across all repositories, joined to its repository and
+-- project, with version count, total tarball size, and a proxy flag.
 SELECT
     p.key        AS project_key,
     p.name       AS project_name,
+    r.key        AS repo_key,
     pkg.name     AS package_name,
     COUNT(v.id)  AS version_count,
     CAST(COALESCE(SUM(v.tarball_size), 0) AS INTEGER) AS size_bytes,
-    CAST(rp.project_id IS NOT NULL AS INTEGER) AS is_proxy,
+    CAST(r.mode = 'proxy' AS INTEGER) AS is_proxy,
     pkg.updated_at AS updated_at
 FROM npm_packages pkg
-JOIN projects p ON p.id = pkg.project_id
-LEFT JOIN registry_proxies rp ON rp.project_id = pkg.project_id
+JOIN repositories r ON r.id = pkg.repository_id
+JOIN projects p ON p.id = r.project_id
 LEFT JOIN npm_versions v ON v.package_id = pkg.id
 GROUP BY pkg.id
-ORDER BY p.key ASC, pkg.name ASC;
+ORDER BY p.key ASC, r.key ASC, pkg.name ASC;

@@ -24,6 +24,7 @@ func NewBrowser(sqlDB *sql.DB) *Browser { return &Browser{q: db.New(sqlDB)} }
 type PackageSummary struct {
 	ProjectKey   string
 	ProjectName  string
+	RepoKey      string
 	Name         string
 	VersionCount int
 	SizeBytes    int64
@@ -63,6 +64,7 @@ func (b *Browser) Packages(ctx context.Context) ([]PackageSummary, error) {
 		out = append(out, PackageSummary{
 			ProjectKey:   r.ProjectKey,
 			ProjectName:  r.ProjectName,
+			RepoKey:      r.RepoKey,
 			Name:         r.PackageName,
 			VersionCount: int(r.VersionCount),
 			SizeBytes:    r.SizeBytes,
@@ -73,18 +75,15 @@ func (b *Browser) Packages(ctx context.Context) ([]PackageSummary, error) {
 	return out, nil
 }
 
-// Package returns a single package's versions (newest first) and dist-tags, or
-// ErrPackageNotFound when it has no versions in the project.
-func (b *Browser) Package(ctx context.Context, projectKey, name string) (PackageDetail, error) {
-	proj, err := b.q.GetProjectByKey(ctx, projectKey)
+// Package returns a single package's versions (newest first) and dist-tags in a
+// repository, or ErrPackageNotFound when it has no versions.
+func (b *Browser) Package(ctx context.Context, projectKey, repoKey, name string) (PackageDetail, error) {
+	repoID, err := b.resolveRepo(ctx, projectKey, repoKey)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return PackageDetail{}, errBrowseNotFound
-		}
-		return PackageDetail{}, fmt.Errorf("resolving project: %w", err)
+		return PackageDetail{}, err
 	}
 
-	rows, err := b.q.ListNpmVersions(ctx, db.ListNpmVersionsParams{ProjectID: proj.ID, Name: name})
+	rows, err := b.q.ListNpmVersions(ctx, db.ListNpmVersionsParams{RepositoryID: repoID, Name: name})
 	if err != nil {
 		return PackageDetail{}, fmt.Errorf("listing versions: %w", err)
 	}
@@ -104,7 +103,7 @@ func (b *Browser) Package(ctx context.Context, projectKey, name string) (Package
 		})
 	}
 
-	tagRows, err := b.q.ListNpmDistTags(ctx, db.ListNpmDistTagsParams{ProjectID: proj.ID, Name: name})
+	tagRows, err := b.q.ListNpmDistTags(ctx, db.ListNpmDistTagsParams{RepositoryID: repoID, Name: name})
 	if err != nil {
 		return PackageDetail{}, fmt.Errorf("listing dist-tags: %w", err)
 	}
@@ -114,6 +113,25 @@ func (b *Browser) Package(ctx context.Context, projectKey, name string) (Package
 	}
 
 	return PackageDetail{Name: name, DistTags: tags, Versions: versions}, nil
+}
+
+// resolveRepo maps (projectKey, repoKey) to a repository id, or ErrPackageNotFound.
+func (b *Browser) resolveRepo(ctx context.Context, projectKey, repoKey string) (string, error) {
+	proj, err := b.q.GetProjectByKey(ctx, projectKey)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", errBrowseNotFound
+		}
+		return "", fmt.Errorf("resolving project: %w", err)
+	}
+	repo, err := b.q.GetRepository(ctx, db.GetRepositoryParams{ProjectID: proj.ID, Key: repoKey})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", errBrowseNotFound
+		}
+		return "", fmt.Errorf("resolving repository: %w", err)
+	}
+	return repo.ID, nil
 }
 
 func parseBrowseTime(s string) time.Time {

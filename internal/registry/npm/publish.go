@@ -11,6 +11,7 @@ import (
 	"net/http"
 
 	"github.com/platbor/platbor/internal/core/blob"
+	"github.com/platbor/platbor/internal/core/repository"
 )
 
 // maxPublishBody caps a publish payload. Tarballs are base64-inlined in the
@@ -44,17 +45,10 @@ type versionDist struct {
 
 // publish handles `npm publish`: verify each version's tarball, store it in the
 // content-addressable blob store, then persist the package, versions, and
-// dist-tags atomically. Proxy projects are read-only and reject publishes.
-func (h *handler) publish(w http.ResponseWriter, r *http.Request, project, pkg string) {
-	projectID, ok := h.resolveProject(w, r, project)
-	if !ok {
-		return
-	}
-	if proxy, err := h.store.isProxy(r.Context(), projectID); err != nil {
-		h.internalError(w, "checking proxy", err)
-		return
-	} else if proxy {
-		writeError(w, h.log, http.StatusForbidden, "cannot publish to a proxy project")
+// dist-tags atomically. Proxy repositories are read-only and reject publishes.
+func (h *handler) publish(w http.ResponseWriter, r *http.Request, repo repository.Repository, pkg string) {
+	if repo.Mode == repository.ModeProxy {
+		writeError(w, h.log, http.StatusForbidden, "cannot publish to a proxy repository")
 		return
 	}
 
@@ -82,11 +76,12 @@ func (h *handler) publish(w http.ResponseWriter, r *http.Request, project, pkg s
 	}
 
 	in := publishInput{
-		ProjectID: projectID,
-		Name:      pkg,
-		Versions:  versions,
-		DistTags:  req.DistTags,
-		Actor:     actorFrom(r),
+		RepositoryID: repo.ID,
+		ProjectID:    repo.ProjectID,
+		Name:         pkg,
+		Versions:     versions,
+		DistTags:     req.DistTags,
+		Actor:        actorFrom(r),
 	}
 	if err := h.store.publish(r.Context(), in); err != nil {
 		if errors.Is(err, ErrVersionExists) {

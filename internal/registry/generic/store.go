@@ -34,29 +34,16 @@ func newFileStore(sqlDB *sql.DB) *fileStore {
 	}
 }
 
-func (s *fileStore) resolveProject(ctx context.Context, key string) (string, error) {
+// resolveProject maps a project key to its id and auto-create policy.
+func (s *fileStore) resolveProject(ctx context.Context, key string) (id string, allowAutoCreate bool, err error) {
 	row, err := s.q.GetProjectByKey(ctx, key)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", errProjectNotFound
+			return "", false, errProjectNotFound
 		}
-		return "", fmt.Errorf("resolving project %q: %w", key, err)
+		return "", false, fmt.Errorf("resolving project %q: %w", key, err)
 	}
-	return row.ID, nil
-}
-
-// isProxy reports whether a project is a pull-through mirror, used to reject
-// writes. A generic proxy has no upstream protocol, so a proxy project simply
-// rejects generic uploads and deletes.
-func (s *fileStore) isProxy(ctx context.Context, projectID string) (bool, error) {
-	_, err := s.q.GetProxyByProjectID(ctx, projectID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
-		}
-		return false, fmt.Errorf("loading proxy config: %w", err)
-	}
-	return true, nil
+	return row.ID, row.AllowAutoCreate != 0, nil
 }
 
 // storedFile is a file read back for serving: its blob and checksums.
@@ -71,14 +58,15 @@ type storedFile struct {
 // filePut is an upload to persist: the resolved location, the committed blob,
 // and the checksums computed while streaming it.
 type filePut struct {
-	ProjectID  string
-	Path       string
-	BlobDigest string
-	Size       int64
-	SHA256     string
-	SHA1       string
-	MD5        string
-	Actor      string
+	RepositoryID string
+	ProjectID    string // for the audit entry's project scope
+	Path         string
+	BlobDigest   string
+	Size         int64
+	SHA256       string
+	SHA1         string
+	MD5          string
+	Actor        string
 }
 
 // put records a file at its path (overwriting any existing one) and audits it.
@@ -86,16 +74,16 @@ func (s *fileStore) put(ctx context.Context, in filePut) error {
 	ts := s.now().Format(time.RFC3339Nano)
 	return s.inTx(ctx, func(qtx *db.Queries) error {
 		if err := qtx.UpsertGenericFile(ctx, db.UpsertGenericFileParams{
-			ID:         id.New("gen"),
-			ProjectID:  in.ProjectID,
-			Path:       in.Path,
-			BlobDigest: in.BlobDigest,
-			Size:       in.Size,
-			Sha256:     in.SHA256,
-			Sha1:       in.SHA1,
-			Md5:        in.MD5,
-			CreatedAt:  ts,
-			UpdatedAt:  ts,
+			ID:           id.New("gen"),
+			RepositoryID: in.RepositoryID,
+			Path:         in.Path,
+			BlobDigest:   in.BlobDigest,
+			Size:         in.Size,
+			Sha256:       in.SHA256,
+			Sha1:         in.SHA1,
+			Md5:          in.MD5,
+			CreatedAt:    ts,
+			UpdatedAt:    ts,
 		}); err != nil {
 			return fmt.Errorf("storing file: %w", err)
 		}
@@ -104,8 +92,8 @@ func (s *fileStore) put(ctx context.Context, in filePut) error {
 	})
 }
 
-func (s *fileStore) get(ctx context.Context, projectID, path string) (storedFile, error) {
-	row, err := s.q.GetGenericFile(ctx, db.GetGenericFileParams{ProjectID: projectID, Path: path})
+func (s *fileStore) get(ctx context.Context, repositoryID, path string) (storedFile, error) {
+	row, err := s.q.GetGenericFile(ctx, db.GetGenericFileParams{RepositoryID: repositoryID, Path: path})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return storedFile{}, ErrFileNotFound
@@ -122,10 +110,10 @@ func (s *fileStore) get(ctx context.Context, projectID, path string) (storedFile
 }
 
 // delete removes a file's record (the blob is reclaimed by GC), auditing it.
-func (s *fileStore) delete(ctx context.Context, projectID, path, actor string) error {
+func (s *fileStore) delete(ctx context.Context, repositoryID, projectID, path, actor string) error {
 	ts := s.now().Format(time.RFC3339Nano)
 	return s.inTx(ctx, func(qtx *db.Queries) error {
-		n, err := qtx.DeleteGenericFile(ctx, db.DeleteGenericFileParams{ProjectID: projectID, Path: path})
+		n, err := qtx.DeleteGenericFile(ctx, db.DeleteGenericFileParams{RepositoryID: repositoryID, Path: path})
 		if err != nil {
 			return fmt.Errorf("deleting file: %w", err)
 		}

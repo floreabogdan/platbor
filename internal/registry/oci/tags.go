@@ -29,7 +29,7 @@ func (h *handler) serveTags(w http.ResponseWriter, r *http.Request, p parsedPath
 		writeError(w, h.log, http.StatusMethodNotAllowed, codeUnsupported, "method not allowed")
 		return
 	}
-	projectID, repo, ok := h.resolveName(w, r, p.name)
+	repo, image, ok := h.resolveRepo(w, r, p.name, false)
 	if !ok {
 		return
 	}
@@ -52,7 +52,7 @@ func (h *handler) serveTags(w http.ResponseWriter, r *http.Request, p parsedPath
 	var next string
 	if limit > 0 {
 		// Fetch one extra row to detect whether a further page exists.
-		page, err := h.manifests.listTags(r.Context(), projectID, repo, last, limit+1)
+		page, err := h.manifests.listTags(r.Context(), repo.ID, image, last, limit+1)
 		if err != nil {
 			h.internalError(w, "listing tags", err)
 			return

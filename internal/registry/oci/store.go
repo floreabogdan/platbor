@@ -10,7 +10,6 @@ import (
 
 	"github.com/platbor/platbor/internal/core/db"
 	"github.com/platbor/platbor/internal/core/id"
-	"github.com/platbor/platbor/internal/registry/proxy"
 )
 
 // Store-level sentinels. Handlers translate these into spec error envelopes;
@@ -41,43 +40,17 @@ func newManifestStore(sqlDB *sql.DB) *manifestStore {
 	}
 }
 
-// resolveProject maps the leading name component to a project id. Every push and
-// pull targets an existing project (Harbor-style); unknown keys are rejected so
-// artifacts never land outside a project's scope.
-func (s *manifestStore) resolveProject(ctx context.Context, key string) (string, error) {
+// resolveProject maps the leading name component to a project id and its
+// auto-create policy.
+func (s *manifestStore) resolveProject(ctx context.Context, key string) (id string, allowAutoCreate bool, err error) {
 	row, err := s.q.GetProjectByKey(ctx, key)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", errProjectNotFound
+			return "", false, errProjectNotFound
 		}
-		return "", fmt.Errorf("resolving project %q: %w", key, err)
+		return "", false, fmt.Errorf("resolving project %q: %w", key, err)
 	}
-	return row.ID, nil
-}
-
-// proxyUpstream returns the upstream a project mirrors, or ok=false when the
-// project is an ordinary local project. It is consulted only on a cache miss, so
-// local pulls pay nothing for it.
-func (s *manifestStore) proxyUpstream(ctx context.Context, projectID string) (proxy.Upstream, bool, error) {
-	row, err := s.q.GetProxyByProjectID(ctx, projectID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return proxy.Upstream{}, false, nil
-		}
-		return proxy.Upstream{}, false, fmt.Errorf("loading proxy config: %w", err)
-	}
-	return proxy.Upstream{
-		BaseURL:  row.UpstreamUrl,
-		Username: row.Username,
-		Password: row.Password,
-	}, true, nil
-}
-
-// isProxy reports whether a project is a pull-through proxy, used to reject
-// writes (a proxy is a read-only mirror).
-func (s *manifestStore) isProxy(ctx context.Context, projectID string) (bool, error) {
-	_, ok, err := s.proxyUpstream(ctx, projectID)
-	return ok, err
+	return row.ID, row.AllowAutoCreate != 0, nil
 }
 
 // storedManifest is a manifest read back for serving: its exact bytes plus the
@@ -89,8 +62,8 @@ type storedManifest struct {
 	Size      int64
 }
 
-func (s *manifestStore) getManifest(ctx context.Context, projectID, repo, digest string) (storedManifest, error) {
-	row, err := s.q.GetManifest(ctx, db.GetManifestParams{ProjectID: projectID, Repository: repo, Digest: digest})
+func (s *manifestStore) getManifest(ctx context.Context, repositoryID, repo, digest string) (storedManifest, error) {
+	row, err := s.q.GetManifest(ctx, db.GetManifestParams{RepositoryID: repositoryID, Repository: repo, Digest: digest})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return storedManifest{}, ErrManifestNotFound
@@ -101,8 +74,8 @@ func (s *manifestStore) getManifest(ctx context.Context, projectID, repo, digest
 }
 
 // resolveTag returns the digest a tag currently points at, or ErrManifestNotFound.
-func (s *manifestStore) resolveTag(ctx context.Context, projectID, repo, tag string) (string, error) {
-	row, err := s.q.GetTag(ctx, db.GetTagParams{ProjectID: projectID, Repository: repo, Tag: tag})
+func (s *manifestStore) resolveTag(ctx context.Context, repositoryID, repo, tag string) (string, error) {
+	row, err := s.q.GetTag(ctx, db.GetTagParams{RepositoryID: repositoryID, Repository: repo, Tag: tag})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrManifestNotFound
@@ -112,8 +85,8 @@ func (s *manifestStore) resolveTag(ctx context.Context, projectID, repo, tag str
 	return row.Digest, nil
 }
 
-func (s *manifestStore) manifestExists(ctx context.Context, projectID, repo, digest string) (bool, error) {
-	n, err := s.q.ManifestExists(ctx, db.ManifestExistsParams{ProjectID: projectID, Repository: repo, Digest: digest})
+func (s *manifestStore) manifestExists(ctx context.Context, repositoryID, repo, digest string) (bool, error) {
+	n, err := s.q.ManifestExists(ctx, db.ManifestExistsParams{RepositoryID: repositoryID, Repository: repo, Digest: digest})
 	if err != nil {
 		return false, fmt.Errorf("checking manifest existence: %w", err)
 	}
@@ -122,12 +95,12 @@ func (s *manifestStore) manifestExists(ctx context.Context, projectID, repo, dig
 
 // listTags returns up to limit tags in lexical order after last (exclusive), for
 // keyset pagination.
-func (s *manifestStore) listTags(ctx context.Context, projectID, repo, last string, limit int) ([]string, error) {
+func (s *manifestStore) listTags(ctx context.Context, repositoryID, repo, last string, limit int) ([]string, error) {
 	tags, err := s.q.ListTags(ctx, db.ListTagsParams{
-		ProjectID:  projectID,
-		Repository: repo,
-		Tag:        last,
-		Limit:      int64(limit),
+		RepositoryID: repositoryID,
+		Repository:   repo,
+		Tag:          last,
+		Limit:        int64(limit),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("listing tags: %w", err)
@@ -174,8 +147,8 @@ type referrerRow struct {
 }
 
 // listReferrers returns the manifests whose subject is the given digest.
-func (s *manifestStore) listReferrers(ctx context.Context, projectID, repo, subject string) ([]referrerRow, error) {
-	rows, err := s.q.ListReferrers(ctx, db.ListReferrersParams{ProjectID: projectID, Repository: repo, Subject: subject})
+func (s *manifestStore) listReferrers(ctx context.Context, repositoryID, repo, subject string) ([]referrerRow, error) {
+	rows, err := s.q.ListReferrers(ctx, db.ListReferrersParams{RepositoryID: repositoryID, Repository: repo, Subject: subject})
 	if err != nil {
 		return nil, fmt.Errorf("listing referrers: %w", err)
 	}
@@ -194,7 +167,9 @@ func (s *manifestStore) listReferrers(ctx context.Context, projectID, repo, subj
 
 // manifestWrite is the input to putManifest. Tag is empty for a push by digest;
 // Subject/ArtifactType are denormalized from the payload for the referrers API.
+// RepositoryID scopes storage; ProjectID scopes the audit entry.
 type manifestWrite struct {
+	RepositoryID string
 	ProjectID    string
 	Repository   string
 	Digest       string
@@ -216,7 +191,7 @@ func (s *manifestStore) putManifest(ctx context.Context, m manifestWrite) error 
 	return s.inTx(ctx, func(qtx *db.Queries) error {
 		if err := qtx.UpsertManifest(ctx, db.UpsertManifestParams{
 			ID:           id.New("mfst"),
-			ProjectID:    m.ProjectID,
+			RepositoryID: m.RepositoryID,
 			Repository:   m.Repository,
 			Digest:       m.Digest,
 			MediaType:    m.MediaType,
@@ -230,11 +205,11 @@ func (s *manifestStore) putManifest(ctx context.Context, m manifestWrite) error 
 		}
 		if m.Tag != "" {
 			if err := qtx.UpsertTag(ctx, db.UpsertTagParams{
-				ProjectID:  m.ProjectID,
-				Repository: m.Repository,
-				Tag:        m.Tag,
-				Digest:     m.Digest,
-				UpdatedAt:  ts,
+				RepositoryID: m.RepositoryID,
+				Repository:   m.Repository,
+				Tag:          m.Tag,
+				Digest:       m.Digest,
+				UpdatedAt:    ts,
 			}); err != nil {
 				return fmt.Errorf("tagging manifest: %w", err)
 			}
@@ -246,18 +221,18 @@ func (s *manifestStore) putManifest(ctx context.Context, m manifestWrite) error 
 
 // deleteManifest removes a manifest by digest along with every tag that pointed
 // at it. Deleting an unknown manifest returns ErrManifestNotFound.
-func (s *manifestStore) deleteManifest(ctx context.Context, projectID, repo, digest, actor string) error {
+func (s *manifestStore) deleteManifest(ctx context.Context, repositoryID, projectID, repo, digest, actor string) error {
 	ts := s.now().Format(time.RFC3339Nano)
 
 	return s.inTx(ctx, func(qtx *db.Queries) error {
-		n, err := qtx.DeleteManifest(ctx, db.DeleteManifestParams{ProjectID: projectID, Repository: repo, Digest: digest})
+		n, err := qtx.DeleteManifest(ctx, db.DeleteManifestParams{RepositoryID: repositoryID, Repository: repo, Digest: digest})
 		if err != nil {
 			return fmt.Errorf("deleting manifest: %w", err)
 		}
 		if n == 0 {
 			return ErrManifestNotFound
 		}
-		if err := qtx.DeleteTagsForDigest(ctx, db.DeleteTagsForDigestParams{ProjectID: projectID, Repository: repo, Digest: digest}); err != nil {
+		if err := qtx.DeleteTagsForDigest(ctx, db.DeleteTagsForDigestParams{RepositoryID: repositoryID, Repository: repo, Digest: digest}); err != nil {
 			return fmt.Errorf("deleting tags for digest: %w", err)
 		}
 		return s.audit(ctx, qtx, projectID, actor, "oci.manifest.delete", "manifest", digest, ts,
@@ -266,11 +241,11 @@ func (s *manifestStore) deleteManifest(ctx context.Context, projectID, repo, dig
 }
 
 // deleteTag removes a single tag, leaving the manifest it referenced in place.
-func (s *manifestStore) deleteTag(ctx context.Context, projectID, repo, tag, actor string) error {
+func (s *manifestStore) deleteTag(ctx context.Context, repositoryID, projectID, repo, tag, actor string) error {
 	ts := s.now().Format(time.RFC3339Nano)
 
 	return s.inTx(ctx, func(qtx *db.Queries) error {
-		n, err := qtx.DeleteTag(ctx, db.DeleteTagParams{ProjectID: projectID, Repository: repo, Tag: tag})
+		n, err := qtx.DeleteTag(ctx, db.DeleteTagParams{RepositoryID: repositoryID, Repository: repo, Tag: tag})
 		if err != nil {
 			return fmt.Errorf("deleting tag: %w", err)
 		}

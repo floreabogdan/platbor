@@ -17,6 +17,7 @@ import (
 
 	"github.com/platbor/platbor/internal/core/auth"
 	"github.com/platbor/platbor/internal/core/blob"
+	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry"
 )
 
@@ -38,10 +39,11 @@ func (a *Adapter) Mount(r chi.Router, deps registry.Deps) {
 		blobs:    deps.Blobs,
 		auth:     deps.Auth,
 		store:    newPackageStore(deps.DB),
+		repos:    deps.Repositories,
 		upstream: newUpstreamClient(),
 		log:      deps.Log,
 	}
-	r.Route("/{project}", func(sub chi.Router) {
+	r.Route("/{project}/{repo}", func(sub chi.Router) {
 		sub.Handle("/*", http.HandlerFunc(h.serve))
 	})
 }
@@ -50,6 +52,7 @@ type handler struct {
 	blobs    blob.Store
 	auth     *auth.Service
 	store    *packageStore
+	repos    *repository.Service
 	upstream *upstreamClient
 	log      *slog.Logger
 }
@@ -59,6 +62,7 @@ type handler struct {
 // valid bearer token or Basic credentials.
 func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 	project := chi.URLParam(r, "project")
+	repoKey := chi.URLParam(r, "repo")
 
 	tail := chi.URLParam(r, "*")
 	// The package name may arrive percent-encoded (scoped names as @scope%2fname).
@@ -80,20 +84,29 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	r = r.WithContext(withUser(r.Context(), user))
 
-	if op.kind != opWhoami && !validPackageName(op.pkg) {
+	if op.kind == opWhoami {
+		h.whoami(w, r)
+		return
+	}
+	if !validPackageName(op.pkg) {
 		writeError(w, h.log, http.StatusNotFound, "not found")
 		return
 	}
 
+	// publish is the only write; everything else reads (auto-create only on write).
+	write := op.kind == opPackage && r.Method == http.MethodPut
+	repo, ok := h.resolveRepo(w, r, project, repoKey, write)
+	if !ok {
+		return
+	}
+
 	switch op.kind {
-	case opWhoami:
-		h.whoami(w, r)
 	case opPackage:
 		switch r.Method {
 		case http.MethodGet:
-			h.getPackument(w, r, project, op.pkg)
+			h.getPackument(w, r, repo, project, op.pkg)
 		case http.MethodPut:
-			h.publish(w, r, project, op.pkg)
+			h.publish(w, r, repo, op.pkg)
 		default:
 			writeError(w, h.log, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -102,12 +115,46 @@ func (h *handler) serve(w http.ResponseWriter, r *http.Request) {
 			writeError(w, h.log, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		h.getTarball(w, r, project, op.pkg, op.ref)
+		h.getTarball(w, r, repo, project, op.pkg, op.ref)
 	case opDistTags:
-		h.serveDistTags(w, r, project, op)
+		h.serveDistTags(w, r, repo, op)
 	default:
 		writeError(w, h.log, http.StatusNotFound, "not found")
 	}
+}
+
+// resolveRepo resolves (project, repo) to an npm repository, auto-creating a
+// local one on writes when the project allows it, or 404ing a missing repo on
+// reads. A format mismatch is rejected.
+func (h *handler) resolveRepo(w http.ResponseWriter, r *http.Request, project, repoKey string, write bool) (repository.Repository, bool) {
+	projectID, allowAutoCreate, err := h.store.resolveProject(r.Context(), project)
+	if err != nil {
+		if errors.Is(err, errProjectNotFound) {
+			writeError(w, h.log, http.StatusNotFound, "project not found: "+project)
+			return repository.Repository{}, false
+		}
+		h.internalError(w, "resolving project", err)
+		return repository.Repository{}, false
+	}
+	var repo repository.Repository
+	if write {
+		repo, err = h.repos.ResolveOrCreate(r.Context(), projectID, repoKey, repository.FormatNPM, actorFrom(r), allowAutoCreate)
+	} else {
+		repo, err = h.repos.GetForFormat(r.Context(), projectID, repoKey, repository.FormatNPM)
+	}
+	switch {
+	case err == nil:
+		return repo, true
+	case errors.Is(err, repository.ErrNotFound):
+		writeError(w, h.log, http.StatusNotFound, "repository not found: "+repoKey)
+	case errors.Is(err, repository.ErrFormatMismatch):
+		writeError(w, h.log, http.StatusBadRequest, "repository "+repoKey+" is not an npm repository")
+	case errors.As(err, new(*repository.ValidationError)):
+		writeError(w, h.log, http.StatusBadRequest, err.Error())
+	default:
+		h.internalError(w, "resolving repository", err)
+	}
+	return repository.Repository{}, false
 }
 
 // authenticate resolves a bearer token or Basic credentials to a user. For
@@ -145,31 +192,15 @@ func (h *handler) whoami(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, h.log, http.StatusOK, map[string]string{"username": user.Username})
 }
 
-// resolveProject maps a project key to its id, writing the npm error envelope
-// and returning ok=false when the project is unknown.
-func (h *handler) resolveProject(w http.ResponseWriter, r *http.Request, key string) (string, bool) {
-	projectID, err := h.store.resolveProject(r.Context(), key)
-	if err != nil {
-		if errors.Is(err, errProjectNotFound) {
-			writeError(w, h.log, http.StatusNotFound, "project not found: "+key)
-			return "", false
-		}
-		h.internalError(w, "resolving project", err)
-		return "", false
-	}
-	return projectID, true
-}
-
-// registryBase reconstructs the absolute base URL of this npm registry
-// (scheme://host/npm/<project>) so packument tarball URLs point back at us
-// regardless of how the client addressed the server. The project is the
-// registry: packages live directly under it.
-func registryBase(r *http.Request, project string) string {
+// registryBase reconstructs the absolute base URL of this npm repository
+// (scheme://host/npm/<project>/<repo>) so packument tarball URLs point back at
+// us regardless of how the client addressed the server.
+func registryBase(r *http.Request, project, repo string) string {
 	scheme := "http"
 	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		scheme = "https"
 	}
-	return scheme + "://" + r.Host + "/npm/" + project
+	return scheme + "://" + r.Host + "/npm/" + project + "/" + repo
 }
 
 // writeError emits npm's JSON error envelope: clients surface the "error" field.

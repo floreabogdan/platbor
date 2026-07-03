@@ -20,6 +20,7 @@ import (
 	"github.com/platbor/platbor/internal/core/config"
 	"github.com/platbor/platbor/internal/core/db"
 	"github.com/platbor/platbor/internal/core/project"
+	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry"
 	"github.com/platbor/platbor/internal/registry/generic"
 	"github.com/platbor/platbor/internal/registry/oci"
@@ -53,14 +54,18 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("Bootstrap: %v", err)
 	}
 	projects := project.NewService(sqlDB)
-	if _, err := projects.Create(ctx, project.CreateInput{Key: "files", Name: "Files", Actor: "admin"}); err != nil {
+	proj, err := projects.Create(ctx, project.CreateInput{Key: "files", Name: "Files", AllowAutoCreate: true, Actor: "admin"})
+	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	if _, err := projects.Create(ctx, project.CreateInput{
-		Key: "mirror", Name: "Mirror", Actor: "admin",
-		Upstream: &project.Upstream{URL: "https://example.com"},
+	// A proxy generic repository, for the read-only assertion. Local repos
+	// auto-create on first push.
+	if _, err := repository.NewService(sqlDB).Create(ctx, repository.CreateInput{
+		ProjectID: proj.ID, Key: "mirror", Name: "Mirror",
+		Format: repository.FormatGeneric, Mode: repository.ModeProxy,
+		Upstream: &repository.Upstream{URL: "https://example.com"}, Actor: "admin",
 	}); err != nil {
-		t.Fatalf("create proxy project: %v", err)
+		t.Fatalf("create proxy repo: %v", err)
 	}
 	store, err := blob.NewFS(cfg.DataDir)
 	if err != nil {
@@ -69,7 +74,7 @@ func newHarness(t *testing.T) *harness {
 
 	r := chi.NewRouter()
 	r.Route("/generic", func(sub chi.Router) {
-		generic.New().Mount(sub, registry.Deps{Blobs: store, Auth: authSvc, DB: sqlDB, Log: discardLogger()})
+		generic.New().Mount(sub, registry.Deps{Blobs: store, Auth: authSvc, DB: sqlDB, Repositories: repository.NewService(sqlDB), Log: discardLogger()})
 	})
 	return &harness{router: r, auth: authSvc, db: sqlDB, blobs: store}
 }
@@ -164,8 +169,8 @@ func TestAuthAndValidation(t *testing.T) {
 	if rr := h.do(t, http.MethodPut, "/generic/files/bucket/..%2fescape.bin", []byte("x"), true); rr.Code != http.StatusBadRequest {
 		t.Errorf("traversal: status = %d, want 400", rr.Code)
 	}
-	// Proxy projects are read-only.
-	if rr := h.do(t, http.MethodPut, "/generic/mirror/bucket/x.bin", []byte("x"), true); rr.Code != http.StatusForbidden {
+	// Proxy repositories are read-only.
+	if rr := h.do(t, http.MethodPut, "/generic/files/mirror/x.bin", []byte("x"), true); rr.Code != http.StatusForbidden {
 		t.Errorf("proxy upload: status = %d, want 403", rr.Code)
 	}
 }

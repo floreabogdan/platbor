@@ -12,11 +12,10 @@ import (
 // client uses to resolve versions and dependencies during restore. Platbor emits
 // a single inline registration page per package (no external catalog pages).
 func (h *handler) registration(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.resolveProject(w, r)
+	repo, ok := h.resolveRepo(w, r, false)
 	if !ok {
 		return
 	}
-	project := chi.URLParam(r, "project")
 	rest := strings.Trim(chi.URLParam(r, "*"), "/")
 	parts := strings.Split(rest, "/")
 	if len(parts) != 2 || parts[1] != "index.json" {
@@ -25,7 +24,7 @@ func (h *handler) registration(w http.ResponseWriter, r *http.Request) {
 	}
 	idLower := strings.ToLower(parts[0])
 
-	versions, err := h.store.versions(r.Context(), projectID, idLower)
+	versions, err := h.store.versions(r.Context(), repo.ID, idLower)
 	if err != nil {
 		if errors.Is(err, ErrPackageNotFound) {
 			writeError(w, http.StatusNotFound, "package not found")
@@ -35,7 +34,7 @@ func (h *handler) registration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	base := baseURL(r, project)
+	base := baseURL(r, chi.URLParam(r, "project"), chi.URLParam(r, "repo"))
 	regIndexID := base + "/v3/registrations/" + idLower + "/index.json"
 	flatBase := base + "/v3-flatcontainer/" + idLower + "/"
 

@@ -27,15 +27,16 @@ const (
 	KindIndex = "index"
 )
 
-// RepositorySummary is one repository in the browser's project-grouped index.
+// RepositorySummary is one OCI image in the browser's project-grouped index.
 type RepositorySummary struct {
 	ProjectKey    string
 	ProjectName   string
-	Repository    string
+	RepoKey       string // the typed repository the image lives in
+	Repository    string // the OCI image name within the repo
 	TagCount      int
 	ManifestCount int
-	SizeBytes     int64 // logical size: distinct blobs + manifests this repo holds
-	IsProxy       bool  // the repository's project is a pull-through mirror
+	SizeBytes     int64 // logical size: distinct blobs + manifests this image holds
+	IsProxy       bool  // the repository is a pull-through mirror
 	UpdatedAt     time.Time
 }
 
@@ -111,10 +112,11 @@ func (b *Browser) Repositories(ctx context.Context) ([]RepositorySummary, error)
 		out = append(out, RepositorySummary{
 			ProjectKey:    r.ProjectKey,
 			ProjectName:   r.ProjectName,
+			RepoKey:       r.RepoKey,
 			Repository:    r.Repository,
 			TagCount:      int(r.TagCount),
 			ManifestCount: int(r.ManifestCount),
-			SizeBytes:     sizes[repoKey(r.ProjectKey, r.Repository)],
+			SizeBytes:     sizes[repoKey(r.ProjectKey, r.RepoKey, r.Repository)],
 			IsProxy:       r.IsProxy != 0,
 			UpdatedAt:     parseTime(asString(r.UpdatedAt)),
 		})
@@ -122,9 +124,11 @@ func (b *Browser) Repositories(ctx context.Context) ([]RepositorySummary, error)
 	return out, nil
 }
 
-// repoKey joins a project key and repository into a map key. The NUL separator
-// cannot appear in either, so distinct (project, repo) pairs never collide.
-func repoKey(projectKey, repo string) string { return projectKey + "\x00" + repo }
+// repoKey joins a project key, repository key, and image into a map key. The NUL
+// separator cannot appear in any of them, so distinct triples never collide.
+func repoKey(projectKey, repo, image string) string {
+	return projectKey + "\x00" + repo + "\x00" + image
+}
 
 // repositorySizes computes each repository's logical storage: the summed size of
 // the distinct blobs (config + layers) and manifests it holds. Blobs are a
@@ -156,7 +160,7 @@ func (b *Browser) repositorySizes(ctx context.Context) (map[string]int64, error)
 	}
 
 	for _, r := range rows {
-		key := repoKey(r.ProjectKey, r.Repository)
+		key := repoKey(r.ProjectKey, r.RepoKey, r.Repository)
 		add(key, r.Digest, r.Size) // the manifest document's own bytes
 
 		var doc manifestDoc
@@ -180,8 +184,8 @@ func (b *Browser) repositorySizes(ctx context.Context) (map[string]int64, error)
 
 // Tags returns a repository's tags with the media type and size of the manifest
 // each points at, newest push first.
-func (b *Browser) Tags(ctx context.Context, projectID, repo string) ([]TagSummary, error) {
-	rows, err := b.q.ListTagsWithManifest(ctx, db.ListTagsWithManifestParams{ProjectID: projectID, Repository: repo})
+func (b *Browser) Tags(ctx context.Context, repositoryID, image string) ([]TagSummary, error) {
+	rows, err := b.q.ListTagsWithManifest(ctx, db.ListTagsWithManifestParams{RepositoryID: repositoryID, Repository: image})
 	if err != nil {
 		return nil, fmt.Errorf("listing tags: %w", err)
 	}
@@ -213,8 +217,8 @@ type Referrer struct {
 
 // Referrers returns the manifests whose subject is the given digest, newest
 // first, for the browser's manifest detail view.
-func (b *Browser) Referrers(ctx context.Context, projectID, repo, subject string) ([]Referrer, error) {
-	rows, err := b.q.ListReferrers(ctx, db.ListReferrersParams{ProjectID: projectID, Repository: repo, Subject: subject})
+func (b *Browser) Referrers(ctx context.Context, repositoryID, image, subject string) ([]Referrer, error) {
+	rows, err := b.q.ListReferrers(ctx, db.ListReferrersParams{RepositoryID: repositoryID, Repository: image, Subject: subject})
 	if err != nil {
 		return nil, fmt.Errorf("listing referrers: %w", err)
 	}
@@ -232,10 +236,10 @@ func (b *Browser) Referrers(ctx context.Context, projectID, repo, subject string
 }
 
 // Manifest returns the detail of a manifest referenced by tag or digest.
-func (b *Browser) Manifest(ctx context.Context, projectID, repo, ref string) (ManifestView, error) {
+func (b *Browser) Manifest(ctx context.Context, repositoryID, image, ref string) (ManifestView, error) {
 	digest := ref
 	if !isDigestRef(ref) {
-		row, err := b.q.GetTag(ctx, db.GetTagParams{ProjectID: projectID, Repository: repo, Tag: ref})
+		row, err := b.q.GetTag(ctx, db.GetTagParams{RepositoryID: repositoryID, Repository: image, Tag: ref})
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return ManifestView{}, ErrManifestNotFound
@@ -245,7 +249,7 @@ func (b *Browser) Manifest(ctx context.Context, projectID, repo, ref string) (Ma
 		digest = row.Digest
 	}
 
-	m, err := b.q.GetManifest(ctx, db.GetManifestParams{ProjectID: projectID, Repository: repo, Digest: digest})
+	m, err := b.q.GetManifest(ctx, db.GetManifestParams{RepositoryID: repositoryID, Repository: image, Digest: digest})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ManifestView{}, ErrManifestNotFound

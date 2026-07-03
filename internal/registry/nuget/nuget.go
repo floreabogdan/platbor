@@ -1,6 +1,6 @@
 // Package nuget implements the NuGet V3 registry protocol under
-// /nuget/<project>. The project is the feed: a service index at
-// /nuget/<project>/v3/index.json advertises the publish, flat-container
+// /nuget/<project>/<repo>. A NuGet repository is a feed: a service index at
+// /nuget/<project>/<repo>/v3/index.json advertises the publish, flat-container
 // (restore), registration (metadata), and search resources. Auth is a NuGet API
 // key (X-NuGet-ApiKey, a Platbor personal access token), HTTP Basic, or a bearer
 // token; the service index itself is anonymous so a client can discover it.
@@ -18,6 +18,7 @@ import (
 
 	"github.com/platbor/platbor/internal/core/auth"
 	"github.com/platbor/platbor/internal/core/blob"
+	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry"
 )
 
@@ -36,9 +37,10 @@ func (a *Adapter) Mount(r chi.Router, deps registry.Deps) {
 		blobs: deps.Blobs,
 		auth:  deps.Auth,
 		store: newPackageStore(deps.DB),
+		repos: deps.Repositories,
 		log:   deps.Log,
 	}
-	r.Route("/{project}", func(sub chi.Router) {
+	r.Route("/{project}/{repo}", func(sub chi.Router) {
 		// The service index is anonymous so clients can discover the feed.
 		sub.Get("/v3/index.json", h.serviceIndex)
 
@@ -58,6 +60,7 @@ type handler struct {
 	blobs blob.Store
 	auth  *auth.Service
 	store *packageStore
+	repos *repository.Service
 	log   *slog.Logger
 }
 
@@ -101,29 +104,49 @@ func (h *handler) authenticate(r *http.Request) (auth.User, bool) {
 	return auth.User{}, false
 }
 
-// resolveProject maps the {project} param to an id, writing the error response
-// and returning ok=false when unknown.
-func (h *handler) resolveProject(w http.ResponseWriter, r *http.Request) (string, bool) {
-	key := chi.URLParam(r, "project")
-	projectID, err := h.store.resolveProject(r.Context(), key)
+// resolveRepo resolves the {project}/{repo} params to a NuGet repository. On a
+// write it auto-creates a local repo when the project allows it; on a read a
+// missing repo is 404. A format mismatch is rejected.
+func (h *handler) resolveRepo(w http.ResponseWriter, r *http.Request, write bool) (repository.Repository, bool) {
+	project := chi.URLParam(r, "project")
+	repoKey := chi.URLParam(r, "repo")
+	projectID, allowAutoCreate, err := h.store.resolveProject(r.Context(), project)
 	if err != nil {
 		if errors.Is(err, errProjectNotFound) {
-			writeError(w, http.StatusNotFound, "project not found: "+key)
-			return "", false
+			writeError(w, http.StatusNotFound, "project not found: "+project)
+			return repository.Repository{}, false
 		}
 		h.internalError(w, "resolving project", err)
-		return "", false
+		return repository.Repository{}, false
 	}
-	return projectID, true
+	var repo repository.Repository
+	if write {
+		repo, err = h.repos.ResolveOrCreate(r.Context(), projectID, repoKey, repository.FormatNuGet, actorFrom(r), allowAutoCreate)
+	} else {
+		repo, err = h.repos.GetForFormat(r.Context(), projectID, repoKey, repository.FormatNuGet)
+	}
+	switch {
+	case err == nil:
+		return repo, true
+	case errors.Is(err, repository.ErrNotFound):
+		writeError(w, http.StatusNotFound, "repository not found: "+repoKey)
+	case errors.Is(err, repository.ErrFormatMismatch):
+		writeError(w, http.StatusBadRequest, "repository "+repoKey+" is not a NuGet repository")
+	case errors.As(err, new(*repository.ValidationError)):
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		h.internalError(w, "resolving repository", err)
+	}
+	return repository.Repository{}, false
 }
 
-// baseURL is the absolute base of this feed: scheme://host/nuget/<project>.
-func baseURL(r *http.Request, project string) string {
+// baseURL is the absolute base of this feed: scheme://host/nuget/<project>/<repo>.
+func baseURL(r *http.Request, project, repo string) string {
 	scheme := "http"
 	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 		scheme = "https"
 	}
-	return scheme + "://" + r.Host + "/nuget/" + project
+	return scheme + "://" + r.Host + "/nuget/" + project + "/" + repo
 }
 
 func (h *handler) internalError(w http.ResponseWriter, msg string, err error) {

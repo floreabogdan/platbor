@@ -11,16 +11,16 @@ import (
 
 const deleteGenericFile = `-- name: DeleteGenericFile :execrows
 DELETE FROM generic_files
-WHERE project_id = ? AND path = ?
+WHERE repository_id = ? AND path = ?
 `
 
 type DeleteGenericFileParams struct {
-	ProjectID string `json:"project_id"`
-	Path      string `json:"path"`
+	RepositoryID string `json:"repository_id"`
+	Path         string `json:"path"`
 }
 
 func (q *Queries) DeleteGenericFile(ctx context.Context, arg DeleteGenericFileParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, deleteGenericFile, arg.ProjectID, arg.Path)
+	result, err := q.db.ExecContext(ctx, deleteGenericFile, arg.RepositoryID, arg.Path)
 	if err != nil {
 		return 0, err
 	}
@@ -28,21 +28,21 @@ func (q *Queries) DeleteGenericFile(ctx context.Context, arg DeleteGenericFilePa
 }
 
 const getGenericFile = `-- name: GetGenericFile :one
-SELECT id, project_id, path, blob_digest, size, sha256, sha1, md5, created_at, updated_at FROM generic_files
-WHERE project_id = ? AND path = ?
+SELECT id, repository_id, path, blob_digest, size, sha256, sha1, md5, created_at, updated_at FROM generic_files
+WHERE repository_id = ? AND path = ?
 `
 
 type GetGenericFileParams struct {
-	ProjectID string `json:"project_id"`
-	Path      string `json:"path"`
+	RepositoryID string `json:"repository_id"`
+	Path         string `json:"path"`
 }
 
 func (q *Queries) GetGenericFile(ctx context.Context, arg GetGenericFileParams) (GenericFile, error) {
-	row := q.db.QueryRowContext(ctx, getGenericFile, arg.ProjectID, arg.Path)
+	row := q.db.QueryRowContext(ctx, getGenericFile, arg.RepositoryID, arg.Path)
 	var i GenericFile
 	err := row.Scan(
 		&i.ID,
-		&i.ProjectID,
+		&i.RepositoryID,
 		&i.Path,
 		&i.BlobDigest,
 		&i.Size,
@@ -59,27 +59,30 @@ const listAllGenericFiles = `-- name: ListAllGenericFiles :many
 SELECT
     p.key        AS project_key,
     p.name       AS project_name,
+    r.key        AS repo_key,
     f.path       AS path,
     f.size       AS size,
-    CAST(rp.project_id IS NOT NULL AS INTEGER) AS is_proxy,
+    CAST(r.mode = 'proxy' AS INTEGER) AS is_proxy,
     f.updated_at AS updated_at
 FROM generic_files f
-JOIN projects p ON p.id = f.project_id
-LEFT JOIN registry_proxies rp ON rp.project_id = f.project_id
-ORDER BY p.key ASC, f.path ASC
+JOIN repositories r ON r.id = f.repository_id
+JOIN projects p ON p.id = r.project_id
+ORDER BY p.key ASC, r.key ASC, f.path ASC
 `
 
 type ListAllGenericFilesRow struct {
 	ProjectKey  string `json:"project_key"`
 	ProjectName string `json:"project_name"`
+	RepoKey     string `json:"repo_key"`
 	Path        string `json:"path"`
 	Size        int64  `json:"size"`
 	IsProxy     int64  `json:"is_proxy"`
 	UpdatedAt   string `json:"updated_at"`
 }
 
-// Every generic file across all projects, with a proxy flag, for the registry
-// browser's generic index. is_proxy is 1 when the file's project is a mirror.
+// Every generic file across all repositories, joined to its repository and
+// project, for the registry browser's generic index. is_proxy is 1 for a proxy
+// repository.
 func (q *Queries) ListAllGenericFiles(ctx context.Context) ([]ListAllGenericFilesRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAllGenericFiles)
 	if err != nil {
@@ -92,6 +95,7 @@ func (q *Queries) ListAllGenericFiles(ctx context.Context) ([]ListAllGenericFile
 		if err := rows.Scan(
 			&i.ProjectKey,
 			&i.ProjectName,
+			&i.RepoKey,
 			&i.Path,
 			&i.Size,
 			&i.IsProxy,
@@ -140,9 +144,9 @@ func (q *Queries) ListGenericBlobDigests(ctx context.Context) ([]string, error) 
 }
 
 const upsertGenericFile = `-- name: UpsertGenericFile :exec
-INSERT INTO generic_files (id, project_id, path, blob_digest, size, sha256, sha1, md5, created_at, updated_at)
+INSERT INTO generic_files (id, repository_id, path, blob_digest, size, sha256, sha1, md5, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT (project_id, path)
+ON CONFLICT (repository_id, path)
 DO UPDATE SET
     blob_digest = excluded.blob_digest,
     size        = excluded.size,
@@ -153,24 +157,24 @@ DO UPDATE SET
 `
 
 type UpsertGenericFileParams struct {
-	ID         string `json:"id"`
-	ProjectID  string `json:"project_id"`
-	Path       string `json:"path"`
-	BlobDigest string `json:"blob_digest"`
-	Size       int64  `json:"size"`
-	Sha256     string `json:"sha256"`
-	Sha1       string `json:"sha1"`
-	Md5        string `json:"md5"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	ID           string `json:"id"`
+	RepositoryID string `json:"repository_id"`
+	Path         string `json:"path"`
+	BlobDigest   string `json:"blob_digest"`
+	Size         int64  `json:"size"`
+	Sha256       string `json:"sha256"`
+	Sha1         string `json:"sha1"`
+	Md5          string `json:"md5"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
-// Store a file at a path, replacing any existing file there (generic paths are
-// mutable: a re-upload overwrites).
+// Store a file at a path in a repository, replacing any existing file there
+// (generic paths are mutable: a re-upload overwrites).
 func (q *Queries) UpsertGenericFile(ctx context.Context, arg UpsertGenericFileParams) error {
 	_, err := q.db.ExecContext(ctx, upsertGenericFile,
 		arg.ID,
-		arg.ProjectID,
+		arg.RepositoryID,
 		arg.Path,
 		arg.BlobDigest,
 		arg.Size,

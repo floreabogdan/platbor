@@ -10,6 +10,7 @@ import (
 
 	"github.com/platbor/platbor/internal/core/blob"
 	"github.com/platbor/platbor/internal/core/project"
+	"github.com/platbor/platbor/internal/core/repository"
 )
 
 // fakeRegistry is a minimal upstream OCI registry (no auth) that serves one
@@ -72,18 +73,22 @@ func (f *fakeRegistry) serve(t *testing.T) *httptest.Server {
 	return srv
 }
 
-// newProxyProject creates a proxy project mirroring upstream and returns nothing;
-// the harness already holds the db.
-func (h *harness) newProxyProject(t *testing.T, key, upstream string) {
+// newProxyRepo creates a project with a proxy OCI repository mirroring upstream.
+// Images are addressed at /v2/<projectKey>/<repoKey>/<image>.
+func (h *harness) newProxyRepo(t *testing.T, projectKey, repoKey, upstream string) {
 	t.Helper()
-	_, err := project.NewService(h.db).Create(context.Background(), project.CreateInput{
-		Key:      key,
-		Name:     key,
-		Actor:    "admin",
-		Upstream: &project.Upstream{URL: upstream},
+	proj, err := project.NewService(h.db).Create(context.Background(), project.CreateInput{
+		Key: projectKey, Name: projectKey, AllowAutoCreate: true, Actor: "admin",
 	})
 	if err != nil {
-		t.Fatalf("create proxy project: %v", err)
+		t.Fatalf("create project: %v", err)
+	}
+	if _, err := repository.NewService(h.db).Create(context.Background(), repository.CreateInput{
+		ProjectID: proj.ID, Key: repoKey, Name: repoKey,
+		Format: repository.FormatOCI, Mode: repository.ModeProxy,
+		Upstream: &repository.Upstream{URL: upstream}, Actor: "admin",
+	}); err != nil {
+		t.Fatalf("create proxy repo: %v", err)
 	}
 }
 
@@ -91,9 +96,9 @@ func TestProxyPullThroughCachesUpstream(t *testing.T) {
 	h := newHarness(t)
 	fake := newFakeRegistry()
 	srv := fake.serve(t)
-	h.newProxyProject(t, "mirror", srv.URL)
+	h.newProxyRepo(t, "mirror", "hub", srv.URL)
 
-	const repo = "mirror/library/thing"
+	const repo = "mirror/hub/library/thing"
 
 	// 1. Pull the manifest by tag: fetched from upstream and served.
 	get := h.req(t, http.MethodGet, "/v2/"+repo+"/manifests/v1", nil, "password")
@@ -132,10 +137,10 @@ func TestProxyRejectsPush(t *testing.T) {
 	h := newHarness(t)
 	fake := newFakeRegistry()
 	srv := fake.serve(t)
-	h.newProxyProject(t, "mirror", srv.URL)
+	h.newProxyRepo(t, "mirror", "hub", srv.URL)
 
-	// Starting an upload against a proxy project is denied (read-only mirror).
-	up := h.req(t, http.MethodPost, "/v2/mirror/library/thing/blobs/uploads/", nil, "password")
+	// Starting an upload against a proxy repository is denied (read-only mirror).
+	up := h.req(t, http.MethodPost, "/v2/mirror/hub/library/thing/blobs/uploads/", nil, "password")
 	if up.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST upload to proxy: status = %d, want 405; body=%s", up.Code, up.Body.String())
 	}
@@ -145,7 +150,7 @@ func TestProxyRejectsPush(t *testing.T) {
 
 	// So is pushing a manifest.
 	body, _ := h.buildImageBytes()
-	man := h.putManifest(t, "mirror/library/thing", "v1", body)
+	man := h.putManifest(t, "mirror/hub/library/thing", "v1", body)
 	if man.Code != http.StatusMethodNotAllowed {
 		t.Errorf("PUT manifest to proxy: status = %d, want 405", man.Code)
 	}

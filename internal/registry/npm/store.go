@@ -42,47 +42,16 @@ func newPackageStore(sqlDB *sql.DB) *packageStore {
 	}
 }
 
-// resolveProject maps a project key to its id. The project is the npm registry;
-// unknown keys are rejected so packages never land outside a project's scope.
-func (s *packageStore) resolveProject(ctx context.Context, key string) (string, error) {
+// resolveProject maps a project key to its id and auto-create policy.
+func (s *packageStore) resolveProject(ctx context.Context, key string) (id string, allowAutoCreate bool, err error) {
 	row, err := s.q.GetProjectByKey(ctx, key)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", errProjectNotFound
+			return "", false, errProjectNotFound
 		}
-		return "", fmt.Errorf("resolving project %q: %w", key, err)
+		return "", false, fmt.Errorf("resolving project %q: %w", key, err)
 	}
-	return row.ID, nil
-}
-
-// isProxy reports whether a project is a pull-through mirror, used to reject
-// writes (a proxy is read-only).
-func (s *packageStore) isProxy(ctx context.Context, projectID string) (bool, error) {
-	_, _, err := s.proxyUpstream(ctx, projectID)
-	if errors.Is(err, errNotProxy) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-// errNotProxy is an internal sentinel: the project is an ordinary local project,
-// not a proxy. Callers translate it to "no upstream".
-var errNotProxy = errors.New("not a proxy project")
-
-// proxyUpstream returns the upstream a project mirrors, or errNotProxy when the
-// project is an ordinary local project.
-func (s *packageStore) proxyUpstream(ctx context.Context, projectID string) (upstream, bool, error) {
-	row, err := s.q.GetProxyByProjectID(ctx, projectID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return upstream{}, false, errNotProxy
-		}
-		return upstream{}, false, fmt.Errorf("loading proxy config: %w", err)
-	}
-	return upstream{BaseURL: row.UpstreamUrl, Username: row.Username, Password: row.Password}, true, nil
+	return row.ID, row.AllowAutoCreate != 0, nil
 }
 
 // versionInput is one published version: its metadata document (stored verbatim)
@@ -97,13 +66,15 @@ type versionInput struct {
 }
 
 // publishInput is a single `npm publish`: one or more versions of one package
-// plus the dist-tags to move (usually just "latest").
+// plus the dist-tags to move (usually just "latest"). RepositoryID scopes the
+// storage; ProjectID scopes the audit entry.
 type publishInput struct {
-	ProjectID string
-	Name      string
-	Versions  []versionInput
-	DistTags  map[string]string
-	Actor     string
+	RepositoryID string
+	ProjectID    string
+	Name         string
+	Versions     []versionInput
+	DistTags     map[string]string
+	Actor        string
 }
 
 // publish stores the package, its new versions, and its dist-tags atomically,
@@ -114,11 +85,11 @@ func (s *packageStore) publish(ctx context.Context, in publishInput) error {
 
 	return s.inTx(ctx, func(qtx *db.Queries) error {
 		pkgID, err := qtx.UpsertNpmPackage(ctx, db.UpsertNpmPackageParams{
-			ID:        id.New("npmpkg"),
-			ProjectID: in.ProjectID,
-			Name:      in.Name,
-			CreatedAt: ts,
-			UpdatedAt: ts,
+			ID:           id.New("npmpkg"),
+			RepositoryID: in.RepositoryID,
+			Name:         in.Name,
+			CreatedAt:    ts,
+			UpdatedAt:    ts,
 		})
 		if err != nil {
 			return fmt.Errorf("upserting package: %w", err)
@@ -126,9 +97,9 @@ func (s *packageStore) publish(ctx context.Context, in publishInput) error {
 
 		for _, v := range in.Versions {
 			exists, err := qtx.NpmVersionExists(ctx, db.NpmVersionExistsParams{
-				ProjectID: in.ProjectID,
-				Name:      in.Name,
-				Version:   v.Version,
+				RepositoryID: in.RepositoryID,
+				Name:         in.Name,
+				Version:      v.Version,
 			})
 			if err != nil {
 				return fmt.Errorf("checking version: %w", err)
@@ -184,8 +155,8 @@ type storedVersion struct {
 // packument returns everything needed to rebuild a package's packument: its
 // versions (oldest first) and current dist-tags. An empty package (no versions)
 // is reported as ErrPackageNotFound.
-func (s *packageStore) packument(ctx context.Context, projectID, name string) ([]storedVersion, map[string]string, error) {
-	rows, err := s.q.ListNpmVersions(ctx, db.ListNpmVersionsParams{ProjectID: projectID, Name: name})
+func (s *packageStore) packument(ctx context.Context, repositoryID, name string) ([]storedVersion, map[string]string, error) {
+	rows, err := s.q.ListNpmVersions(ctx, db.ListNpmVersionsParams{RepositoryID: repositoryID, Name: name})
 	if err != nil {
 		return nil, nil, fmt.Errorf("listing versions: %w", err)
 	}
@@ -202,7 +173,7 @@ func (s *packageStore) packument(ctx context.Context, projectID, name string) ([
 		})
 	}
 
-	tags, err := s.distTags(ctx, projectID, name)
+	tags, err := s.distTags(ctx, repositoryID, name)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -210,8 +181,8 @@ func (s *packageStore) packument(ctx context.Context, projectID, name string) ([
 }
 
 // tarball returns the blob digest and size for one version's tarball.
-func (s *packageStore) tarball(ctx context.Context, projectID, name, version string) (digest string, size int64, err error) {
-	row, err := s.q.GetNpmTarball(ctx, db.GetNpmTarballParams{ProjectID: projectID, Name: name, Version: version})
+func (s *packageStore) tarball(ctx context.Context, repositoryID, name, version string) (digest string, size int64, err error) {
+	row, err := s.q.GetNpmTarball(ctx, db.GetNpmTarballParams{RepositoryID: repositoryID, Name: name, Version: version})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", 0, ErrPackageNotFound
@@ -222,8 +193,8 @@ func (s *packageStore) tarball(ctx context.Context, projectID, name, version str
 }
 
 // distTags returns the package's current dist-tags as tag -> version.
-func (s *packageStore) distTags(ctx context.Context, projectID, name string) (map[string]string, error) {
-	rows, err := s.q.ListNpmDistTags(ctx, db.ListNpmDistTagsParams{ProjectID: projectID, Name: name})
+func (s *packageStore) distTags(ctx context.Context, repositoryID, name string) (map[string]string, error) {
+	rows, err := s.q.ListNpmDistTags(ctx, db.ListNpmDistTagsParams{RepositoryID: repositoryID, Name: name})
 	if err != nil {
 		return nil, fmt.Errorf("listing dist-tags: %w", err)
 	}
@@ -236,9 +207,9 @@ func (s *packageStore) distTags(ctx context.Context, projectID, name string) (ma
 
 // setDistTag points a tag at a version, auditing the change. The package must
 // exist; an unknown package is ErrPackageNotFound.
-func (s *packageStore) setDistTag(ctx context.Context, projectID, name, tag, version, actor string) error {
+func (s *packageStore) setDistTag(ctx context.Context, repositoryID, projectID, name, tag, version, actor string) error {
 	ts := s.now().Format(time.RFC3339Nano)
-	pkgID, err := s.packageID(ctx, projectID, name)
+	pkgID, err := s.packageID(ctx, repositoryID, name)
 	if err != nil {
 		return err
 	}
@@ -257,9 +228,9 @@ func (s *packageStore) setDistTag(ctx context.Context, projectID, name, tag, ver
 }
 
 // deleteDistTag removes a tag from a package, auditing the change.
-func (s *packageStore) deleteDistTag(ctx context.Context, projectID, name, tag, actor string) error {
+func (s *packageStore) deleteDistTag(ctx context.Context, repositoryID, projectID, name, tag, actor string) error {
 	ts := s.now().Format(time.RFC3339Nano)
-	pkgID, err := s.packageID(ctx, projectID, name)
+	pkgID, err := s.packageID(ctx, repositoryID, name)
 	if err != nil {
 		return err
 	}
@@ -277,8 +248,8 @@ func (s *packageStore) deleteDistTag(ctx context.Context, projectID, name, tag, 
 }
 
 // packageID resolves a package to its row id, or ErrPackageNotFound.
-func (s *packageStore) packageID(ctx context.Context, projectID, name string) (string, error) {
-	row, err := s.q.GetNpmPackage(ctx, db.GetNpmPackageParams{ProjectID: projectID, Name: name})
+func (s *packageStore) packageID(ctx context.Context, repositoryID, name string) (string, error) {
+	row, err := s.q.GetNpmPackage(ctx, db.GetNpmPackageParams{RepositoryID: repositoryID, Name: name})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrPackageNotFound
@@ -291,15 +262,15 @@ func (s *packageStore) packageID(ctx context.Context, projectID, name string) (s
 // cacheVersion stores a proxied version and its tarball digest, deduping if it
 // already exists. A cache fill is not a user mutation, so it writes no audit
 // entry (unlike publish).
-func (s *packageStore) cacheVersion(ctx context.Context, in versionInput, projectID, name string) error {
+func (s *packageStore) cacheVersion(ctx context.Context, in versionInput, repositoryID, name string) error {
 	ts := s.now().Format(time.RFC3339Nano)
 	return s.inTx(ctx, func(qtx *db.Queries) error {
 		pkgID, err := qtx.UpsertNpmPackage(ctx, db.UpsertNpmPackageParams{
-			ID:        id.New("npmpkg"),
-			ProjectID: projectID,
-			Name:      name,
-			CreatedAt: ts,
-			UpdatedAt: ts,
+			ID:           id.New("npmpkg"),
+			RepositoryID: repositoryID,
+			Name:         name,
+			CreatedAt:    ts,
+			UpdatedAt:    ts,
 		})
 		if err != nil {
 			return fmt.Errorf("upserting package: %w", err)

@@ -5,27 +5,20 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+
+	"github.com/platbor/platbor/internal/core/repository"
 )
 
-// getPackument answers `npm install`'s metadata request. For a proxy project it
-// fetches fresh from the upstream (falling back to cache when offline); for a
-// local project it rebuilds the packument from stored versions and dist-tags.
-func (h *handler) getPackument(w http.ResponseWriter, r *http.Request, project, pkg string) {
-	projectID, ok := h.resolveProject(w, r, project)
-	if !ok {
-		return
-	}
-	up, isProxy, err := h.proxyUpstreamFor(r.Context(), projectID)
-	if err != nil {
-		h.internalError(w, "checking proxy", err)
-		return
-	}
-	if isProxy {
-		h.proxyPackument(w, r, up, projectID, project, pkg)
+// getPackument answers `npm install`'s metadata request. For a proxy repository
+// it fetches fresh from the upstream (falling back to cache when offline); for a
+// local repository it rebuilds the packument from stored versions and dist-tags.
+func (h *handler) getPackument(w http.ResponseWriter, r *http.Request, repo repository.Repository, project, pkg string) {
+	if repo.Mode == repository.ModeProxy {
+		h.proxyPackument(w, r, upstreamOf(repo), repo.ID, project, repo.Key, pkg)
 		return
 	}
 
-	versions, distTags, err := h.store.packument(r.Context(), projectID, pkg)
+	versions, distTags, err := h.store.packument(r.Context(), repo.ID, pkg)
 	if err != nil {
 		if errors.Is(err, ErrPackageNotFound) {
 			writeError(w, h.log, http.StatusNotFound, "package not found: "+pkg)
@@ -34,14 +27,22 @@ func (h *handler) getPackument(w http.ResponseWriter, r *http.Request, project, 
 		h.internalError(w, "reading packument", err)
 		return
 	}
-	h.writePackument(w, r, project, pkg, versions, distTags)
+	h.writePackument(w, r, project, repo.Key, pkg, versions, distTags)
+}
+
+// upstreamOf builds the upstream client config from a proxy repository.
+func upstreamOf(repo repository.Repository) upstream {
+	if repo.Upstream == nil {
+		return upstream{}
+	}
+	return upstream{BaseURL: repo.Upstream.URL, Username: repo.Upstream.Username, Password: repo.Upstream.Password}
 }
 
 // writePackument assembles and writes a package document from stored versions,
 // stamping each version's dist with this registry's tarball URL and the
 // authoritative digests computed at publish time.
-func (h *handler) writePackument(w http.ResponseWriter, r *http.Request, project, pkg string, versions []storedVersion, distTags map[string]string) {
-	base := registryBase(r, project)
+func (h *handler) writePackument(w http.ResponseWriter, r *http.Request, project, repoKey, pkg string, versions []storedVersion, distTags map[string]string) {
+	base := registryBase(r, project, repoKey)
 	versionMap := make(map[string]json.RawMessage, len(versions))
 	for _, v := range versions {
 		patched, err := patchVersion(v, base, pkg)
@@ -91,20 +92,12 @@ func patchVersion(v storedVersion, base, pkg string) (json.RawMessage, error) {
 	return json.Marshal(obj)
 }
 
-// getTarball serves a version's tarball. For a proxy project it fills the cache
-// from the upstream on a miss; for a local project it streams from the store.
-func (h *handler) getTarball(w http.ResponseWriter, r *http.Request, project, pkg, filename string) {
-	projectID, ok := h.resolveProject(w, r, project)
-	if !ok {
-		return
-	}
-	up, isProxy, err := h.proxyUpstreamFor(r.Context(), projectID)
-	if err != nil {
-		h.internalError(w, "checking proxy", err)
-		return
-	}
-	if isProxy {
-		h.proxyTarball(w, r, up, projectID, pkg, filename)
+// getTarball serves a version's tarball. For a proxy repository it fills the
+// cache from the upstream on a miss; for a local repository it streams from the
+// store.
+func (h *handler) getTarball(w http.ResponseWriter, r *http.Request, repo repository.Repository, project, pkg, filename string) {
+	if repo.Mode == repository.ModeProxy {
+		h.proxyTarball(w, r, upstreamOf(repo), repo.ID, pkg, filename)
 		return
 	}
 
@@ -113,7 +106,7 @@ func (h *handler) getTarball(w http.ResponseWriter, r *http.Request, project, pk
 		writeError(w, h.log, http.StatusNotFound, "not found")
 		return
 	}
-	digest, size, err := h.store.tarball(r.Context(), projectID, pkg, version)
+	digest, size, err := h.store.tarball(r.Context(), repo.ID, pkg, version)
 	if err != nil {
 		if errors.Is(err, ErrPackageNotFound) {
 			writeError(w, h.log, http.StatusNotFound, "not found")

@@ -76,15 +76,21 @@ func validTag(ref string) bool { return tagPattern.MatchString(ref) }
 // the presence of one is decisive.
 func isDigestRef(ref string) bool { return strings.Contains(ref, ":") }
 
-// splitName divides an OCI name into its leading project component and the
-// remaining repository path. A single-component name has no project and returns
-// ok=false.
-func splitName(name string) (project, repo string, ok bool) {
-	project, repo, found := strings.Cut(name, "/")
-	if !found || project == "" || repo == "" {
-		return "", "", false
+// splitName divides an OCI name into its leading <project>/<repo> components and
+// the remaining image path. The scheme is /v2/<project>/<repo>/<image...>: the
+// first component is the project (tenant), the second is the typed repository,
+// and the rest — which may itself contain slashes — is the image name. A name
+// with fewer than three components has no place to store an artifact.
+func splitName(name string) (project, repo, image string, ok bool) {
+	project, rest, found := strings.Cut(name, "/")
+	if !found || project == "" {
+		return "", "", "", false
 	}
-	return project, repo, true
+	repo, image, found = strings.Cut(rest, "/")
+	if !found || repo == "" || image == "" {
+		return "", "", "", false
+	}
+	return project, repo, image, true
 }
 
 // parseContentRange parses a "start-end" Content-Range value used by chunked

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/platbor/platbor/internal/core/blob"
+	"github.com/platbor/platbor/internal/core/repository"
 )
 
 // maxNupkgSize caps a single package upload.
@@ -17,14 +18,11 @@ const maxNupkgSize = 1 << 30 // 1 GiB
 // raw body), extract its id/version from the embedded .nuspec, store the package
 // in the blob store, and index the version. Proxy feeds are read-only.
 func (h *handler) push(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := h.resolveProject(w, r)
+	repo, ok := h.resolveRepo(w, r, true)
 	if !ok {
 		return
 	}
-	if proxy, err := h.store.isProxy(r.Context(), projectID); err != nil {
-		h.internalError(w, "checking proxy", err)
-		return
-	} else if proxy {
+	if repo.Mode == repository.ModeProxy {
 		writeError(w, http.StatusForbidden, "cannot push to a proxy feed")
 		return
 	}
@@ -48,13 +46,14 @@ func (h *handler) push(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.push(r.Context(), pushInput{
-		ProjectID:   projectID,
-		IDOriginal:  pkgID,
-		Version:     version,
-		NupkgDigest: digest,
-		NupkgSize:   size,
-		Nuspec:      nuspec,
-		Actor:       actorFrom(r),
+		RepositoryID: repo.ID,
+		ProjectID:    repo.ProjectID,
+		IDOriginal:   pkgID,
+		Version:      version,
+		NupkgDigest:  digest,
+		NupkgSize:    size,
+		Nuspec:       nuspec,
+		Actor:        actorFrom(r),
 	}); err != nil {
 		if errors.Is(err, ErrVersionExists) {
 			// NuGet uses 409 for a duplicate version.

@@ -21,6 +21,7 @@ func NewBrowser(sqlDB *sql.DB) *Browser { return &Browser{q: db.New(sqlDB)} }
 type FileSummary struct {
 	ProjectKey  string
 	ProjectName string
+	RepoKey     string
 	Path        string
 	SizeBytes   int64
 	IsProxy     bool
@@ -38,6 +39,7 @@ func (b *Browser) Files(ctx context.Context) ([]FileSummary, error) {
 		out = append(out, FileSummary{
 			ProjectKey:  r.ProjectKey,
 			ProjectName: r.ProjectName,
+			RepoKey:     r.RepoKey,
 			Path:        r.Path,
 			SizeBytes:   r.Size,
 			IsProxy:     r.IsProxy != 0,

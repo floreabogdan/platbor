@@ -39,6 +39,9 @@ var (
 	ErrNotFound = errors.New("repository not found")
 	// ErrDuplicateKey means a repository with that key already exists in the project.
 	ErrDuplicateKey = errors.New("repository key already exists")
+	// ErrFormatMismatch means the repository exists but holds a different format
+	// than the request (e.g. an npm push into an OCI repository).
+	ErrFormatMismatch = errors.New("repository format mismatch")
 )
 
 // ValidationError describes invalid input.
@@ -157,6 +160,101 @@ func (s *Service) Get(ctx context.Context, projectID, key string) (Repository, e
 			return Repository{}, ErrNotFound
 		}
 		return Repository{}, fmt.Errorf("getting repository: %w", err)
+	}
+	return toDomain(row), nil
+}
+
+// GetForFormat returns a repository for a read, requiring it to hold the given
+// format. Missing → ErrNotFound; wrong format → ErrFormatMismatch.
+func (s *Service) GetForFormat(ctx context.Context, projectID, key string, format Format) (Repository, error) {
+	repo, err := s.Get(ctx, projectID, key)
+	if err != nil {
+		return Repository{}, err
+	}
+	if repo.Format != format {
+		return Repository{}, ErrFormatMismatch
+	}
+	return repo, nil
+}
+
+// ResolveOrCreate resolves the repository for a write. If it exists it must hold
+// the given format (else ErrFormatMismatch). If it does not exist, it is
+// auto-created as a local repository of that format when allowAutoCreate is set;
+// otherwise ErrNotFound is returned (the repository must be created first).
+func (s *Service) ResolveOrCreate(ctx context.Context, projectID, key string, format Format, actor string, allowAutoCreate bool) (Repository, error) {
+	repo, err := s.Get(ctx, projectID, key)
+	switch {
+	case err == nil:
+		if repo.Format != format {
+			return Repository{}, ErrFormatMismatch
+		}
+		return repo, nil
+	case !errors.Is(err, ErrNotFound):
+		return Repository{}, err
+	}
+	if !allowAutoCreate {
+		return Repository{}, ErrNotFound
+	}
+	created, err := s.Create(ctx, CreateInput{
+		ProjectID: projectID, Key: key, Name: key, Format: format, Mode: ModeLocal, Actor: actor,
+	})
+	if errors.Is(err, ErrDuplicateKey) {
+		// Created concurrently by another push; fetch it and re-check the format.
+		return s.GetForFormat(ctx, projectID, key, format)
+	}
+	return created, err
+}
+
+// UpdateInput is the desired repository configuration for an update.
+type UpdateInput struct {
+	Name      string
+	Upstream  *Upstream
+	Retention Retention
+}
+
+// Update replaces a repository's name, upstream, and retention policy, auditing
+// the change. The format and mode are immutable.
+func (s *Service) Update(ctx context.Context, projectID, key string, in UpdateInput, actor string) (Repository, error) {
+	existing, err := s.Get(ctx, projectID, key)
+	if err != nil {
+		return Repository{}, err
+	}
+	if in.Name == "" {
+		in.Name = existing.Name
+	}
+	up := Upstream{}
+	if in.Upstream != nil {
+		up = *in.Upstream
+	} else if existing.Upstream != nil {
+		up = *existing.Upstream
+	}
+	ts := s.now().Format(time.RFC3339Nano)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Repository{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	qtx := s.q.WithTx(tx)
+
+	row, err := qtx.UpdateRepository(ctx, db.UpdateRepositoryParams{
+		Name:             in.Name,
+		UpstreamUrl:      up.URL,
+		UpstreamUsername: up.Username,
+		UpstreamPassword: up.Password,
+		KeepLast:         int64(in.Retention.KeepLast),
+		DeleteUntagged:   boolToInt(in.Retention.DeleteUntagged),
+		UpdatedAt:        ts,
+		ID:               existing.ID,
+	})
+	if err != nil {
+		return Repository{}, fmt.Errorf("updating repository: %w", err)
+	}
+	if err := s.audit(ctx, qtx, projectID, actor, "repository.update", existing.ID, ts, fmt.Sprintf(`{"key":%q}`, key)); err != nil {
+		return Repository{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Repository{}, fmt.Errorf("commit: %w", err)
 	}
 	return toDomain(row), nil
 }

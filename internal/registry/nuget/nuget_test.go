@@ -20,6 +20,7 @@ import (
 	"github.com/platbor/platbor/internal/core/config"
 	"github.com/platbor/platbor/internal/core/db"
 	"github.com/platbor/platbor/internal/core/project"
+	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry"
 	"github.com/platbor/platbor/internal/registry/nuget"
 	"github.com/platbor/platbor/internal/registry/oci"
@@ -52,14 +53,23 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("Bootstrap: %v", err)
 	}
 	projects := project.NewService(sqlDB)
-	if _, err := projects.Create(ctx, project.CreateInput{Key: "feed", Name: "Feed", Actor: "admin"}); err != nil {
+	proj, err := projects.Create(ctx, project.CreateInput{Key: "feed", Name: "Feed", AllowAutoCreate: true, Actor: "admin"})
+	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	if _, err := projects.Create(ctx, project.CreateInput{
-		Key: "mirror", Name: "Mirror", Actor: "admin",
-		Upstream: &project.Upstream{URL: "https://api.nuget.org/v3/index.json"},
+	repos := repository.NewService(sqlDB)
+	if _, err := repos.Create(ctx, repository.CreateInput{
+		ProjectID: proj.ID, Key: "local", Name: "Local",
+		Format: repository.FormatNuGet, Mode: repository.ModeLocal, Actor: "admin",
 	}); err != nil {
-		t.Fatalf("create proxy project: %v", err)
+		t.Fatalf("create local repo: %v", err)
+	}
+	if _, err := repos.Create(ctx, repository.CreateInput{
+		ProjectID: proj.ID, Key: "mirror", Name: "Mirror",
+		Format: repository.FormatNuGet, Mode: repository.ModeProxy,
+		Upstream: &repository.Upstream{URL: "https://api.nuget.org/v3/index.json"}, Actor: "admin",
+	}); err != nil {
+		t.Fatalf("create proxy repo: %v", err)
 	}
 	store, err := blob.NewFS(cfg.DataDir)
 	if err != nil {
@@ -67,7 +77,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	r := chi.NewRouter()
 	r.Route("/nuget", func(sub chi.Router) {
-		nuget.New().Mount(sub, registry.Deps{Blobs: store, Auth: authSvc, DB: sqlDB, Log: discardLogger()})
+		nuget.New().Mount(sub, registry.Deps{Blobs: store, Auth: authSvc, DB: sqlDB, Repositories: repository.NewService(sqlDB), Log: discardLogger()})
 	})
 	return &harness{router: r, auth: authSvc, db: sqlDB, blobs: store}
 }
@@ -127,7 +137,7 @@ func buildNupkg(t *testing.T, id, version string) []byte {
 
 func TestServiceIndexIsAnonymous(t *testing.T) {
 	h := newHarness(t)
-	rr := h.do(t, http.MethodGet, "/nuget/feed/v3/index.json", nil, "")
+	rr := h.do(t, http.MethodGet, "/nuget/feed/local/v3/index.json", nil, "")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("service index: status = %d, want 200", rr.Code)
 	}
@@ -164,15 +174,15 @@ func TestPushRestoreRoundTrip(t *testing.T) {
 	nupkg := buildNupkg(t, "Acme.Widgets", "1.2.3")
 
 	// Push requires auth.
-	if rr := h.do(t, http.MethodPut, "/nuget/feed/v3/package", nupkg, ""); rr.Code != http.StatusUnauthorized {
+	if rr := h.do(t, http.MethodPut, "/nuget/feed/local/v3/package", nupkg, ""); rr.Code != http.StatusUnauthorized {
 		t.Fatalf("unauth push: status = %d, want 401", rr.Code)
 	}
-	if rr := h.do(t, http.MethodPut, "/nuget/feed/v3/package", nupkg, key); rr.Code != http.StatusCreated {
+	if rr := h.do(t, http.MethodPut, "/nuget/feed/local/v3/package", nupkg, key); rr.Code != http.StatusCreated {
 		t.Fatalf("push: status = %d, want 201 (%s)", rr.Code, rr.Body.String())
 	}
 
 	// Flat-container lists the version.
-	fv := h.do(t, http.MethodGet, "/nuget/feed/v3-flatcontainer/acme.widgets/index.json", nil, key)
+	fv := h.do(t, http.MethodGet, "/nuget/feed/local/v3-flatcontainer/acme.widgets/index.json", nil, key)
 	if fv.Code != http.StatusOK {
 		t.Fatalf("flat versions: status = %d", fv.Code)
 	}
@@ -185,13 +195,13 @@ func TestPushRestoreRoundTrip(t *testing.T) {
 	}
 
 	// The nupkg downloads byte-for-byte.
-	dl := h.do(t, http.MethodGet, "/nuget/feed/v3-flatcontainer/acme.widgets/1.2.3/acme.widgets.1.2.3.nupkg", nil, key)
+	dl := h.do(t, http.MethodGet, "/nuget/feed/local/v3-flatcontainer/acme.widgets/1.2.3/acme.widgets.1.2.3.nupkg", nil, key)
 	if dl.Code != http.StatusOK || !bytes.Equal(dl.Body.Bytes(), nupkg) {
 		t.Errorf("download: status=%d match=%v", dl.Code, bytes.Equal(dl.Body.Bytes(), nupkg))
 	}
 
 	// Registration carries the catalog entry with @type and the dependency group.
-	reg := h.do(t, http.MethodGet, "/nuget/feed/v3/registrations/acme.widgets/index.json", nil, key)
+	reg := h.do(t, http.MethodGet, "/nuget/feed/local/v3/registrations/acme.widgets/index.json", nil, key)
 	if reg.Code != http.StatusOK {
 		t.Fatalf("registration: status = %d", reg.Code)
 	}
@@ -225,7 +235,7 @@ func TestPushRestoreRoundTrip(t *testing.T) {
 	}
 
 	// Re-pushing the same version is a conflict.
-	if rr := h.do(t, http.MethodPut, "/nuget/feed/v3/package", nupkg, key); rr.Code != http.StatusConflict {
+	if rr := h.do(t, http.MethodPut, "/nuget/feed/local/v3/package", nupkg, key); rr.Code != http.StatusConflict {
 		t.Errorf("re-push: status = %d, want 409", rr.Code)
 	}
 }
@@ -233,7 +243,7 @@ func TestPushRestoreRoundTrip(t *testing.T) {
 func TestPushToProxyRejected(t *testing.T) {
 	h := newHarness(t)
 	key := h.token(t)
-	rr := h.do(t, http.MethodPut, "/nuget/mirror/v3/package", buildNupkg(t, "X", "1.0.0"), key)
+	rr := h.do(t, http.MethodPut, "/nuget/feed/mirror/v3/package", buildNupkg(t, "X", "1.0.0"), key)
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("push to proxy: status = %d, want 403", rr.Code)
 	}
@@ -242,8 +252,8 @@ func TestPushToProxyRejected(t *testing.T) {
 func TestSearch(t *testing.T) {
 	h := newHarness(t)
 	key := h.token(t)
-	h.do(t, http.MethodPut, "/nuget/feed/v3/package", buildNupkg(t, "Acme.Widgets", "1.0.0"), key)
-	rr := h.do(t, http.MethodGet, "/nuget/feed/v3/search?q=widg", nil, key)
+	h.do(t, http.MethodPut, "/nuget/feed/local/v3/package", buildNupkg(t, "Acme.Widgets", "1.0.0"), key)
+	rr := h.do(t, http.MethodGet, "/nuget/feed/local/v3/search?q=widg", nil, key)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("search: status = %d", rr.Code)
 	}
@@ -263,7 +273,7 @@ func TestSearch(t *testing.T) {
 func TestGCKeepsNupkgs(t *testing.T) {
 	h := newHarness(t)
 	key := h.token(t)
-	h.do(t, http.MethodPut, "/nuget/feed/v3/package", buildNupkg(t, "Acme.Widgets", "1.0.0"), key)
+	h.do(t, http.MethodPut, "/nuget/feed/local/v3/package", buildNupkg(t, "Acme.Widgets", "1.0.0"), key)
 
 	ctx := context.Background()
 	future := time.Now().UTC().Add(48 * time.Hour)

@@ -24,7 +24,7 @@ func sha512Digest(data []byte) string {
 // referrers link was recorded.
 func TestManifestSubjectHeader(t *testing.T) {
 	h := newHarness(t)
-	const name = "library/alpine"
+	const name = "library/images/alpine"
 
 	imgBody, imgDigest := h.buildImage(t, name)
 	if put := h.putManifest(t, name, "v1.0", imgBody); put.Code != http.StatusCreated {
@@ -52,7 +52,7 @@ func TestManifestSubjectHeader(t *testing.T) {
 // requires 416, not a later digest mismatch.
 func TestOutOfOrderChunkOnPutReturns416(t *testing.T) {
 	h := newHarness(t)
-	const name = "library/alpine"
+	const name = "library/images/alpine"
 
 	start := h.req(t, http.MethodPost, "/v2/"+name+"/blobs/uploads/", nil, "password")
 	loc := start.Header().Get("Location")
@@ -78,7 +78,7 @@ func TestOutOfOrderChunkOnPutReturns416(t *testing.T) {
 // test pins.
 func TestManifestPushPullBySHA512Digest(t *testing.T) {
 	h := newHarness(t)
-	const name = "library/alpine"
+	const name = "library/images/alpine"
 
 	body, _ := h.buildImage(t, name)
 	digest := sha512Digest(body)
@@ -109,7 +109,7 @@ func TestManifestPushPullBySHA512Digest(t *testing.T) {
 // the registry (carries urls): its blob is not required to be present.
 func TestNonDistributableLayerAccepted(t *testing.T) {
 	h := newHarness(t)
-	const name = "library/alpine"
+	const name = "library/images/alpine"
 
 	config := []byte(`{"architecture":"amd64","os":"linux"}`)
 	configDigest := h.pushBlob(t, name, config)

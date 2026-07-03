@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/platbor/platbor/internal/core/blob"
+	"github.com/platbor/platbor/internal/core/repository"
 )
 
 // maxManifestBytes caps a manifest document. Manifests are small descriptors
@@ -109,44 +109,39 @@ type manifestError struct {
 
 func (e *manifestError) Error() string { return e.msg }
 
-// serveManifest dispatches /v2/<name>/manifests/<ref> after resolving the
-// project the repository belongs to.
+// serveManifest dispatches /v2/<name>/manifests/<ref> after resolving the typed
+// repository the image belongs to.
 func (h *handler) serveManifest(w http.ResponseWriter, r *http.Request, p parsedPath) {
-	projectID, repo, ok := h.resolveName(w, r, p.name)
+	repo, image, ok := h.resolveRepo(w, r, p.name, r.Method == http.MethodPut)
 	if !ok {
 		return
 	}
 	switch r.Method {
 	case http.MethodPut:
-		if h.denyProxyWrite(w, r, projectID) {
+		if h.denyProxyWrite(w, repo) {
 			return
 		}
-		h.putManifest(w, r, projectID, repo, p)
+		h.putManifest(w, r, repo, image, p)
 	case http.MethodGet:
-		h.getManifest(w, r, projectID, repo, p, true)
+		h.getManifest(w, r, repo, image, p, true)
 	case http.MethodHead:
-		h.getManifest(w, r, projectID, repo, p, false)
+		h.getManifest(w, r, repo, image, p, false)
 	case http.MethodDelete:
-		if h.denyProxyWrite(w, r, projectID) {
+		if h.denyProxyWrite(w, repo) {
 			return
 		}
-		h.deleteManifest(w, r, projectID, repo, p)
+		h.deleteManifest(w, r, repo, image, p)
 	default:
 		writeError(w, h.log, http.StatusMethodNotAllowed, codeUnsupported, "method not allowed")
 	}
 }
 
-// denyProxyWrite rejects a mutation targeting a pull-through proxy project: a
+// denyProxyWrite rejects a mutation targeting a pull-through proxy repository: a
 // proxy is a read-only mirror, so pushes and deletes are denied. It returns true
 // when it has written the rejection (the caller must stop).
-func (h *handler) denyProxyWrite(w http.ResponseWriter, r *http.Request, projectID string) bool {
-	isProxy, err := h.manifests.isProxy(r.Context(), projectID)
-	if err != nil {
-		h.internalError(w, "checking proxy status", err)
-		return true
-	}
-	if isProxy {
-		writeError(w, h.log, http.StatusMethodNotAllowed, codeDenied, "this project is a pull-through proxy and is read-only")
+func (h *handler) denyProxyWrite(w http.ResponseWriter, repo repository.Repository) bool {
+	if repo.Mode == repository.ModeProxy {
+		writeError(w, h.log, http.StatusMethodNotAllowed, codeDenied, "this repository is a pull-through proxy and is read-only")
 		return true
 	}
 	return false
@@ -154,7 +149,7 @@ func (h *handler) denyProxyWrite(w http.ResponseWriter, r *http.Request, project
 
 // putManifest stores an uploaded manifest, verifying its digest and that every
 // blob (or child manifest) it references already exists.
-func (h *handler) putManifest(w http.ResponseWriter, r *http.Request, projectID, repo string, p parsedPath) {
+func (h *handler) putManifest(w http.ResponseWriter, r *http.Request, repo repository.Repository, image string, p parsedPath) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxManifestBytes+1))
 	if err != nil {
 		h.internalError(w, "reading manifest", err)
@@ -202,7 +197,7 @@ func (h *handler) putManifest(w http.ResponseWriter, r *http.Request, projectID,
 		tag = p.ref
 	}
 
-	if err := h.validateReferences(r.Context(), projectID, repo, mediaType, doc); err != nil {
+	if err := h.validateReferences(r.Context(), repo.ID, image, mediaType, doc); err != nil {
 		var me *manifestError
 		if errors.As(err, &me) {
 			writeError(w, h.log, me.status, me.code, me.msg)
@@ -213,8 +208,9 @@ func (h *handler) putManifest(w http.ResponseWriter, r *http.Request, projectID,
 	}
 
 	if err := h.manifests.putManifest(r.Context(), manifestWrite{
-		ProjectID:    projectID,
-		Repository:   repo,
+		RepositoryID: repo.ID,
+		ProjectID:    repo.ProjectID,
+		Repository:   image,
 		Digest:       digest,
 		MediaType:    mediaType,
 		Payload:      body,
@@ -240,9 +236,9 @@ func (h *handler) putManifest(w http.ResponseWriter, r *http.Request, projectID,
 }
 
 // getManifest answers GET (metadata + body) and HEAD (metadata only). It
-// resolves a tag to its digest and, for a proxy project, fills the cache from
+// resolves a tag to its digest and, for a proxy repository, fills the cache from
 // the upstream on a miss (see loadManifest).
-func (h *handler) getManifest(w http.ResponseWriter, r *http.Request, projectID, repo string, p parsedPath, body bool) {
+func (h *handler) getManifest(w http.ResponseWriter, r *http.Request, repo repository.Repository, image string, p parsedPath, body bool) {
 	if isDigestRef(p.ref) {
 		if err := blob.ValidateDigest(p.ref); err != nil {
 			writeError(w, h.log, http.StatusBadRequest, codeDigestInvalid, "invalid digest")
@@ -250,7 +246,7 @@ func (h *handler) getManifest(w http.ResponseWriter, r *http.Request, projectID,
 		}
 	}
 
-	m, err := h.loadManifest(r.Context(), projectID, repo, p.ref)
+	m, err := h.loadManifest(r.Context(), repo, image, p.ref)
 	if err != nil {
 		if errors.Is(err, ErrManifestNotFound) {
 			writeError(w, h.log, http.StatusNotFound, codeManifestUnknown, "manifest unknown")
@@ -274,7 +270,7 @@ func (h *handler) getManifest(w http.ResponseWriter, r *http.Request, projectID,
 }
 
 // deleteManifest removes a manifest (by digest) or untags it (by tag).
-func (h *handler) deleteManifest(w http.ResponseWriter, r *http.Request, projectID, repo string, p parsedPath) {
+func (h *handler) deleteManifest(w http.ResponseWriter, r *http.Request, repo repository.Repository, image string, p parsedPath) {
 	actor := usernameFromContext(r.Context())
 
 	var err error
@@ -283,13 +279,13 @@ func (h *handler) deleteManifest(w http.ResponseWriter, r *http.Request, project
 			writeError(w, h.log, http.StatusBadRequest, codeDigestInvalid, "invalid digest")
 			return
 		}
-		err = h.manifests.deleteManifest(r.Context(), projectID, repo, p.ref, actor)
+		err = h.manifests.deleteManifest(r.Context(), repo.ID, repo.ProjectID, image, p.ref, actor)
 	} else {
 		if !validTag(p.ref) {
 			writeError(w, h.log, http.StatusBadRequest, codeManifestInvalid, "invalid tag")
 			return
 		}
-		err = h.manifests.deleteTag(r.Context(), projectID, repo, p.ref, actor)
+		err = h.manifests.deleteTag(r.Context(), repo.ID, repo.ProjectID, image, p.ref, actor)
 	}
 	if err != nil {
 		if errors.Is(err, ErrManifestNotFound) {
@@ -306,13 +302,13 @@ func (h *handler) deleteManifest(w http.ResponseWriter, r *http.Request, project
 // not hold: an image manifest's config and layers must be present as blobs; an
 // index's child manifests must already be stored. This is what makes a dangling
 // push fail loudly instead of producing an unpullable image.
-func (h *handler) validateReferences(ctx context.Context, projectID, repo, mediaType string, doc manifestDoc) error {
+func (h *handler) validateReferences(ctx context.Context, repositoryID, image, mediaType string, doc manifestDoc) error {
 	if imageIndexTypes[mediaType] {
 		for _, d := range doc.Manifests {
 			if err := blob.ValidateDigest(d.Digest); err != nil {
 				return &manifestError{http.StatusBadRequest, codeManifestInvalid, "invalid digest in index: " + d.Digest}
 			}
-			ok, err := h.manifests.manifestExists(ctx, projectID, repo, d.Digest)
+			ok, err := h.manifests.manifestExists(ctx, repositoryID, image, d.Digest)
 			if err != nil {
 				return err
 			}
@@ -348,27 +344,6 @@ func (h *handler) validateReferences(ctx context.Context, projectID, repo, media
 		}
 	}
 	return nil
-}
-
-// resolveName splits the OCI name into <project>/<repository> and resolves the
-// project. The scheme (docs/ARCHITECTURE.md) puts the project first; a bare
-// single-component name has no project to scope to.
-func (h *handler) resolveName(w http.ResponseWriter, r *http.Request, name string) (projectID, repo string, ok bool) {
-	key, repo, split := splitName(name)
-	if !split {
-		writeError(w, h.log, http.StatusNotFound, codeNameUnknown, "repository name must be <project>/<repository>")
-		return "", "", false
-	}
-	projectID, err := h.manifests.resolveProject(r.Context(), key)
-	if err != nil {
-		if errors.Is(err, errProjectNotFound) {
-			writeError(w, h.log, http.StatusNotFound, codeNameUnknown, fmt.Sprintf("project %q does not exist", key))
-			return "", "", false
-		}
-		h.internalError(w, "resolving project", err)
-		return "", "", false
-	}
-	return projectID, repo, true
 }
 
 func usernameFromContext(ctx context.Context) string {

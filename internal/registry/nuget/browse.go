@@ -23,6 +23,7 @@ func NewBrowser(sqlDB *sql.DB) *Browser { return &Browser{q: db.New(sqlDB)} }
 type PackageSummary struct {
 	ProjectKey   string
 	ProjectName  string
+	RepoKey      string
 	ID           string
 	VersionCount int
 	SizeBytes    int64
@@ -57,6 +58,7 @@ func (b *Browser) Packages(ctx context.Context) ([]PackageSummary, error) {
 		out = append(out, PackageSummary{
 			ProjectKey:   r.ProjectKey,
 			ProjectName:  r.ProjectName,
+			RepoKey:      r.RepoKey,
 			ID:           r.PackageID,
 			VersionCount: int(r.VersionCount),
 			SizeBytes:    r.SizeBytes,
@@ -67,8 +69,9 @@ func (b *Browser) Packages(ctx context.Context) ([]PackageSummary, error) {
 	return out, nil
 }
 
-// Package returns one package's versions (newest first), or ErrPackageNotFound.
-func (b *Browser) Package(ctx context.Context, projectKey, id string) (PackageDetail, error) {
+// Package returns one package's versions (newest first) in a repository, or
+// ErrPackageNotFound.
+func (b *Browser) Package(ctx context.Context, projectKey, repoKey, id string) (PackageDetail, error) {
 	proj, err := b.q.GetProjectByKey(ctx, projectKey)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -76,7 +79,14 @@ func (b *Browser) Package(ctx context.Context, projectKey, id string) (PackageDe
 		}
 		return PackageDetail{}, fmt.Errorf("resolving project: %w", err)
 	}
-	rows, err := b.q.ListNugetVersions(ctx, db.ListNugetVersionsParams{ProjectID: proj.ID, IDLower: strings.ToLower(id)})
+	repoRow, err := b.q.GetRepository(ctx, db.GetRepositoryParams{ProjectID: proj.ID, Key: repoKey})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return PackageDetail{}, errBrowseNotFound
+		}
+		return PackageDetail{}, fmt.Errorf("resolving repository: %w", err)
+	}
+	rows, err := b.q.ListNugetVersions(ctx, db.ListNugetVersionsParams{RepositoryID: repoRow.ID, IDLower: strings.ToLower(id)})
 	if err != nil {
 		return PackageDetail{}, fmt.Errorf("listing versions: %w", err)
 	}

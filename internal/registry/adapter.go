@@ -13,6 +13,7 @@ import (
 
 	"github.com/platbor/platbor/internal/core/auth"
 	"github.com/platbor/platbor/internal/core/blob"
+	"github.com/platbor/platbor/internal/core/repository"
 )
 
 // Deps is exactly what an adapter needs from the core: blob storage,
@@ -23,10 +24,11 @@ import (
 // tables (OCI manifests/tags, npm dist-tags, ...) owns its own project-scoped
 // queries through sqlc — core domain services stay format-agnostic.
 type Deps struct {
-	Blobs blob.Store
-	Auth  *auth.Service
-	DB    *sql.DB
-	Log   *slog.Logger
+	Blobs        blob.Store
+	Auth         *auth.Service
+	DB           *sql.DB
+	Repositories *repository.Service
+	Log          *slog.Logger
 }
 
 // Adapter is one registry format. Mount registers the format's protocol routes
@@ -38,14 +40,15 @@ type Adapter interface {
 	Mount(r chi.Router, deps Deps)
 }
 
-// Pruner applies a retention policy to one format's artifacts within a project:
-// keep only the newest keepLast versions/tags of each artifact (0 = keep all),
-// and for formats with the notion, sweep untagged content when deleteUntagged is
-// set. It returns how many versions/tags it removed (or would remove, on a dry
-// run). Pruning deletes metadata; blobs are reclaimed later by GC. Each adapter
-// implements this over its own store; the retention orchestrator runs them all.
+// Pruner applies a retention policy to one repository's artifacts: keep only the
+// newest keepLast versions/tags of each artifact (0 = keep all), and for formats
+// with the notion, sweep untagged content when deleteUntagged is set. It returns
+// how many versions/tags it removed (or would remove, on a dry run). Pruning
+// deletes metadata; blobs are reclaimed later by GC. Each adapter implements this
+// over its own store; the retention orchestrator runs the pruner matching the
+// repository's format.
 type Pruner interface {
-	Prune(ctx context.Context, projectID string, keepLast int, deleteUntagged, dryRun bool, actor string) (int, error)
+	Prune(ctx context.Context, repositoryID string, keepLast int, deleteUntagged, dryRun bool, actor string) (int, error)
 }
 
 // BlobReferencer reports the blob digests a format still needs, so garbage
