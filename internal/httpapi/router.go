@@ -51,6 +51,7 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 			r.Route("/projects", projectsHandler{svc: api.Projects, log: log}.mount)
 			r.Route("/registry", registryHandler{
 				browser:   oci.NewBrowser(api.DB),
+				packages:  npm.NewBrowser(api.DB),
 				manager:   oci.NewManager(api.DB),
 				collector: oci.NewCollector(api.Blobs, api.DB, npm.NewReferencer(api.DB)),
 				projects:  api.Projects,

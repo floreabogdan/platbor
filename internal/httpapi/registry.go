@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/platbor/platbor/internal/core/project"
+	"github.com/platbor/platbor/internal/registry/npm"
 	"github.com/platbor/platbor/internal/registry/oci"
 )
 
@@ -22,6 +23,7 @@ const gcGracePeriod = time.Hour
 // session-authenticated deletion and admin garbage collection.
 type registryHandler struct {
 	browser   *oci.Browser
+	packages  *npm.Browser
 	manager   *oci.Manager
 	collector *oci.Collector
 	projects  *project.Service
@@ -29,8 +31,9 @@ type registryHandler struct {
 }
 
 func (h registryHandler) mount(r chi.Router) {
-	// Global index across every project (grouped by project in the UI).
-	r.Get("/repositories", h.listRepositories)
+	// Global indexes across every project (grouped by project in the UI).
+	r.Get("/repositories", h.listRepositories) // OCI repositories
+	r.Get("/packages", h.listPackages)         // npm packages
 	// Garbage collection is instance-wide and destructive: admins only.
 	r.With(requireAdmin).Post("/gc", h.runGC) // ?dryRun=true|false
 	// Everything below is scoped to one project.
@@ -39,6 +42,7 @@ func (h registryHandler) mount(r chi.Router) {
 		r.Get("/manifests", h.getManifest)       // ?repository=<repo>&reference=<tag|digest>
 		r.Delete("/manifests", h.deleteManifest) // ?repository=<repo>&reference=<tag|digest>
 		r.Get("/referrers", h.listReferrers)     // ?repository=<repo>&subject=<digest>
+		r.Get("/package", h.getPackage)          // ?repository=<repo>&name=<pkg> (npm detail)
 	})
 }
 
@@ -140,6 +144,101 @@ func repoKind(isProxy bool) string {
 		return "proxy"
 	}
 	return "local"
+}
+
+type packageResponse struct {
+	ProjectKey   string    `json:"projectKey"`
+	ProjectName  string    `json:"projectName"`
+	Repository   string    `json:"repository"`
+	Name         string    `json:"name"`
+	Kind         string    `json:"kind"` // "local" or "proxy"
+	VersionCount int       `json:"versionCount"`
+	SizeBytes    int64     `json:"sizeBytes"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type listPackagesResponse struct {
+	Packages []packageResponse `json:"packages"`
+}
+
+// listPackages returns every npm package across all projects, grouped by project
+// in the UI (mirrors listRepositories for the OCI format).
+func (h registryHandler) listPackages(w http.ResponseWriter, r *http.Request) {
+	pkgs, err := h.packages.Packages(r.Context())
+	if err != nil {
+		h.log.Error("listing packages", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	items := make([]packageResponse, 0, len(pkgs))
+	for _, p := range pkgs {
+		items = append(items, packageResponse{
+			ProjectKey:   p.ProjectKey,
+			ProjectName:  p.ProjectName,
+			Repository:   p.Repository,
+			Name:         p.Name,
+			Kind:         repoKind(p.IsProxy),
+			VersionCount: p.VersionCount,
+			SizeBytes:    p.SizeBytes,
+			UpdatedAt:    p.UpdatedAt,
+		})
+	}
+	writeJSON(w, h.log, http.StatusOK, listPackagesResponse{Packages: items})
+}
+
+type packageVersionResponse struct {
+	Version     string    `json:"version"`
+	SizeBytes   int64     `json:"sizeBytes"`
+	Shasum      string    `json:"shasum"`
+	Integrity   string    `json:"integrity"`
+	PublishedAt time.Time `json:"publishedAt"`
+}
+
+type packageDetailResponse struct {
+	Name       string                   `json:"name"`
+	Repository string                   `json:"repository"`
+	DistTags   map[string]string        `json:"distTags"`
+	Versions   []packageVersionResponse `json:"versions"`
+}
+
+// getPackage returns one npm package's versions and dist-tags for the detail
+// page. The project comes from the path; repository and name are query params.
+func (h registryHandler) getPackage(w http.ResponseWriter, r *http.Request) {
+	projectKey := chi.URLParam(r, "project")
+	repo := r.URL.Query().Get("repository")
+	name := r.URL.Query().Get("name")
+	if repo == "" || name == "" {
+		writeProblem(w, http.StatusBadRequest, "Missing parameter", "repository and name are required")
+		return
+	}
+
+	detail, err := h.packages.Package(r.Context(), projectKey, repo, name)
+	if err != nil {
+		if errors.Is(err, npm.ErrPackageNotFound) {
+			writeProblem(w, http.StatusNotFound, "Package not found", "no such package in that repository")
+			return
+		}
+		h.log.Error("getting package", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+
+	versions := make([]packageVersionResponse, 0, len(detail.Versions))
+	for _, v := range detail.Versions {
+		versions = append(versions, packageVersionResponse{
+			Version:     v.Version,
+			SizeBytes:   v.SizeBytes,
+			Shasum:      v.Shasum,
+			Integrity:   v.Integrity,
+			PublishedAt: v.PublishedAt,
+		})
+	}
+	writeJSON(w, h.log, http.StatusOK, packageDetailResponse{
+		Name:       detail.Name,
+		Repository: repo,
+		DistTags:   detail.DistTags,
+		Versions:   versions,
+	})
 }
 
 func (h registryHandler) listTags(w http.ResponseWriter, r *http.Request) {

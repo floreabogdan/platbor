@@ -438,6 +438,50 @@ func TestProxyPullThrough(t *testing.T) {
 	}
 }
 
+func TestBrowse(t *testing.T) {
+	h := newHarness(t)
+	tok := h.token(t)
+	h.do(t, http.MethodPut, base+"/browse-pkg", publishBody("browse-pkg", "1.0.0", []byte("aa")), tok)
+	h.do(t, http.MethodPut, base+"/browse-pkg", publishBody("browse-pkg", "1.1.0", []byte("bbbb")), tok)
+
+	br := npm.NewBrowser(h.db)
+	pkgs, err := br.Packages(context.Background())
+	if err != nil {
+		t.Fatalf("Packages: %v", err)
+	}
+	var found *npm.PackageSummary
+	for i := range pkgs {
+		if pkgs[i].Name == "browse-pkg" {
+			found = &pkgs[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("browse-pkg not in package index: %+v", pkgs)
+	}
+	if found.VersionCount != 2 || found.ProjectKey != "npm-local" || found.Repository != "lib" {
+		t.Errorf("summary = %+v, want 2 versions in npm-local/lib", *found)
+	}
+	if found.SizeBytes != int64(len("aa")+len("bbbb")) {
+		t.Errorf("size = %d, want %d", found.SizeBytes, len("aa")+len("bbbb"))
+	}
+
+	detail, err := br.Package(context.Background(), "npm-local", "lib", "browse-pkg")
+	if err != nil {
+		t.Fatalf("Package: %v", err)
+	}
+	if detail.DistTags["latest"] != "1.1.0" {
+		t.Errorf("latest = %q, want 1.1.0", detail.DistTags["latest"])
+	}
+	// Newest first.
+	if len(detail.Versions) != 2 || detail.Versions[0].Version != "1.1.0" {
+		t.Errorf("versions = %+v, want newest-first [1.1.0, 1.0.0]", detail.Versions)
+	}
+
+	if _, err := br.Package(context.Background(), "npm-local", "lib", "nope"); err != npm.ErrPackageNotFound {
+		t.Errorf("missing package: got %v, want ErrPackageNotFound", err)
+	}
+}
+
 // TestGCKeepsNpmTarballs proves the collector marks npm tarball blobs so a sweep
 // never deletes live package content — the cross-format GC guarantee.
 func TestGCKeepsNpmTarballs(t *testing.T) {
