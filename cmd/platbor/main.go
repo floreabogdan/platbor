@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/platbor/platbor/internal/core/auth"
@@ -68,7 +69,7 @@ func run() error {
 		return err
 	}
 
-	blobStore, err := blob.NewFS(cfg.DataDir)
+	blobStore, err := openBlobStore(ctx, cfg, log)
 	if err != nil {
 		return fmt.Errorf("initializing blob store: %w", err)
 	}
@@ -84,6 +85,30 @@ func run() error {
 
 	log.Info("starting platbor", slog.String("addr", cfg.Addr), slog.String("dataDir", cfg.DataDir))
 	return httpapi.NewServer(cfg, log, assets, api).Run(ctx)
+}
+
+// openBlobStore builds the configured content-addressable blob store: the
+// zero-config filesystem driver, or an S3-compatible object store for large
+// artifacts (in-progress uploads stage under {DataDir}/uploads either way).
+func openBlobStore(ctx context.Context, cfg config.Config, log *slog.Logger) (blob.Store, error) {
+	switch cfg.Blob.Driver {
+	case "s3":
+		log.Info("using s3 blob store",
+			slog.String("endpoint", cfg.Blob.S3.Endpoint),
+			slog.String("bucket", cfg.Blob.S3.Bucket))
+		return blob.NewS3(ctx, blob.S3Options{
+			Endpoint:   cfg.Blob.S3.Endpoint,
+			Bucket:     cfg.Blob.S3.Bucket,
+			Region:     cfg.Blob.S3.Region,
+			AccessKey:  cfg.Blob.S3.AccessKeyID,
+			SecretKey:  cfg.Blob.S3.SecretAccessKey,
+			UseSSL:     cfg.Blob.S3.UseSSL,
+			Prefix:     cfg.Blob.S3.Prefix,
+			StagingDir: filepath.Join(cfg.DataDir, "uploads"),
+		})
+	default:
+		return blob.NewFS(cfg.DataDir)
+	}
 }
 
 // bootstrapAdmin creates the instance admin on first run and, when it generated

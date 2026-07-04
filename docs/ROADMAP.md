@@ -64,7 +64,7 @@ Goal: the reasons enterprises deploy Harbor.
 - [ ] Cosign signature and SBOM (attestation) display via the referrers API
 - [ ] Webhooks (push/scan/delete events), quotas per project
 - [ ] Virtual/group repositories (one URL over local + proxy)
-- [ ] S3 blob driver hardening, Postgres load testing
+- [~] S3 blob driver, Postgres load testing — **S3 driver done**: an S3-compatible blob backend (AWS S3, MinIO, R2) behind the same `blob.Store` contract the fs driver passes, selected via `blob.driver: s3` (or `PLATBOR_BLOB_DRIVER=s3` + `PLATBOR_S3_*`). In-progress uploads stage locally and flush to the bucket on commit (multipart for large blobs); committed blobs live only in object storage. Verified against a real MinIO: the full contract suite passes, and a live instance round-trips generic files (incl. a 40 MiB multipart blob), an OCI `/v2` layer upload, and GC/Walk — all with nothing on local disk. This is the unlock for large artifacts (container images today, ML models next). Remaining: driver hardening (retries/backoff, server-side dedup) and Postgres load testing.
 
 ## Phase 5 — Building blocks
 

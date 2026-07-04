@@ -72,8 +72,8 @@ Dependency rule: `httpapi → {registry, catalog, scan} → core`. Nothing impor
 
 All binary content — image layers, package tarballs, chart archives — lives in one CAS keyed by `sha256`. Format adapters store only metadata plus digest references.
 
-- Drivers: `fs` (default, `{data-dir}/blobs/sha256/ab/abcdef...`) and `s3` (any S3-compatible).
-- Uploads are session-based and resumable (the OCI spec requires it; others benefit).
+- Drivers: `fs` (default, `{data-dir}/blobs/sha256/ab/abcdef...`) and `s3` (any S3-compatible — AWS S3, MinIO, R2; keys `<prefix>/blobs/<algo>/<hex>`). Both share the same `blob.Store` contract test, so they are fully substitutable.
+- Uploads are session-based and resumable (the OCI spec requires it; others benefit). Both drivers stage an in-progress upload as a local temp file under `{data-dir}/uploads` and differ only in the commit step: `fs` renames it into the CAS tree, `s3` flushes it to the bucket (multipart for large blobs). Staging is node-local, so a resumable upload must be resumed on the node that began it; committed blobs are shared. Object storage is the unlock for large artifacts — container images and, ahead, ML models.
 - Deletion is mark-and-sweep GC over the `blob_refs` table, run by the job runner. Never delete inline — shared blobs make inline deletion a correctness trap.
 
 ### Database: SQLite first, Postgres for scale

@@ -29,6 +29,8 @@ type Config struct {
 	DataDir string `yaml:"dataDir"`
 	// Database configures the metadata store.
 	Database DatabaseConfig `yaml:"database"`
+	// Blob configures the content-addressable blob store.
+	Blob BlobConfig `yaml:"blob"`
 	// Auth configures identity and sessions.
 	Auth AuthConfig `yaml:"auth"`
 	// Log configures structured logging.
@@ -45,6 +47,36 @@ type DatabaseConfig struct {
 	// DSN is the data source name. When empty, sqlite uses
 	// {DataDir}/platbor.db; postgres requires an explicit DSN.
 	DSN string `yaml:"dsn"`
+}
+
+// BlobConfig selects and configures the content-addressable blob store.
+type BlobConfig struct {
+	// Driver is fs (default, zero-config — blobs under {DataDir}/blobs) or s3
+	// (S3-compatible object storage: AWS S3, MinIO, R2, ...). Large artifacts
+	// (container images, ML models) live better in object storage.
+	Driver string `yaml:"driver"`
+	// S3 configures the s3 driver; ignored for fs.
+	S3 S3Config `yaml:"s3"`
+}
+
+// S3Config configures the S3-compatible blob driver. In-progress uploads are
+// always staged locally under {DataDir}/uploads; only finished blobs go to the
+// bucket.
+type S3Config struct {
+	// Endpoint is host[:port] of the S3 API (s3.amazonaws.com, localhost:9000, ...).
+	Endpoint string `yaml:"endpoint"`
+	// Bucket holds the blobs; created on first run if absent and permitted.
+	Bucket string `yaml:"bucket"`
+	// Region is the bucket region (optional for MinIO).
+	Region string `yaml:"region"`
+	// AccessKeyID / SecretAccessKey authenticate to the endpoint. When both are
+	// empty, ambient credentials (env, IAM role) are used.
+	AccessKeyID     string `yaml:"accessKeyId"`
+	SecretAccessKey string `yaml:"secretAccessKey"`
+	// UseSSL selects HTTPS to the endpoint.
+	UseSSL bool `yaml:"useSSL"`
+	// Prefix is an optional key prefix within the bucket.
+	Prefix string `yaml:"prefix"`
 }
 
 // AuthConfig configures the identity layer.
@@ -81,6 +113,9 @@ func Default() Config {
 		Database: DatabaseConfig{
 			Driver: "sqlite",
 			DSN:    "",
+		},
+		Blob: BlobConfig{
+			Driver: "fs",
 		},
 		Auth: AuthConfig{
 			AdminUsername: "admin",
@@ -150,6 +185,34 @@ func applyEnv(cfg *Config) error {
 	if v, ok := lookup("DB_DSN"); ok {
 		cfg.Database.DSN = v
 	}
+	if v, ok := lookup("BLOB_DRIVER"); ok {
+		cfg.Blob.Driver = v
+	}
+	if v, ok := lookup("S3_ENDPOINT"); ok {
+		cfg.Blob.S3.Endpoint = v
+	}
+	if v, ok := lookup("S3_BUCKET"); ok {
+		cfg.Blob.S3.Bucket = v
+	}
+	if v, ok := lookup("S3_REGION"); ok {
+		cfg.Blob.S3.Region = v
+	}
+	if v, ok := lookup("S3_ACCESS_KEY_ID"); ok {
+		cfg.Blob.S3.AccessKeyID = v
+	}
+	if v, ok := lookup("S3_SECRET_ACCESS_KEY"); ok {
+		cfg.Blob.S3.SecretAccessKey = v
+	}
+	if v, ok := lookup("S3_USE_SSL"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("parsing %sS3_USE_SSL %q: %w", envPrefix, v, err)
+		}
+		cfg.Blob.S3.UseSSL = b
+	}
+	if v, ok := lookup("S3_PREFIX"); ok {
+		cfg.Blob.S3.Prefix = v
+	}
 	if v, ok := lookup("ADMIN_USERNAME"); ok {
 		cfg.Auth.AdminUsername = v
 	}
@@ -197,9 +260,10 @@ func lookup(key string) (string, bool) {
 }
 
 var (
-	validLevels  = map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
-	validFormats = map[string]bool{"text": true, "json": true}
-	validDrivers = map[string]bool{"sqlite": true, "postgres": true}
+	validLevels      = map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
+	validFormats     = map[string]bool{"text": true, "json": true}
+	validDrivers     = map[string]bool{"sqlite": true, "postgres": true}
+	validBlobDrivers = map[string]bool{"fs": true, "s3": true}
 )
 
 // validate rejects any configuration that would fail confusingly at runtime,
@@ -219,6 +283,14 @@ func (c Config) validate() error {
 	}
 	if c.Database.Driver == "postgres" && c.Database.DSN == "" {
 		return errors.New("database.dsn is required when database.driver is postgres")
+	}
+	if !validBlobDrivers[c.Blob.Driver] {
+		return fmt.Errorf("blob.driver %q must be one of fs, s3", c.Blob.Driver)
+	}
+	if c.Blob.Driver == "s3" {
+		if c.Blob.S3.Endpoint == "" || c.Blob.S3.Bucket == "" {
+			return errors.New("blob.s3.endpoint and blob.s3.bucket are required when blob.driver is s3")
+		}
 	}
 	if !validLevels[c.Log.Level] {
 		return fmt.Errorf("log.level %q must be one of debug, info, warn, error", c.Log.Level)
