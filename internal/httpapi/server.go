@@ -35,10 +35,20 @@ type API struct {
 	EnableOCIBearer bool
 }
 
-// Server owns the HTTP listener and its graceful-shutdown lifecycle.
+// uploadSweep bounds how often stale upload sessions are reclaimed and how long
+// an abandoned session is spared. The grace window is generous so a slow but live
+// resumable upload (a large layer pushed over a flaky link) is never swept.
+const (
+	uploadSweepInterval = time.Hour
+	uploadSweepGrace    = 24 * time.Hour
+)
+
+// Server owns the HTTP listener and its graceful-shutdown lifecycle, plus the
+// background maintenance the instance runs while serving.
 type Server struct {
 	http     *http.Server
 	log      *slog.Logger
+	blobs    blob.Store
 	shutdown time.Duration
 }
 
@@ -52,6 +62,7 @@ func NewServer(cfg config.Config, log *slog.Logger, assets fs.FS, api API) *Serv
 			ReadHeaderTimeout: 10 * time.Second,
 		},
 		log:      log,
+		blobs:    api.Blobs,
 		shutdown: cfg.ShutdownTimeout,
 	}
 }
@@ -59,6 +70,8 @@ func NewServer(cfg config.Config, log *slog.Logger, assets fs.FS, api API) *Serv
 // Run serves until ctx is cancelled, then drains in-flight requests within the
 // configured shutdown timeout. It returns nil on a clean shutdown.
 func (s *Server) Run(ctx context.Context) error {
+	go s.sweepUploads(ctx)
+
 	errc := make(chan error, 1)
 	go func() {
 		s.log.Info("http server listening", slog.String("addr", s.http.Addr))
@@ -75,6 +88,39 @@ func (s *Server) Run(ctx context.Context) error {
 	case <-ctx.Done():
 		s.log.Info("shutdown signal received, draining", slog.Duration("timeout", s.shutdown))
 		return s.drain()
+	}
+}
+
+// sweepUploads periodically reclaims abandoned resumable-upload staging files
+// (a client that starts an upload but never commits or aborts). It runs once
+// shortly after boot and then on an interval, and exits when ctx is cancelled. A
+// blob store that does not support sweeping is a no-op.
+func (s *Server) sweepUploads(ctx context.Context) {
+	sweeper, ok := s.blobs.(blob.UploadSweeper)
+	if !ok {
+		return
+	}
+	sweep := func() {
+		removed, err := sweeper.SweepUploads(ctx, time.Now().Add(-uploadSweepGrace))
+		if err != nil {
+			s.log.Warn("sweeping stale uploads", slog.String("error", err.Error()))
+			return
+		}
+		if removed > 0 {
+			s.log.Info("swept stale upload sessions", slog.Int("removed", removed))
+		}
+	}
+
+	sweep()
+	t := time.NewTicker(uploadSweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			sweep()
+		}
 	}
 }
 

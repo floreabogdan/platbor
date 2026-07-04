@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -168,6 +169,20 @@ func (s *S3Store) Walk(ctx context.Context, fn func(Info) error) error {
 		}
 	}
 	return nil
+}
+
+// HealthCheck implements HealthChecker: the bucket is reachable.
+func (s *S3Store) HealthCheck(ctx context.Context) error {
+	if _, err := s.client.BucketExists(ctx, s.bucket); err != nil {
+		return fmt.Errorf("bucket %s unreachable: %w", s.bucket, err)
+	}
+	return nil
+}
+
+// SweepUploads implements UploadSweeper. Only local staging files are swept;
+// committed blobs in the bucket are never touched here.
+func (s *S3Store) SweepUploads(_ context.Context, cutoff time.Time) (int, error) {
+	return s.staging.sweep(cutoff)
 }
 
 // StartUpload implements Store.

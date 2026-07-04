@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // FSStore is a filesystem-backed content-addressable store. Committed blobs live
@@ -112,6 +113,19 @@ func (s *FSStore) Walk(_ context.Context, fn func(Info) error) error {
 		}
 	}
 	return nil
+}
+
+// HealthCheck implements HealthChecker: the blob directory is reachable.
+func (s *FSStore) HealthCheck(_ context.Context) error {
+	if _, err := os.Stat(filepath.Join(s.root, "blobs")); err != nil {
+		return fmt.Errorf("blob store unreachable: %w", err)
+	}
+	return nil
+}
+
+// SweepUploads implements UploadSweeper.
+func (s *FSStore) SweepUploads(_ context.Context, cutoff time.Time) (int, error) {
+	return s.staging.sweep(cutoff)
 }
 
 // StartUpload implements Store.

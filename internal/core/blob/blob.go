@@ -67,6 +67,21 @@ type Store interface {
 	ResumeUpload(ctx context.Context, id string) (Upload, error)
 }
 
+// HealthChecker is an optional Store capability: a cheap reachability probe (the
+// backing filesystem or bucket answers). Readiness checks use it; a store that
+// does not implement it is assumed always reachable.
+type HealthChecker interface {
+	HealthCheck(ctx context.Context) error
+}
+
+// UploadSweeper is an optional Store capability: remove abandoned in-progress
+// upload sessions last written before cutoff, returning how many were removed.
+// Resumable uploads that a client starts but never commits or aborts would
+// otherwise leak staging files; a background sweep reclaims them.
+type UploadSweeper interface {
+	SweepUploads(ctx context.Context, cutoff time.Time) (int, error)
+}
+
 // Upload is an in-progress, resumable blob upload. A session spans one or more
 // requests: write bytes, Close to persist progress, and later Commit or Abort.
 // A single session must not be written by two goroutines concurrently.

@@ -1,15 +1,19 @@
 package httpapi
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/platbor/platbor/internal/core/audit"
+	"github.com/platbor/platbor/internal/core/blob"
 	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry"
 	"github.com/platbor/platbor/internal/registry/cargo"
@@ -34,9 +38,11 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 	r.Use(requestLogger(log))
 	r.Use(middleware.Recoverer)
 
-	// Operational endpoints — unauthenticated, never cached.
+	// Operational endpoints — unauthenticated, never cached. Liveness reports the
+	// process is up; readiness additionally probes the dependencies an orchestrator
+	// should gate traffic on (metadata DB and blob store).
 	r.Get("/healthz", health)
-	r.Get("/readyz", health)
+	r.Get("/readyz", readyz(api.DB, api.Blobs, log))
 
 	// Terraform service discovery is instance-global (per hostname) and
 	// unauthenticated; it must live at the host root, not under a format prefix.
@@ -150,12 +156,58 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 	return r
 }
 
-// health is the liveness/readiness probe. It reports nothing but reachability
-// today; readiness gains real dependency checks (DB, blob store) as those land.
+// health is the liveness probe: it answers as long as the process can serve, so
+// an orchestrator only restarts a truly hung instance. It deliberately checks no
+// dependencies — a transient DB blip should not trigger a restart loop.
 func health(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}
+
+// readyz is the readiness probe: it reports whether the instance can actually
+// serve requests by probing its dependencies — the metadata database and the
+// blob store. On any failure it returns 503 with a per-check breakdown so an
+// orchestrator stops routing traffic here until it recovers. The checks are
+// bounded by a short timeout so a hung dependency cannot hang the probe.
+func readyz(db *sql.DB, blobs blob.Store, log *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+
+		checks := map[string]string{}
+		ready := true
+
+		if err := db.PingContext(ctx); err != nil {
+			checks["database"] = "unavailable"
+			ready = false
+			log.Warn("readiness: database unreachable", slog.String("error", err.Error()))
+		} else {
+			checks["database"] = "ok"
+		}
+
+		// The blob store is probed only when it advertises a health check; a driver
+		// without one is treated as always reachable.
+		if hc, ok := blobs.(blob.HealthChecker); ok {
+			if err := hc.HealthCheck(ctx); err != nil {
+				checks["blobStore"] = "unavailable"
+				ready = false
+				log.Warn("readiness: blob store unreachable", slog.String("error", err.Error()))
+			} else {
+				checks["blobStore"] = "ok"
+			}
+		} else {
+			checks["blobStore"] = "ok"
+		}
+
+		status := http.StatusOK
+		state := "ready"
+		if !ready {
+			status = http.StatusServiceUnavailable
+			state = "unready"
+		}
+		writeJSON(w, log, status, map[string]any{"status": state, "checks": checks})
+	}
 }
 
 // spaHandler serves the embedded single-page app: static files when they exist,

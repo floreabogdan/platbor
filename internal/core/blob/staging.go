@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"time"
 )
 
 // A resumable upload spans one or more requests, so its bytes must survive
@@ -151,6 +152,36 @@ func (u *stagedUpload) hashFile(algo string) (string, int64, error) {
 	}
 	defer func() { _ = f.Close() }()
 	return digestReader(algo, f)
+}
+
+// sweep removes staging files last modified before cutoff — abandoned resumable
+// sessions that were never committed or aborted. Only files whose name matches a
+// generated upload id are touched, and a file still being written stays safe
+// because its modification time is recent. It returns how many were removed.
+func (a *stagingArea) sweep(cutoff time.Time) (int, error) {
+	entries, err := os.ReadDir(a.dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("reading upload dir: %w", err)
+	}
+	removed := 0
+	for _, e := range entries {
+		if e.IsDir() || !uploadIDPattern.MatchString(e.Name()) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue // removed concurrently
+		}
+		if info.ModTime().Before(cutoff) {
+			if err := os.Remove(a.path(e.Name())); err == nil {
+				removed++
+			}
+		}
+	}
+	return removed, nil
 }
 
 func newUploadID() (string, error) {
