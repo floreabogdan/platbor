@@ -163,6 +163,9 @@ type Querier interface {
 	// image references. Blobs are a shared CAS, so a layer used by two images is
 	// counted once per image (logical size), not physically.
 	ListManifestSizing(ctx context.Context) ([]ListManifestSizingRow, error)
+	// The same per-image sizing rows as ListManifestSizing, scoped to one project,
+	// for per-project storage accounting (quota usage).
+	ListManifestSizingForProject(ctx context.Context, projectID string) ([]ListManifestSizingForProjectRow, error)
 	// Distinct blob digests every cached/uploaded Maven file references, for garbage
 	// collection to mark them alongside other formats. Empty (uncached) rows excluded.
 	ListMavenBlobDigests(ctx context.Context) ([]string, error)
@@ -239,6 +242,13 @@ type Querier interface {
 	// Whether a specific version is already pushed. NuGet forbids overwriting a
 	// published version, so the handler rejects a re-push before inserting.
 	NugetVersionExists(ctx context.Context, arg NugetVersionExistsParams) (int64, error)
+	// A project's logical storage across every flat-sized format (all formats except
+	// OCI, whose per-image size is computed from manifest payloads and summed
+	// separately). Sizes are summed per artifact row, so a blob shared by two
+	// artifacts counts once per artifact -- matching the per-repository sizes shown
+	// in the browser. sqlc.arg(project_id) keeps this a single Go parameter across
+	// every branch.
+	ProjectFlatStorageUsage(ctx context.Context, projectID string) (int64, error)
 	// Whether a distribution filename already exists in the repository (uploads are
 	// immutable: re-uploading a filename is rejected).
 	PypiFileExists(ctx context.Context, arg PypiFileExistsParams) (int64, error)
@@ -257,6 +267,7 @@ type Querier interface {
 	SetGemVersionBlob(ctx context.Context, arg SetGemVersionBlobParams) error
 	SetGemYanked(ctx context.Context, arg SetGemYankedParams) (int64, error)
 	SetProjectAutoCreate(ctx context.Context, arg SetProjectAutoCreateParams) error
+	SetProjectQuota(ctx context.Context, arg SetProjectQuotaParams) error
 	// Fill a proxied file's cached blob after downloading it from the upstream.
 	SetPypiFileBlob(ctx context.Context, arg SetPypiFileBlobParams) error
 	TerraformVersionExists(ctx context.Context, arg TerraformVersionExistsParams) (int64, error)

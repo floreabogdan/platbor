@@ -86,6 +86,19 @@ FROM oci_manifests m
 JOIN repositories r ON r.id = m.repository_id
 JOIN projects p ON p.id = r.project_id;
 
+-- name: ListManifestSizingForProject :many
+-- The same per-image sizing rows as ListManifestSizing, scoped to one project,
+-- for per-project storage accounting (quota usage).
+SELECT
+    r.key        AS repo_key,
+    m.repository AS repository,
+    m.digest     AS digest,
+    m.size       AS size,
+    m.payload    AS payload
+FROM oci_manifests m
+JOIN repositories r ON r.id = m.repository_id
+WHERE r.project_id = ?;
+
 -- name: ListReferrers :many
 -- Manifests whose subject is the given digest (a subject's signatures, SBOMs,
 -- and other attestations) for the referrers API. Newest first.

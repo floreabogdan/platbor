@@ -82,16 +82,56 @@ type Repository struct {
 	UpdatedAt time.Time
 }
 
+// ProjectUsageFunc reports a project's current logical storage in bytes. The
+// size of every format lives above core, so it is injected; nil disables quota
+// enforcement (used only for the shared write-path service).
+type ProjectUsageFunc func(ctx context.Context, projectID string) (int64, error)
+
 // Service manages repositories.
 type Service struct {
-	db  *sql.DB
-	q   *db.Queries
-	now func() time.Time
+	db    *sql.DB
+	q     *db.Queries
+	now   func() time.Time
+	usage ProjectUsageFunc
 }
 
 // NewService wires the repository service to an open database.
 func NewService(sqlDB *sql.DB) *Service {
 	return &Service{db: sqlDB, q: db.New(sqlDB), now: func() time.Time { return time.Now().UTC() }}
+}
+
+// SetUsageFunc installs the storage-usage computer used to enforce per-project
+// quotas on writes. Wire it on the service the format adapters share; leaving it
+// unset (management/read services) simply skips quota checks.
+func (s *Service) SetUsageFunc(f ProjectUsageFunc) { s.usage = f }
+
+// enforceQuota rejects a write when the project is at or over its storage quota.
+// It is a no-op when no usage computer is installed or the project is unlimited.
+// The at-or-over check lets the crossing write through and blocks the next one —
+// simple, predictable semantics. It surfaces as a *ValidationError so every
+// adapter reports it uniformly.
+func (s *Service) enforceQuota(ctx context.Context, projectID string) error {
+	if s.usage == nil {
+		return nil
+	}
+	proj, err := s.q.GetProjectByID(ctx, projectID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil // a missing project is reported by the caller's own resolution
+		}
+		return fmt.Errorf("loading project quota: %w", err)
+	}
+	if proj.QuotaBytes <= 0 {
+		return nil // unlimited
+	}
+	used, err := s.usage(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("computing project usage: %w", err)
+	}
+	if used >= proj.QuotaBytes {
+		return &ValidationError{fmt.Sprintf("project storage quota exceeded: %d of %d bytes used", used, proj.QuotaBytes)}
+	}
+	return nil
 }
 
 var keyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
@@ -188,6 +228,9 @@ func (s *Service) GetForFormat(ctx context.Context, projectID, key string, forma
 // auto-created as a local repository of that format when allowAutoCreate is set;
 // otherwise ErrNotFound is returned (the repository must be created first).
 func (s *Service) ResolveOrCreate(ctx context.Context, projectID, key string, format Format, actor string, allowAutoCreate bool) (Repository, error) {
+	if err := s.enforceQuota(ctx, projectID); err != nil {
+		return Repository{}, err
+	}
 	repo, err := s.Get(ctx, projectID, key)
 	switch {
 	case err == nil:

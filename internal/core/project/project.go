@@ -49,8 +49,10 @@ type Project struct {
 	Name            string
 	Description     string
 	AllowAutoCreate bool
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// QuotaBytes caps the project's logical storage; 0 means unlimited.
+	QuotaBytes int64
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // Service provides project operations backed by the metadata store.
@@ -76,7 +78,9 @@ type CreateInput struct {
 	Name            string
 	Description     string
 	AllowAutoCreate bool
-	Actor           string
+	// QuotaBytes caps the project's logical storage; 0 (the default) is unlimited.
+	QuotaBytes int64
+	Actor      string
 }
 
 // Create validates the input and, in a single transaction, inserts the project
@@ -104,6 +108,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Project, error) {
 		Name:            in.Name,
 		Description:     in.Description,
 		AllowAutoCreate: boolToInt(in.AllowAutoCreate),
+		QuotaBytes:      in.QuotaBytes,
 		CreatedAt:       ts,
 		UpdatedAt:       ts,
 	})
@@ -152,6 +157,20 @@ func (s *Service) SetAutoCreate(ctx context.Context, key string, allow bool) err
 		AllowAutoCreate: boolToInt(allow), UpdatedAt: ts, Key: key,
 	}); err != nil {
 		return fmt.Errorf("setting auto-create: %w", err)
+	}
+	return nil
+}
+
+// SetQuota sets a project's storage quota in bytes (0 = unlimited).
+func (s *Service) SetQuota(ctx context.Context, key string, quotaBytes int64) error {
+	if quotaBytes < 0 {
+		return &ValidationError{Field: "quotaBytes", Message: "must not be negative"}
+	}
+	ts := s.now().Format(time.RFC3339Nano)
+	if err := s.q.SetProjectQuota(ctx, db.SetProjectQuotaParams{
+		QuotaBytes: quotaBytes, UpdatedAt: ts, Key: key,
+	}); err != nil {
+		return fmt.Errorf("setting quota: %w", err)
 	}
 	return nil
 }
@@ -263,6 +282,7 @@ func toDomain(row db.Project) (Project, error) {
 		Name:            row.Name,
 		Description:     row.Description,
 		AllowAutoCreate: row.AllowAutoCreate != 0,
+		QuotaBytes:      row.QuotaBytes,
 		CreatedAt:       created,
 		UpdatedAt:       updated,
 	}, nil

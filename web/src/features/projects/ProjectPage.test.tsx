@@ -51,7 +51,7 @@ function renderAt() {
 beforeEach(() => {
   listProjects.mockResolvedValue({
     projects: [
-      { id: 'p1', key: 'acme', name: 'Acme', description: '', allowAutoCreate: true, createdAt: '', updatedAt: '' },
+      { id: 'p1', key: 'acme', name: 'Acme', description: '', allowAutoCreate: true, quotaBytes: 0, createdAt: '', updatedAt: '' },
     ],
   });
 });

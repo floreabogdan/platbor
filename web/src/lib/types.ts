@@ -17,8 +17,17 @@ export interface Project {
   // When true (default), a push to an unknown repo path auto-creates a local
   // repository of that format; when false, repos must be created before pushing.
   allowAutoCreate: boolean;
+  // Logical storage cap in bytes; 0 means unlimited.
+  quotaBytes: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/** ProjectUsage — a project's current logical storage against its quota. */
+export interface ProjectUsage {
+  projectKey: string;
+  quotaBytes: number; // 0 = unlimited
+  usedBytes: number;
 }
 
 export interface ListProjectsResponse {
@@ -31,6 +40,7 @@ export interface CreateProjectRequest {
   name: string;
   description?: string;
   allowAutoCreate?: boolean;
+  quotaBytes?: number;
 }
 
 // --- Repositories (the typed, configured containers inside a project) ---

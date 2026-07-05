@@ -289,6 +289,57 @@ func (q *Queries) ListManifestSizing(ctx context.Context) ([]ListManifestSizingR
 	return items, nil
 }
 
+const listManifestSizingForProject = `-- name: ListManifestSizingForProject :many
+SELECT
+    r.key        AS repo_key,
+    m.repository AS repository,
+    m.digest     AS digest,
+    m.size       AS size,
+    m.payload    AS payload
+FROM oci_manifests m
+JOIN repositories r ON r.id = m.repository_id
+WHERE r.project_id = ?
+`
+
+type ListManifestSizingForProjectRow struct {
+	RepoKey    string `json:"repo_key"`
+	Repository string `json:"repository"`
+	Digest     string `json:"digest"`
+	Size       int64  `json:"size"`
+	Payload    []byte `json:"payload"`
+}
+
+// The same per-image sizing rows as ListManifestSizing, scoped to one project,
+// for per-project storage accounting (quota usage).
+func (q *Queries) ListManifestSizingForProject(ctx context.Context, projectID string) ([]ListManifestSizingForProjectRow, error) {
+	rows, err := q.db.QueryContext(ctx, listManifestSizingForProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListManifestSizingForProjectRow{}
+	for rows.Next() {
+		var i ListManifestSizingForProjectRow
+		if err := rows.Scan(
+			&i.RepoKey,
+			&i.Repository,
+			&i.Digest,
+			&i.Size,
+			&i.Payload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReferrers = `-- name: ListReferrers :many
 SELECT digest, media_type, size, artifact_type, payload
 FROM oci_manifests

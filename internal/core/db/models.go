@@ -197,6 +197,7 @@ type Project struct {
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 	AllowAutoCreate int64  `json:"allow_auto_create"`
+	QuotaBytes      int64  `json:"quota_bytes"`
 }
 
 type ProjectMember struct {

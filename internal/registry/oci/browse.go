@@ -136,6 +136,49 @@ func repoKey(projectKey, repo, image string) string {
 	return projectKey + "\x00" + repo + "\x00" + image
 }
 
+// ProjectSize computes a project's OCI logical storage: the summed size of the
+// distinct blobs (config + layers) and manifests each of its images holds,
+// deduplicated per repository (matching the per-repo sizes the browser shows).
+// It is the OCI contribution to per-project quota accounting.
+func (b *Browser) ProjectSize(ctx context.Context, projectID string) (int64, error) {
+	rows, err := b.q.ListManifestSizingForProject(ctx, projectID)
+	if err != nil {
+		return 0, fmt.Errorf("sizing project manifests: %w", err)
+	}
+	seen := make(map[string]map[string]struct{}) // repo -> counted digests
+	var total int64
+	add := func(repo, digest string, size int64) {
+		set, ok := seen[repo]
+		if !ok {
+			set = make(map[string]struct{})
+			seen[repo] = set
+		}
+		if _, dup := set[digest]; dup {
+			return
+		}
+		set[digest] = struct{}{}
+		total += size
+	}
+	for _, r := range rows {
+		repo := r.RepoKey + "/" + r.Repository
+		add(repo, r.Digest, r.Size) // the manifest document's own bytes
+		var doc manifestDoc
+		if err := json.Unmarshal(r.Payload, &doc); err != nil {
+			continue
+		}
+		if doc.Config != nil && doc.Config.Digest != "" {
+			add(repo, doc.Config.Digest, doc.Config.Size)
+		}
+		for _, l := range doc.Layers {
+			if len(l.URLs) > 0 {
+				continue // foreign layer: referenced by URL, not stored here
+			}
+			add(repo, l.Digest, l.Size)
+		}
+	}
+	return total, nil
+}
+
 // repositorySizes computes each repository's logical storage: the summed size of
 // the distinct blobs (config + layers) and manifests it holds. Blobs are a
 // shared CAS, so a layer used by two repositories counts once per repository,

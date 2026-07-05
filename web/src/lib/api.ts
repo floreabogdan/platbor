@@ -32,6 +32,7 @@ import type {
   NugetPackageDetail,
   Problem,
   Project,
+  ProjectUsage,
   PyPIPackageDetail,
   Repo,
   Token,
@@ -103,6 +104,15 @@ export const api = {
 
   createProject: (body: CreateProjectRequest): Promise<Project> =>
     request<Project>(`/projects`, { method: 'POST', body: JSON.stringify(body) }),
+
+  getProjectUsage: (project: string): Promise<ProjectUsage> =>
+    request<ProjectUsage>(`/projects/${encodeURIComponent(project)}/usage`),
+
+  setProjectQuota: (project: string, quotaBytes: number): Promise<Project> =>
+    request<Project>(`/projects/${encodeURIComponent(project)}/quota`, {
+      method: 'PUT',
+      body: JSON.stringify({ quotaBytes }),
+    }),
 
   // Repositories (typed containers inside a project)
   listRepos: (project: string): Promise<ListReposResponse> =>

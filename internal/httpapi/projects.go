@@ -11,19 +11,27 @@ import (
 
 	"github.com/platbor/platbor/internal/core/auth"
 	"github.com/platbor/platbor/internal/core/project"
+	"github.com/platbor/platbor/internal/registry/usage"
 )
 
 // projectsHandler serves the /api/v1/projects endpoints. It stays thin: decode,
 // call the service, encode — mapping domain errors to status codes.
 type projectsHandler struct {
-	svc  *project.Service
-	auth *auth.Service
-	log  *slog.Logger
+	svc   *project.Service
+	auth  *auth.Service
+	usage *usage.Computer
+	log   *slog.Logger
 }
 
 func (h projectsHandler) mount(r chi.Router) {
 	r.Get("/", h.list)
 	r.Post("/", h.create)
+	// Per-project storage: current usage and the quota, both a management concern.
+	r.Route("/{project}", func(r chi.Router) {
+		r.Use(requireProjectManage(h.svc, h.auth))
+		r.Get("/usage", h.getUsage)
+		r.Put("/quota", h.setQuota)
+	})
 }
 
 // projectResponse is the API view of a project (camelCase, RFC 3339 timestamps).
@@ -35,6 +43,7 @@ type projectResponse struct {
 	Name            string    `json:"name"`
 	Description     string    `json:"description"`
 	AllowAutoCreate bool      `json:"allowAutoCreate"`
+	QuotaBytes      int64     `json:"quotaBytes"` // 0 = unlimited
 	CreatedAt       time.Time `json:"createdAt"`
 	UpdatedAt       time.Time `json:"updatedAt"`
 }
@@ -46,6 +55,7 @@ func toProjectResponse(p project.Project) projectResponse {
 		Name:            p.Name,
 		Description:     p.Description,
 		AllowAutoCreate: p.AllowAutoCreate,
+		QuotaBytes:      p.QuotaBytes,
 		CreatedAt:       p.CreatedAt,
 		UpdatedAt:       p.UpdatedAt,
 	}
@@ -90,6 +100,8 @@ type createProjectRequest struct {
 	// AllowAutoCreate defaults to true (zero-config push auto-creates repos).
 	// Pass false to require repositories to be created before pushing.
 	AllowAutoCreate *bool `json:"allowAutoCreate,omitempty"`
+	// QuotaBytes caps the project's logical storage; 0 (default) is unlimited.
+	QuotaBytes int64 `json:"quotaBytes,omitempty"`
 }
 
 func (h projectsHandler) create(w http.ResponseWriter, r *http.Request) {
@@ -109,6 +121,7 @@ func (h projectsHandler) create(w http.ResponseWriter, r *http.Request) {
 		Name:            req.Name,
 		Description:     req.Description,
 		AllowAutoCreate: allowAutoCreate,
+		QuotaBytes:      req.QuotaBytes,
 		Actor:           actorFrom(r),
 	})
 	if err != nil {
@@ -127,6 +140,68 @@ func (h projectsHandler) create(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Location", "/api/v1/projects/"+created.Key)
 	writeJSON(w, h.log, http.StatusCreated, toProjectResponse(created))
+}
+
+type projectUsageResponse struct {
+	ProjectKey string `json:"projectKey"`
+	QuotaBytes int64  `json:"quotaBytes"` // 0 = unlimited
+	UsedBytes  int64  `json:"usedBytes"`
+}
+
+// getUsage reports a project's current logical storage against its quota.
+func (h projectsHandler) getUsage(w http.ResponseWriter, r *http.Request) {
+	key := chi.URLParam(r, "project")
+	proj, err := h.svc.GetByKey(r.Context(), key)
+	if err != nil {
+		h.writeProjectLookupError(w, err)
+		return
+	}
+	used, err := h.usage.ProjectUsage(r.Context(), proj.ID)
+	if err != nil {
+		h.log.Error("computing project usage", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	writeJSON(w, h.log, http.StatusOK, projectUsageResponse{ProjectKey: proj.Key, QuotaBytes: proj.QuotaBytes, UsedBytes: used})
+}
+
+type setQuotaRequest struct {
+	QuotaBytes int64 `json:"quotaBytes"` // 0 = unlimited
+}
+
+// setQuota sets a project's storage quota (0 = unlimited).
+func (h projectsHandler) setQuota(w http.ResponseWriter, r *http.Request) {
+	key := chi.URLParam(r, "project")
+	var req setQuotaRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	if err := h.svc.SetQuota(r.Context(), key, req.QuotaBytes); err != nil {
+		var ve *project.ValidationError
+		if errors.As(err, &ve) {
+			writeProblem(w, http.StatusBadRequest, "Invalid quota", ve.Error())
+			return
+		}
+		h.log.Error("setting project quota", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	proj, err := h.svc.GetByKey(r.Context(), key)
+	if err != nil {
+		h.writeProjectLookupError(w, err)
+		return
+	}
+	writeJSON(w, h.log, http.StatusOK, toProjectResponse(proj))
+}
+
+func (h projectsHandler) writeProjectLookupError(w http.ResponseWriter, err error) {
+	if errors.Is(err, project.ErrNotFound) {
+		writeProblem(w, http.StatusNotFound, "Project not found", "no project with that key")
+		return
+	}
+	h.log.Error("looking up project", slog.String("error", err.Error()))
+	writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
 }
 
 func (h projectsHandler) writeCreateError(w http.ResponseWriter, err error) {

@@ -26,6 +26,7 @@ import (
 	"github.com/platbor/platbor/internal/registry/pypi"
 	"github.com/platbor/platbor/internal/registry/rubygems"
 	"github.com/platbor/platbor/internal/registry/terraform"
+	"github.com/platbor/platbor/internal/registry/usage"
 )
 
 // newRouter assembles the top-level request tree. Ordering matters: operational
@@ -67,7 +68,7 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(requireUser)
 			r.Route("/tokens", tokensHandler{svc: api.Auth, log: log}.mount)
-			r.Route("/projects", projectsHandler{svc: api.Projects, auth: api.Auth, log: log}.mount)
+			r.Route("/projects", projectsHandler{svc: api.Projects, auth: api.Auth, usage: usage.New(api.DB), log: log}.mount)
 			r.Route("/projects/{project}/repositories", repositoriesHandler{
 				repos:    repository.NewService(api.DB),
 				projects: api.Projects,
@@ -107,8 +108,11 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 	})
 
 	// Format-protocol routes. Each adapter owns its URL prefix and its own
-	// protocol-native auth and errors.
-	deps := registry.Deps{Blobs: api.Blobs, Auth: api.Auth, DB: api.DB, Log: log, Repositories: repository.NewService(api.DB), EnableOCIBearer: api.EnableOCIBearer}
+	// protocol-native auth and errors. The repository service the adapters share
+	// carries the storage-usage computer so writes enforce per-project quotas.
+	adapterRepos := repository.NewService(api.DB)
+	adapterRepos.SetUsageFunc(usage.New(api.DB).ProjectUsage)
+	deps := registry.Deps{Blobs: api.Blobs, Auth: api.Auth, DB: api.DB, Log: log, Repositories: adapterRepos, EnableOCIBearer: api.EnableOCIBearer}
 	r.Route("/v2", func(sub chi.Router) {
 		oci.New().Mount(sub, deps)
 	})

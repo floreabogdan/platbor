@@ -9,6 +9,7 @@ import { cx } from '../../lib/cx';
 import { formatDate } from '../../lib/format';
 import type { Repo, RepoFormat } from '../../lib/types';
 import { MembersPanel } from './MembersPanel';
+import { StoragePanel } from './StoragePanel';
 import { RepositoryModal } from './RepositoryModal';
 import { useProjects } from './useProjects';
 import { useRepositories } from './useRepositories';
@@ -112,6 +113,8 @@ export function ProjectPage() {
           </table>
         </Card>
       ) : null}
+
+      <StoragePanel projectKey={key} />
 
       <MembersPanel projectKey={key} />
 
