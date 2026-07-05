@@ -16,8 +16,10 @@ type Querier interface {
 	CountTags(ctx context.Context) (int64, error)
 	CountUsers(ctx context.Context) (int64, error)
 	CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (ApiToken, error)
+	CreateFinding(ctx context.Context, arg CreateFindingParams) error
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
 	CreateRepository(ctx context.Context, arg CreateRepositoryParams) (Repository, error)
+	CreateScan(ctx context.Context, arg CreateScanParams) (Scan, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	CreateWebhook(ctx context.Context, arg CreateWebhookParams) (Webhook, error)
@@ -35,6 +37,9 @@ type Querier interface {
 	DeleteProjectMember(ctx context.Context, arg DeleteProjectMemberParams) (int64, error)
 	DeletePypiFile(ctx context.Context, arg DeletePypiFileParams) (int64, error)
 	DeleteRepository(ctx context.Context, arg DeleteRepositoryParams) (int64, error)
+	// Remove any prior scan of this artifact so a rescan replaces it (findings
+	// cascade). Keeps at most one scan per (repo_id, image, digest).
+	DeleteScansForArtifact(ctx context.Context, arg DeleteScansForArtifactParams) error
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash string) error
 	DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error)
 	DeleteTagsForDigest(ctx context.Context, arg DeleteTagsForDigestParams) error
@@ -48,6 +53,9 @@ type Querier interface {
 	GetGemFile(ctx context.Context, arg GetGemFileParams) (GetGemFileRow, error)
 	GetGenericFile(ctx context.Context, arg GetGenericFileParams) (GenericFile, error)
 	GetGoFile(ctx context.Context, arg GetGoFileParams) (GoFile, error)
+	// The most recent scan of an artifact (there is normally one; ORDER BY guards
+	// against a race leaving two).
+	GetLatestScan(ctx context.Context, arg GetLatestScanParams) (Scan, error)
 	GetManifest(ctx context.Context, arg GetManifestParams) (OciManifest, error)
 	GetMavenFile(ctx context.Context, arg GetMavenFileParams) (MavenFile, error)
 	GetNpmPackage(ctx context.Context, arg GetNpmPackageParams) (NpmPackage, error)
@@ -129,6 +137,9 @@ type Querier interface {
 	// Every Terraform module across all repositories, with version count, total size,
 	// and a proxy flag (always local), for the browser's project-grouped index.
 	ListAllTerraformModules(ctx context.Context) ([]ListAllTerraformModulesRow, error)
+	// The artifacts affected by one vulnerability: the "CVE -> artifacts" query. Joins
+	// through scans to the repository and project for human-readable keys.
+	ListArtifactsByVuln(ctx context.Context, vulnID string) ([]ListArtifactsByVulnRow, error)
 	ListAuditByProject(ctx context.Context, arg ListAuditByProjectParams) ([]AuditLog, error)
 	// Audit entries after the dispatcher's cursor, oldest first, with the project key
 	// for the delivery payload. Keyset on (created_at, id): created_at is RFC3339Nano
@@ -144,6 +155,7 @@ type Querier interface {
 	ListCargoVersionsForCrate(ctx context.Context, arg ListCargoVersionsForCrateParams) ([]ListCargoVersionsForCrateRow, error)
 	// Every version in a repository, grouped by crate and newest first, for pruning.
 	ListCargoVersionsForRetention(ctx context.Context, repositoryID string) ([]ListCargoVersionsForRetentionRow, error)
+	ListFindingsForScan(ctx context.Context, scanID string) ([]ScanFinding, error)
 	ListGemBlobDigests(ctx context.Context) ([]string, error)
 	// Every version of a gem (by name) for the /info/<gem> file, oldest first.
 	ListGemInfoVersions(ctx context.Context, arg ListGemInfoVersionsParams) ([]ListGemInfoVersionsRow, error)
@@ -245,6 +257,10 @@ type Querier interface {
 	ListTerraformVersionsForRetention(ctx context.Context, repositoryID string) ([]ListTerraformVersionsForRetentionRow, error)
 	// Manifests in a repository that no tag points at, for the delete-untagged policy.
 	ListUntaggedManifests(ctx context.Context, repositoryID string) ([]ListUntaggedManifestsRow, error)
+	// One row per distinct vulnerability across all stored scans, with the number of
+	// affected artifacts. severity and summary are properties of the vulnerability so
+	// they are constant within a vuln_id; grouping by them yields one row per vuln.
+	ListVulnerabilities(ctx context.Context) ([]ListVulnerabilitiesRow, error)
 	ListWebhooksByProject(ctx context.Context, projectID string) ([]Webhook, error)
 	ManifestExists(ctx context.Context, arg ManifestExistsParams) (int64, error)
 	// The newest audit entry, to seed the dispatcher cursor on first run.

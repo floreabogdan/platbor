@@ -28,6 +28,7 @@ import (
 	"github.com/platbor/platbor/internal/registry/rubygems"
 	"github.com/platbor/platbor/internal/registry/terraform"
 	"github.com/platbor/platbor/internal/registry/usage"
+	"github.com/platbor/platbor/internal/scan"
 )
 
 // newRouter assembles the top-level request tree. Ordering matters: operational
@@ -88,23 +89,30 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 				log:      log,
 			}.mount)
 			r.Route("/registry", registryHandler{
-				browser:   oci.NewBrowser(api.DB),
-				packages:  npm.NewBrowser(api.DB),
-				nugets:    nuget.NewBrowser(api.DB),
-				generics:  generic.NewBrowser(api.DB),
-				pypis:     pypi.NewBrowser(api.DB),
-				mavens:    maven.NewBrowser(api.DB),
-				gomods:    goproxy.NewBrowser(api.DB),
-				crates:    cargo.NewBrowser(api.DB),
-				gems:      rubygems.NewBrowser(api.DB),
-				modules:   terraform.NewBrowser(api.DB),
-				manager:   oci.NewManager(api.DB),
-				collector: newCollector(api.DB, api.Blobs),
-				retention: newRetention(api.DB),
-				repos:     repository.NewService(api.DB),
-				blobs:     api.Blobs,
-				projects:  api.Projects,
-				log:       log,
+				browser:     oci.NewBrowser(api.DB),
+				packages:    npm.NewBrowser(api.DB),
+				nugets:      nuget.NewBrowser(api.DB),
+				generics:    generic.NewBrowser(api.DB),
+				pypis:       pypi.NewBrowser(api.DB),
+				mavens:      maven.NewBrowser(api.DB),
+				gomods:      goproxy.NewBrowser(api.DB),
+				crates:      cargo.NewBrowser(api.DB),
+				gems:        rubygems.NewBrowser(api.DB),
+				modules:     terraform.NewBrowser(api.DB),
+				manager:     oci.NewManager(api.DB),
+				collector:   newCollector(api.DB, api.Blobs),
+				retention:   newRetention(api.DB),
+				repos:       repository.NewService(api.DB),
+				blobs:       api.Blobs,
+				scanner:     scan.NewScanner(api.OSVEndpoint),
+				scans:       scan.NewService(api.DB),
+				scanEnabled: api.ScanEnabled,
+				projects:    api.Projects,
+				log:         log,
+			}.mount)
+			r.Route("/vulnerabilities", vulnerabilitiesHandler{
+				scans: scan.NewService(api.DB),
+				log:   log,
 			}.mount)
 			r.Route("/dashboard", dashboardHandler{
 				projects: api.Projects,

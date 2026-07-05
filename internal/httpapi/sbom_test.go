@@ -6,7 +6,7 @@ func TestParseCycloneDX(t *testing.T) {
 	data := []byte(`{
 		"bomFormat":"CycloneDX","specVersion":"1.5",
 		"components":[
-			{"type":"library","name":"left-pad","version":"1.3.0","licenses":[{"license":{"id":"WTFPL"}}]},
+			{"type":"library","name":"left-pad","version":"1.3.0","purl":"pkg:npm/left-pad@1.3.0","licenses":[{"license":{"id":"WTFPL"}}]},
 			{"type":"library","name":"react","version":"18.2.0","licenses":[{"license":{"name":"MIT License"}}]},
 			{"type":"application","name":"react","version":"18.2.0"}
 		]}`)
@@ -24,6 +24,9 @@ func TestParseCycloneDX(t *testing.T) {
 	if got.Components[0].Name != "left-pad" || got.Components[0].License != "WTFPL" {
 		t.Errorf("first component = %+v", got.Components[0])
 	}
+	if got.Components[0].PURL != "pkg:npm/left-pad@1.3.0" {
+		t.Errorf("purl = %q, want pkg:npm/left-pad@1.3.0", got.Components[0].PURL)
+	}
 	if got.Components[1].Name != "react" || got.Components[1].License != "MIT License" {
 		t.Errorf("second component = %+v", got.Components[1])
 	}
@@ -33,7 +36,7 @@ func TestParseSPDX(t *testing.T) {
 	data := []byte(`{
 		"spdxVersion":"SPDX-2.3","name":"image",
 		"packages":[
-			{"name":"openssl","versionInfo":"3.0.2","licenseConcluded":"Apache-2.0"},
+			{"name":"openssl","versionInfo":"3.0.2","licenseConcluded":"Apache-2.0","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:generic/openssl@3.0.2"}]},
 			{"name":"zlib","versionInfo":"1.2.11","licenseConcluded":"NOASSERTION","licenseDeclared":"Zlib"}
 		]}`)
 	got, err := parseSBOM(data)
@@ -50,6 +53,9 @@ func TestParseSPDX(t *testing.T) {
 	}
 	if byName["openssl"].License != "Apache-2.0" || byName["zlib"].License != "Zlib" {
 		t.Errorf("licenses = %+v", byName)
+	}
+	if byName["openssl"].PURL != "pkg:generic/openssl@3.0.2" {
+		t.Errorf("openssl purl = %q", byName["openssl"].PURL)
 	}
 }
 

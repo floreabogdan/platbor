@@ -33,6 +33,8 @@ type Config struct {
 	Blob BlobConfig `yaml:"blob"`
 	// Maintenance configures optional scheduled background jobs.
 	Maintenance MaintenanceConfig `yaml:"maintenance"`
+	// Scan configures vulnerability scanning.
+	Scan ScanConfig `yaml:"scan"`
 	// Auth configures identity and sessions.
 	Auth AuthConfig `yaml:"auth"`
 	// Log configures structured logging.
@@ -94,6 +96,18 @@ type MaintenanceConfig struct {
 	RetentionInterval time.Duration `yaml:"retentionInterval"`
 }
 
+// ScanConfig configures vulnerability scanning. Scanning is SBOM-driven and
+// contacts the OSV database (https://osv.dev) only when a scan is triggered, so
+// it adds no required external service — the single-binary promise holds. It is
+// on by default; disable it for an instance that must make no outbound calls.
+type ScanConfig struct {
+	// Enabled turns the scan endpoints on (default true). When false, triggering a
+	// scan returns 503; previously stored results remain readable.
+	Enabled bool `yaml:"enabled"`
+	// OSVEndpoint overrides the OSV API base URL (default https://api.osv.dev).
+	OSVEndpoint string `yaml:"osvEndpoint"`
+}
+
 // AuthConfig configures the identity layer.
 type AuthConfig struct {
 	// AdminUsername is the instance admin created on first run (empty → "admin").
@@ -131,6 +145,10 @@ func Default() Config {
 		},
 		Blob: BlobConfig{
 			Driver: "fs",
+		},
+		Scan: ScanConfig{
+			Enabled:     true,
+			OSVEndpoint: "https://api.osv.dev",
 		},
 		Auth: AuthConfig{
 			AdminUsername: "admin",
@@ -241,6 +259,16 @@ func applyEnv(cfg *Config) error {
 			return fmt.Errorf("parsing %sRETENTION_INTERVAL %q: %w", envPrefix, v, err)
 		}
 		cfg.Maintenance.RetentionInterval = d
+	}
+	if v, ok := lookup("SCAN_ENABLED"); ok {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("parsing %sSCAN_ENABLED %q: %w", envPrefix, v, err)
+		}
+		cfg.Scan.Enabled = b
+	}
+	if v, ok := lookup("SCAN_OSV_ENDPOINT"); ok {
+		cfg.Scan.OSVEndpoint = v
 	}
 	if v, ok := lookup("ADMIN_USERNAME"); ok {
 		cfg.Auth.AdminUsername = v

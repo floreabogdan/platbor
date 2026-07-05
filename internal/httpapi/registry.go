@@ -22,6 +22,7 @@ import (
 	"github.com/platbor/platbor/internal/registry/pypi"
 	"github.com/platbor/platbor/internal/registry/rubygems"
 	"github.com/platbor/platbor/internal/registry/terraform"
+	"github.com/platbor/platbor/internal/scan"
 )
 
 // gcGracePeriod spares blobs written within this window of a sweep: they may be
@@ -48,7 +49,13 @@ type registryHandler struct {
 	repos     *repository.Service
 	projects  *project.Service
 	blobs     blob.Store
-	log       *slog.Logger
+	scanner   *scan.Scanner
+	scans     *scan.Service
+	// scanEnabled gates the vulnerability-scan endpoints; when off, scanning is
+	// disabled instance-wide (the OSV lookup is the only network call scanning
+	// makes, so operators offline by policy can turn it off).
+	scanEnabled bool
+	log         *slog.Logger
 }
 
 func (h registryHandler) mount(r chi.Router) {
@@ -75,6 +82,8 @@ func (h registryHandler) mount(r chi.Router) {
 		r.Delete("/manifests", h.deleteManifest) // ?repo=<repo>&image=<image>&reference=<tag|digest>
 		r.Get("/referrers", h.listReferrers)     // ?repo=<repo>&image=<image>&subject=<digest>
 		r.Get("/sbom", h.getSBOM)                // ?repo=<repo>&image=<image>&digest=<sbom-referrer-digest>
+		r.Get("/scan", h.getScan)                // ?repo=<repo>&image=<image>&digest=<manifest-digest>
+		r.Post("/scan", h.runScan)               // ?repo=<repo>&image=<image>&digest=<manifest-digest>
 		r.Get("/package", h.getPackage)          // ?repo=<repo>&name=<pkg> (npm detail)
 		r.Get("/nuget-package", h.getNuget)      // ?repo=<repo>&id=<id> (NuGet detail)
 		r.Get("/pypi-package", h.getPypi)        // ?repo=<repo>&name=<pkg> (PyPI detail)

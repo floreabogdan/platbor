@@ -9,6 +9,7 @@ import { BucketPage } from '../features/projects/BucketPage';
 import { ProfilePage } from '../features/profile/ProfilePage';
 import { RegistryPage } from '../features/registry/RegistryPage';
 import { RepositoryPage } from '../features/registry/RepositoryPage';
+import { VulnerabilitiesPage } from '../features/registry/VulnerabilitiesPage';
 import { PackagePage } from '../features/registry/PackagePage';
 import { NugetPage } from '../features/registry/NugetPage';
 import { PypiPage } from '../features/registry/PypiPage';
@@ -66,6 +67,7 @@ function Gate() {
         <Route path="registry/:project/-gem-/*" element={<RubyGemPage />} />
         <Route path="registry/:project/-tf-/*" element={<TerraformPage />} />
         <Route path="registry/:project/*" element={<RepositoryPage />} />
+        <Route path="vulnerabilities" element={<VulnerabilitiesPage />} />
         <Route
           path="catalog"
           element={<PlaceholderPage title="Catalog" subtitle="Components, owners, and dependencies land in Phase 3." />}

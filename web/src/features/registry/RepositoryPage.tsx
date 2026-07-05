@@ -1,12 +1,24 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Breadcrumb, Card, CopyButton, EmptyState, PageHeader } from '../../components/ui';
 import { LayersIcon, RegistryIcon, TrashIcon } from '../../components/icons';
-import { api } from '../../lib/api';
+import { ApiError, api } from '../../lib/api';
 import { cx } from '../../lib/cx';
 import { formatBytes, formatDate, shortDigest } from '../../lib/format';
-import type { IndexEntry, Layer, ManifestDetail, ManifestKind, Referrer, SbomResponse, TagSummary } from '../../lib/types';
+import type {
+  IndexEntry,
+  Layer,
+  ManifestDetail,
+  ManifestKind,
+  Referrer,
+  SbomResponse,
+  ScanFinding,
+  ScanResult,
+  TagSummary,
+} from '../../lib/types';
+import { SEVERITY_ORDER } from './severity';
+import { SeverityBadge, SeverityCount } from './SeverityBadge';
 import { DeleteDialog, type DeleteTarget } from './DeleteDialog';
 import { splitRepoAndRest } from './packageRoute';
 import { useManifest, useReferrers, useRepoTags } from './useRegistry';
@@ -275,7 +287,194 @@ function ManifestPanel({
       {referrers.length > 0 ? (
         <ReferrersSection referrers={referrers} project={project} repo={repo} image={image} />
       ) : null}
+
+      <ScanPanel project={project} repo={repo} image={image} digest={manifest.digest} />
     </Card>
+  );
+}
+
+// ScanPanel shows the artifact's stored vulnerability scan and lets the user run
+// (or re-run) one. Scanning matches the image's SBOM component inventory against
+// the OSV database — an image with no SBOM referrer cannot be scanned.
+function ScanPanel({
+  project,
+  repo,
+  image,
+  digest,
+}: {
+  project: string;
+  repo: string;
+  image: string;
+  digest: string;
+}) {
+  const [scan, setScan] = useState<ScanResult>();
+  const [state, setState] = useState<'idle' | 'loading' | 'scanning' | 'error'>('loading');
+  const [message, setMessage] = useState<string>();
+
+  // Load any previously stored scan for this manifest.
+  useEffect(() => {
+    let live = true;
+    setScan(undefined);
+    setMessage(undefined);
+    setState('loading');
+    api
+      .getScan(project, repo, image, digest)
+      .then((res) => {
+        if (live) {
+          setScan(res);
+          setState('idle');
+        }
+      })
+      .catch((err: unknown) => {
+        if (!live) {
+          return;
+        }
+        // 404 simply means not scanned yet — a normal starting state.
+        if (err instanceof ApiError && err.status === 404) {
+          setState('idle');
+          return;
+        }
+        setMessage(err instanceof Error ? err.message : 'Failed to load scan');
+        setState('error');
+      });
+    return () => {
+      live = false;
+    };
+  }, [project, repo, image, digest]);
+
+  async function runScan() {
+    setState('scanning');
+    setMessage(undefined);
+    try {
+      const res = await api.runScan(project, repo, image, digest);
+      setScan(res);
+      setState('idle');
+    } catch (err) {
+      // A missing SBOM (422) is expected guidance, not a hard error.
+      if (err instanceof ApiError && err.status === 422) {
+        setMessage('This image has no SBOM to scan. Attach one (e.g. `cosign attach sbom`) first.');
+      } else if (err instanceof ApiError && err.status === 503) {
+        setMessage('Vulnerability scanning is disabled on this instance.');
+      } else {
+        setMessage(err instanceof Error ? err.message : 'Scan failed');
+      }
+      setState('error');
+    }
+  }
+
+  const busy = state === 'scanning';
+  const total = scan?.findings.length ?? 0;
+
+  return (
+    <div className="mt-6 border-t border-slate-200/70 pt-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h3 className="text-xs font-medium uppercase tracking-wide text-slate-400">Vulnerabilities</h3>
+          {scan ? <ScanSummary scan={scan} /> : null}
+        </div>
+        <button
+          type="button"
+          onClick={() => void runScan()}
+          disabled={busy}
+          className={cx(
+            'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ring-1 ring-inset transition-colors',
+            busy
+              ? 'cursor-wait text-slate-400 ring-slate-200'
+              : 'text-teal-700 ring-teal-200 hover:bg-teal-50',
+          )}
+        >
+          {busy ? 'Scanning…' : scan ? 'Rescan' : 'Scan for vulnerabilities'}
+        </button>
+      </div>
+
+      {state === 'loading' ? <p className="mt-3 text-xs text-slate-400">Loading scan…</p> : null}
+      {message ? <p className="mt-3 text-xs text-slate-500">{message}</p> : null}
+
+      {scan ? (
+        <div className="mt-3">
+          <p className="mb-2 text-xs text-slate-400">
+            {scan.componentCount} components scanned · {formatDate(scan.scannedAt)}
+          </p>
+          {total === 0 ? (
+            <p className="text-sm text-emerald-700">No known vulnerabilities.</p>
+          ) : (
+            <FindingsTable findings={scan.findings} />
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ScanSummary renders the severity breakdown chips (only non-zero buckets).
+function ScanSummary({ scan }: { scan: ScanResult }) {
+  const chips = SEVERITY_ORDER.filter((s) => (scan.counts[s] ?? 0) > 0);
+  if (chips.length === 0) {
+    return (
+      <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+        Clean
+      </span>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {chips.map((s) => (
+        <SeverityCount key={s} severity={s} count={scan.counts[s] ?? 0} />
+      ))}
+    </div>
+  );
+}
+
+function FindingsTable({ findings }: { findings: ScanFinding[] }) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-slate-200/80">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-slate-200/80 text-left text-xs uppercase tracking-wide text-slate-400">
+            <Th>Severity</Th>
+            <Th>Vulnerability</Th>
+            <Th>Package</Th>
+            <Th>Version</Th>
+            <Th>Fixed in</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {findings.map((f, i) => (
+            <tr key={`${f.vulnId}-${f.package}-${String(i)}`} className="border-b border-slate-100 last:border-0">
+              <Td>
+                <SeverityBadge severity={f.severity} />
+              </Td>
+              <Td>
+                {f.referenceUrl ? (
+                  <a
+                    href={f.referenceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono text-xs text-teal-700 hover:text-teal-900"
+                    title={f.summary}
+                  >
+                    {f.vulnId}
+                  </a>
+                ) : (
+                  <span className="font-mono text-xs text-slate-700" title={f.summary}>
+                    {f.vulnId}
+                  </span>
+                )}
+              </Td>
+              <Td>
+                <span className="font-mono text-xs text-slate-700">{f.package}</span>
+              </Td>
+              <Td>
+                <span className="font-mono text-xs text-slate-500">{f.version || '—'}</span>
+              </Td>
+              <Td>
+                <span className="font-mono text-xs text-emerald-700">{f.fixedVersion || '—'}</span>
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

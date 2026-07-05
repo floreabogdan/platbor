@@ -21,6 +21,9 @@ type sbomComponent struct {
 	Version string `json:"version,omitempty"`
 	License string `json:"license,omitempty"`
 	Type    string `json:"type,omitempty"`
+	// PURL is the package URL (pkg:npm/left-pad@1.0.0). It identifies the package
+	// to a vulnerability database; components without one cannot be scanned.
+	PURL string `json:"purl,omitempty"`
 }
 
 type sbomResponse struct {
@@ -137,6 +140,7 @@ func parseCycloneDX(data []byte) (sbomResponse, error) {
 			Name     string `json:"name"`
 			Version  string `json:"version"`
 			Type     string `json:"type"`
+			PURL     string `json:"purl"`
 			Licenses []struct {
 				License struct {
 					ID   string `json:"id"`
@@ -166,7 +170,7 @@ func parseCycloneDX(data []byte) (sbomResponse, error) {
 				lic = l.Expression
 			}
 		}
-		comps = append(comps, sbomComponent{Name: c.Name, Version: c.Version, License: lic, Type: c.Type})
+		comps = append(comps, sbomComponent{Name: c.Name, Version: c.Version, License: lic, Type: c.Type, PURL: c.PURL})
 	}
 	return sbomResponse{Format: "cyclonedx", Components: dedupeSort(comps)}, nil
 }
@@ -178,6 +182,11 @@ func parseSPDX(data []byte) (sbomResponse, error) {
 			VersionInfo      string `json:"versionInfo"`
 			LicenseConcluded string `json:"licenseConcluded"`
 			LicenseDeclared  string `json:"licenseDeclared"`
+			ExternalRefs     []struct {
+				ReferenceType     string `json:"referenceType"`
+				ReferenceCategory string `json:"referenceCategory"`
+				ReferenceLocator  string `json:"referenceLocator"`
+			} `json:"externalRefs"`
 		} `json:"packages"`
 	}
 	if err := json.Unmarshal(data, &doc); err != nil {
@@ -195,7 +204,14 @@ func parseSPDX(data []byte) (sbomResponse, error) {
 		if lic == "NOASSERTION" {
 			lic = ""
 		}
-		comps = append(comps, sbomComponent{Name: p.Name, Version: p.VersionInfo, License: lic, Type: "library"})
+		purl := ""
+		for _, ref := range p.ExternalRefs {
+			if strings.EqualFold(ref.ReferenceType, "purl") {
+				purl = ref.ReferenceLocator
+				break
+			}
+		}
+		comps = append(comps, sbomComponent{Name: p.Name, Version: p.VersionInfo, License: lic, Type: "library", PURL: purl})
 	}
 	return sbomResponse{Format: "spdx", Components: dedupeSort(comps)}, nil
 }

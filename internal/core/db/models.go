@@ -246,6 +246,37 @@ type Repository struct {
 	UpdatedAt        string `json:"updated_at"`
 }
 
+type Scan struct {
+	ID             string `json:"id"`
+	ProjectID      string `json:"project_id"`
+	RepoID         string `json:"repo_id"`
+	Image          string `json:"image"`
+	Digest         string `json:"digest"`
+	SourceDigest   string `json:"source_digest"`
+	ComponentCount int64  `json:"component_count"`
+	Critical       int64  `json:"critical"`
+	High           int64  `json:"high"`
+	Medium         int64  `json:"medium"`
+	Low            int64  `json:"low"`
+	Unknown        int64  `json:"unknown"`
+	CreatedAt      string `json:"created_at"`
+}
+
+type ScanFinding struct {
+	ID           string `json:"id"`
+	ScanID       string `json:"scan_id"`
+	ProjectID    string `json:"project_id"`
+	VulnID       string `json:"vuln_id"`
+	Package      string `json:"package"`
+	Version      string `json:"version"`
+	Ecosystem    string `json:"ecosystem"`
+	Severity     string `json:"severity"`
+	SeverityRank int64  `json:"severity_rank"`
+	Summary      string `json:"summary"`
+	FixedVersion string `json:"fixed_version"`
+	ReferenceUrl string `json:"reference_url"`
+}
+
 type Session struct {
 	ID        string `json:"id"`
 	TokenHash string `json:"token_hash"`

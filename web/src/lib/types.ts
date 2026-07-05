@@ -542,6 +542,64 @@ export interface SbomResponse {
   components: SbomComponent[];
 }
 
+// --- Vulnerability scanning ---
+
+/** Severity buckets, worst to best. */
+export type Severity = 'critical' | 'high' | 'medium' | 'low' | 'unknown';
+
+/** ScanFinding — one vulnerability affecting one component. */
+export interface ScanFinding {
+  vulnId: string;
+  package: string;
+  version: string;
+  ecosystem?: string;
+  severity: Severity;
+  summary?: string;
+  fixedVersion?: string;
+  referenceUrl?: string;
+}
+
+/** ScanResult — a stored scan of an image manifest's SBOM. */
+export interface ScanResult {
+  digest: string;
+  sourceDigest: string;
+  componentCount: number;
+  counts: Partial<Record<Severity, number>>;
+  scannedAt: string;
+  findings: ScanFinding[];
+}
+
+/** VulnerabilitySummary — one row of the instance-wide vulnerability index. */
+export interface VulnerabilitySummary {
+  vulnId: string;
+  severity: Severity;
+  summary?: string;
+  artifactCount: number;
+}
+
+export interface ListVulnerabilitiesResponse {
+  vulnerabilities: VulnerabilitySummary[];
+}
+
+/** AffectedArtifact — one artifact affected by a vulnerability (the reverse query). */
+export interface AffectedArtifact {
+  projectKey: string;
+  projectName: string;
+  repoKey: string;
+  image: string;
+  digest: string;
+  package: string;
+  version: string;
+  severity: Severity;
+  fixedVersion?: string;
+  scannedAt: string;
+}
+
+export interface AffectedResponse {
+  vulnId: string;
+  affected: AffectedArtifact[];
+}
+
 // --- Dashboard ---
 
 /** DashboardSummary — coarse instance counts. */

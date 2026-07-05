@@ -1,4 +1,5 @@
 import type {
+  AffectedResponse,
   CreateProjectRequest,
   CreateWebhookRequest,
   CreateRepoRequest,
@@ -21,6 +22,7 @@ import type {
   ListReposResponse,
   ListRepositoriesResponse,
   ListTagsResponse,
+  ListVulnerabilitiesResponse,
   ListPypisResponse,
   ManifestDetail,
   Member,
@@ -37,6 +39,7 @@ import type {
   ProjectUsage,
   PyPIPackageDetail,
   Repo,
+  ScanResult,
   Token,
   SbomResponse,
   UpdateRepoRequest,
@@ -210,6 +213,21 @@ export const api = {
 
   getSBOM: (project: string, repo: string, image: string, digest: string): Promise<SbomResponse> =>
     request<SbomResponse>(`/registry/${encodeURIComponent(project)}/sbom${query({ repo, image, digest })}`),
+
+  // Vulnerability scanning (SBOM-driven, matched against OSV)
+  getScan: (project: string, repo: string, image: string, digest: string): Promise<ScanResult> =>
+    request<ScanResult>(`/registry/${encodeURIComponent(project)}/scan${query({ repo, image, digest })}`),
+
+  runScan: (project: string, repo: string, image: string, digest: string): Promise<ScanResult> =>
+    request<ScanResult>(`/registry/${encodeURIComponent(project)}/scan${query({ repo, image, digest })}`, {
+      method: 'POST',
+    }),
+
+  listVulnerabilities: (): Promise<ListVulnerabilitiesResponse> =>
+    request<ListVulnerabilitiesResponse>(`/vulnerabilities`),
+
+  getVulnerability: (id: string): Promise<AffectedResponse> =>
+    request<AffectedResponse>(`/vulnerabilities/${encodeURIComponent(id)}`),
 
   // npm package browser
   listPackages: (): Promise<ListPackagesResponse> =>

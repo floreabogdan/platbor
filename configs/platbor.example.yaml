@@ -39,6 +39,14 @@ maintenance:
   gcInterval: "0"         # e.g. "24h" to sweep unreferenced blobs daily
   retentionInterval: "0"  # e.g. "24h" to prune keep-last-N daily
 
+scan:
+  # Vulnerability scanning is SBOM-driven and matches components against OSV
+  # (https://osv.dev) over HTTPS, only when a scan is triggered -- it adds no
+  # required service. Set enabled: false for an instance that must make no
+  # outbound calls (stored results stay readable).
+  enabled: true
+  osvEndpoint: "https://api.osv.dev"
+
 auth:
   adminUsername: "admin"
   # First-run admin password. Empty => a random one is generated and logged once.

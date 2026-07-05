@@ -81,6 +81,8 @@ func run() error {
 		DB:              sqlDB,
 		CookieSecure:    cfg.Auth.CookieSecure,
 		EnableOCIBearer: cfg.Auth.OCIBearer,
+		ScanEnabled:     cfg.Scan.Enabled,
+		OSVEndpoint:     cfg.Scan.OSVEndpoint,
 	}
 
 	log.Info("starting platbor", slog.String("addr", cfg.Addr), slog.String("dataDir", cfg.DataDir))

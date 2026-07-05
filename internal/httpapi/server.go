@@ -35,6 +35,10 @@ type API struct {
 	CookieSecure bool
 	// EnableOCIBearer turns on the OCI bearer-token auth flow (see config.OCIBearer).
 	EnableOCIBearer bool
+	// ScanEnabled gates the vulnerability-scan trigger endpoints.
+	ScanEnabled bool
+	// OSVEndpoint is the OSV API base URL used for scanning.
+	OSVEndpoint string
 }
 
 // uploadSweep bounds how often stale upload sessions are reclaimed and how long

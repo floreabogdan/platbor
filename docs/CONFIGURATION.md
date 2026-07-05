@@ -71,6 +71,20 @@ redundant concurrent runs.
 | `maintenance.gcInterval` | `PLATBOR_GC_INTERVAL` | `0` (disabled) | Interval for automatic garbage collection (unreferenced-blob sweep). Must be ≥ `1m` when set. |
 | `maintenance.retentionInterval` | `PLATBOR_RETENTION_INTERVAL` | `0` (disabled) | Interval for automatic retention (keep-last-N pruning). Must be ≥ `1m` when set. |
 
+### Vulnerability scanning
+
+Scanning is **SBOM-driven**: a scan reads an image's SBOM referrer, extracts each
+component's package URL, and matches it against the [OSV](https://osv.dev)
+database over HTTPS. OSV is contacted **only when a scan is triggered** — it is a
+lookup, not a required service, so the instance boots and serves fully without it.
+Disable it entirely (`scan.enabled: false`) for an instance that must make no
+outbound calls; previously stored results stay readable either way.
+
+| YAML | Env | Default | Notes |
+|------|-----|---------|-------|
+| `scan.enabled` | `PLATBOR_SCAN_ENABLED` | `true` | When `false`, triggering a scan returns 503; stored results remain readable. |
+| `scan.osvEndpoint` | `PLATBOR_SCAN_OSV_ENDPOINT` | `https://api.osv.dev` | OSV API base URL. Point at a mirror or an internal proxy if required. |
+
 ### Auth
 
 | YAML | Env | Default | Notes |

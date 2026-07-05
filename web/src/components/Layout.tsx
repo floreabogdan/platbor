@@ -3,7 +3,15 @@ import { NavLink, Outlet } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { cx } from '../lib/cx';
 import { useAuth } from '../lib/auth';
-import { CatalogIcon, DashboardIcon, LogoutIcon, ProjectsIcon, RegistryIcon, SettingsIcon } from './icons';
+import {
+  CatalogIcon,
+  DashboardIcon,
+  LogoutIcon,
+  ProjectsIcon,
+  RegistryIcon,
+  SettingsIcon,
+  ShieldIcon,
+} from './icons';
 
 interface NavItem {
   to: string;
@@ -29,6 +37,7 @@ const NAV: NavGroup[] = [
     label: 'Browse',
     items: [
       { to: '/registry', label: 'Registry', icon: <RegistryIcon /> },
+      { to: '/vulnerabilities', label: 'Vulnerabilities', icon: <ShieldIcon /> },
       { to: '/catalog', label: 'Catalog', icon: <CatalogIcon /> },
     ],
   },

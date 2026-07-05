@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS scan_findings;
+DROP TABLE IF EXISTS scans;

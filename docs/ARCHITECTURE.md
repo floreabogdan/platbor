@@ -22,8 +22,8 @@
  browser ───────▶│ /api/v1/* ─┐           ▼         └──────────────┘   │
                  │ /  (SPA)   ├──▶ ┌──────────┐   ┌──────────────┐    │
                  │            │    │ catalog   │◀──│ sync workers │◀──── GitHub /
-                 │            │    │ graph     │   │ scan (Trivy) │      Gitea /
-                 │            │    └──────────┘   └──────────────┘      GitLab APIs
+                 │            │    │ graph     │   │ scan (OSV)   │──────▶ osv.dev
+                 │            │    └──────────┘   └──────────────┘      Gitea/GitLab
                  └────────────────────────────────────────────────────┘
 ```
 
@@ -56,7 +56,7 @@ platbor/
 │   │   ├── model/          # entities + edges (the graph)
 │   │   ├── gitprovider/    # github/, gitea/, gitlab/ metadata sync
 │   │   └── linker/         # matches artifacts ↔ components (labels, provenance)
-│   ├── scan/               # Trivy integration, scan queue, policy gates
+│   ├── scan/               # SBOM-driven vulnerability scanning (OSV), scan store
 │   ├── jobs/               # in-process job runner (GC, sync, scan) — no Redis
 │   └── httpapi/            # /api/v1 REST for the UI, middleware, SPA serving
 ├── web/                    # React app (see DESIGN-SYSTEM.md); dist embedded
@@ -81,6 +81,8 @@ All binary content — image layers, package tarballs, chart archives — lives 
 **Webhooks.** A project can subscribe HTTP endpoints to its mutation events. Events are not emitted by each adapter — every mutation already writes an audit entry transactionally, so the **audit log is the event stream**, and webhooks need zero changes to any format adapter. A background dispatcher tails the audit log from a persisted cursor (seeded to the newest entry at first boot so history is not replayed), matches each entry against active webhooks (by action prefix), and POSTs a JSON payload signed with the webhook's secret (`X-Platbor-Signature: sha256=<hmac>`). Delivery is best-effort and at-most-once: a failing endpoint is logged and the cursor still advances, so one bad subscriber never stalls the stream.
 
 **Per-project quotas.** `quota_bytes` caps a project's logical storage (0 = unlimited). Enforcement lives at the one write chokepoint every adapter shares — `repository.ResolveOrCreate` — surfaced as the validation error adapters already map to a 4xx, so no adapter changed. Usage is one UNION query over the flat-sized formats plus OCI's manifest-payload size, injected into the repository service so core need not know each format.
+
+**Vulnerability scanning (`internal/scan`).** Scanning is *SBOM-driven*, which is what lets it stay inside the single-binary promise: instead of bundling a scanner binary and a multi-gigabyte vulnerability database, a scan reads an artifact's existing SBOM referrer, extracts each component's package URL (purl), and matches those against the **OSV** database (https://osv.dev) over HTTPS. OSV is contacted only when a scan is triggered, so it is a lookup and never a required service — the instance boots and serves fully offline, and `scan.enabled: false` turns even the lookup off. The package sits beside `registry` in the dependency graph (`httpapi → {registry, catalog, scan} → core`): it depends only on core and never imports a format adapter — the caller (httpapi) fetches the SBOM components (reusing the referrers/SBOM path) and hands them in as plain structs. Severity is the CVSS v3 base score computed in-process (bucketed critical/high/medium/low), with a named-severity fallback for advisories that ship no vector. Findings are stored per artifact keyed by `(repo, image, digest)` — a rescan replaces the prior result — so the data reads both ways: an artifact's vulnerabilities (the manifest page) and a vulnerability's affected artifacts (the instance-wide Vulnerabilities page, the "CVE → artifacts" query). The reverse query is the first half of the headline "CVE → artifacts → components → teams"; the remaining hops join through the Phase 3 catalog. This is deliberately *not* container-OS package scanning (that needs image-filesystem inspection); it scans what the SBOM declares.
 
 ### Database: SQLite first, Postgres for scale
 
