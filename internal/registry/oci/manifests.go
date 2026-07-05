@@ -137,15 +137,21 @@ func (h *handler) serveManifest(w http.ResponseWriter, r *http.Request, p parsed
 	}
 }
 
-// denyProxyWrite rejects a mutation targeting a pull-through proxy repository: a
-// proxy is a read-only mirror, so pushes and deletes are denied. It returns true
-// when it has written the rejection (the caller must stop).
+// denyProxyWrite rejects a mutation targeting a read-only repository: a
+// pull-through proxy (a mirror) or a virtual repository (a view over members).
+// Pushes and deletes to either are denied. It returns true when it has written
+// the rejection (the caller must stop).
 func (h *handler) denyProxyWrite(w http.ResponseWriter, repo repository.Repository) bool {
-	if repo.Mode == repository.ModeProxy {
+	switch repo.Mode {
+	case repository.ModeProxy:
 		writeError(w, h.log, http.StatusMethodNotAllowed, codeDenied, "this repository is a pull-through proxy and is read-only")
 		return true
+	case repository.ModeVirtual:
+		writeError(w, h.log, http.StatusMethodNotAllowed, codeDenied, "this is a virtual repository and is read-only; push to a member repository")
+		return true
+	default:
+		return false
 	}
-	return false
 }
 
 // putManifest stores an uploaded manifest, verifying its digest and that every
@@ -247,7 +253,15 @@ func (h *handler) getManifest(w http.ResponseWriter, r *http.Request, repo repos
 		}
 	}
 
-	m, err := h.loadManifest(r.Context(), repo, image, p.ref)
+	var (
+		m   storedManifest
+		err error
+	)
+	if repo.Mode == repository.ModeVirtual {
+		m, err = h.loadManifestVirtual(r.Context(), repo, image, p.ref)
+	} else {
+		m, err = h.loadManifest(r.Context(), repo, image, p.ref)
+	}
 	if err != nil {
 		if errors.Is(err, ErrManifestNotFound) {
 			writeError(w, h.log, http.StatusNotFound, codeManifestUnknown, "manifest unknown")

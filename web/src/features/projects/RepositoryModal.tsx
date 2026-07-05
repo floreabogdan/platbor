@@ -30,11 +30,13 @@ function slugify(name: string): string {
 export function RepositoryModal({
   projectKey,
   repo,
+  repos = [],
   onClose,
   onSaved,
 }: {
   projectKey: string;
   repo?: Repo; // present in edit mode
+  repos?: Repo[]; // sibling repos, for virtual-repository member selection
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -50,18 +52,39 @@ export function RepositoryModal({
   const [password, setPassword] = useState('');
   const [keepLast, setKeepLast] = useState<number>(repo?.retention.keepLast ?? 0);
   const [deleteUntagged, setDeleteUntagged] = useState<boolean>(repo?.retention.deleteUntagged ?? false);
+  const [members, setMembers] = useState<string[]>(repo?.members ?? []);
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
 
   const effectiveKey = editing ? key : keyEdited ? key : slugify(name);
   const isProxy = mode === 'proxy';
+  const isVirtual = mode === 'virtual';
   const isOci = format === 'oci';
+
+  // Candidate members: OCI local/proxy siblings (a virtual repo cannot nest or
+  // contain itself). Selection order is the resolution order.
+  const candidates = repos.filter(
+    (rp) => rp.format === 'oci' && rp.mode !== 'virtual' && rp.key !== effectiveKey,
+  );
+
+  function toggleMember(memberKey: string) {
+    setMembers((cur) => (cur.includes(memberKey) ? cur.filter((k) => k !== memberKey) : [...cur, memberKey]));
+  }
+
+  // Virtual repositories are OCI-only; changing the format away from OCI drops
+  // that mode.
+  function changeFormat(next: RepoFormat) {
+    setFormat(next);
+    if (next !== 'oci' && mode === 'virtual') {
+      setMode('local');
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setError(undefined);
-    const retention = { keepLast: keepLast || 0, deleteUntagged: isOci ? deleteUntagged : false };
+    const retention = { keepLast: keepLast || 0, deleteUntagged: isOci && !isVirtual ? deleteUntagged : false };
     const upstream = isProxy
       ? { url: upstreamUrl.trim(), username: username || undefined, password: password || undefined }
       : undefined;
@@ -70,7 +93,15 @@ export function RepositoryModal({
         const body: UpdateRepoRequest = { name, upstream, retention };
         await api.updateRepo(projectKey, repo.key, body);
       } else {
-        const body: CreateRepoRequest = { key: effectiveKey, name, format, mode, upstream, retention };
+        const body: CreateRepoRequest = {
+          key: effectiveKey,
+          name,
+          format,
+          mode,
+          upstream,
+          retention,
+          members: isVirtual ? members : undefined,
+        };
         await api.createRepo(projectKey, body);
       }
       onSaved();
@@ -127,7 +158,7 @@ export function RepositoryModal({
               <select
                 id="repo-format"
                 value={format}
-                onChange={(e) => setFormat(e.target.value as RepoFormat)}
+                onChange={(e) => changeFormat(e.target.value as RepoFormat)}
                 className={inputClass}
               >
                 {FORMATS.map((f) => (
@@ -140,7 +171,7 @@ export function RepositoryModal({
 
             <fieldset>
               <legend className="mb-1.5 block text-sm font-medium text-slate-700">Mode</legend>
-              <div className="grid grid-cols-2 gap-2">
+              <div className={`grid gap-2 ${isOci ? 'grid-cols-3' : 'grid-cols-2'}`}>
                 <ModeOption
                   active={mode === 'local'}
                   onClick={() => setMode('local')}
@@ -153,8 +184,53 @@ export function RepositoryModal({
                   title="Pull-through proxy"
                   subtitle="Mirror & cache an upstream registry."
                 />
+                {isOci ? (
+                  <ModeOption
+                    active={mode === 'virtual'}
+                    onClick={() => setMode('virtual')}
+                    title="Virtual (group)"
+                    subtitle="One URL over several member repos."
+                  />
+                ) : null}
               </div>
             </fieldset>
+
+            {isVirtual ? (
+              <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                <div className="text-sm font-medium text-slate-700">Members</div>
+                <p className="text-xs text-slate-400">
+                  Reads resolve against these repositories in order; the aggregate is read-only.
+                </p>
+                {candidates.length === 0 ? (
+                  <p className="text-sm text-slate-500">
+                    Create some OCI local or proxy repositories first — a virtual repository aggregates them.
+                  </p>
+                ) : (
+                  <ul className="space-y-1">
+                    {candidates.map((c) => {
+                      const order = members.indexOf(c.key);
+                      return (
+                        <li key={c.key}>
+                          <label className="flex items-center gap-2 text-sm text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={order >= 0}
+                              onChange={() => toggleMember(c.key)}
+                              className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500/30"
+                            />
+                            <span className="font-mono">{c.key}</span>
+                            <span className="text-xs text-slate-400">{c.mode}</span>
+                            {order >= 0 ? (
+                              <span className="ml-auto text-xs font-medium text-teal-700">#{order + 1}</span>
+                            ) : null}
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            ) : null}
           </>
         )}
 
@@ -198,30 +274,32 @@ export function RepositoryModal({
           </div>
         ) : null}
 
-        <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-          <div className="text-sm font-medium text-slate-700">Retention</div>
-          <Field label="Keep last N versions" htmlFor="repo-keeplast" hint="0 keeps everything.">
-            <input
-              id="repo-keeplast"
-              type="number"
-              min={0}
-              value={keepLast}
-              onChange={(e) => setKeepLast(Number(e.target.value))}
-              className={inputClass}
-            />
-          </Field>
-          {isOci ? (
-            <label className="flex items-center gap-2 text-sm text-slate-700">
+        {isVirtual ? null : (
+          <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+            <div className="text-sm font-medium text-slate-700">Retention</div>
+            <Field label="Keep last N versions" htmlFor="repo-keeplast" hint="0 keeps everything.">
               <input
-                type="checkbox"
-                checked={deleteUntagged}
-                onChange={(e) => setDeleteUntagged(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500/30"
+                id="repo-keeplast"
+                type="number"
+                min={0}
+                value={keepLast}
+                onChange={(e) => setKeepLast(Number(e.target.value))}
+                className={inputClass}
               />
-              Sweep untagged manifests
-            </label>
-          ) : null}
-        </div>
+            </Field>
+            {isOci ? (
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={deleteUntagged}
+                  onChange={(e) => setDeleteUntagged(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500/30"
+                />
+                Sweep untagged manifests
+              </label>
+            ) : null}
+          </div>
+        )}
 
         {error ? (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 ring-1 ring-inset ring-red-600/20">

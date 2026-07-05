@@ -9,6 +9,22 @@ import (
 	"context"
 )
 
+const addVirtualMember = `-- name: AddVirtualMember :exec
+INSERT INTO virtual_repo_members (virtual_repo_id, member_repo_id, position)
+VALUES (?, ?, ?)
+`
+
+type AddVirtualMemberParams struct {
+	VirtualRepoID string `json:"virtual_repo_id"`
+	MemberRepoID  string `json:"member_repo_id"`
+	Position      int64  `json:"position"`
+}
+
+func (q *Queries) AddVirtualMember(ctx context.Context, arg AddVirtualMemberParams) error {
+	_, err := q.db.ExecContext(ctx, addVirtualMember, arg.VirtualRepoID, arg.MemberRepoID, arg.Position)
+	return err
+}
+
 const createRepository = `-- name: CreateRepository :one
 INSERT INTO repositories (
     id, project_id, key, name, format, mode,
@@ -85,6 +101,15 @@ func (q *Queries) DeleteRepository(ctx context.Context, arg DeleteRepositoryPara
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const deleteVirtualMembers = `-- name: DeleteVirtualMembers :exec
+DELETE FROM virtual_repo_members WHERE virtual_repo_id = ?
+`
+
+func (q *Queries) DeleteVirtualMembers(ctx context.Context, virtualRepoID string) error {
+	_, err := q.db.ExecContext(ctx, deleteVirtualMembers, virtualRepoID)
+	return err
 }
 
 const getRepository = `-- name: GetRepository :one
@@ -260,6 +285,51 @@ WHERE keep_last > 0 OR delete_untagged = 1
 // Repositories that have an effective retention policy, for a retention run.
 func (q *Queries) ListRepositoriesWithPolicy(ctx context.Context) ([]Repository, error) {
 	rows, err := q.db.QueryContext(ctx, listRepositoriesWithPolicy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Repository{}
+	for rows.Next() {
+		var i Repository
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Key,
+			&i.Name,
+			&i.Format,
+			&i.Mode,
+			&i.UpstreamUrl,
+			&i.UpstreamUsername,
+			&i.UpstreamPassword,
+			&i.KeepLast,
+			&i.DeleteUntagged,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVirtualMembers = `-- name: ListVirtualMembers :many
+SELECT r.id, r.project_id, r."key", r.name, r.format, r.mode, r.upstream_url, r.upstream_username, r.upstream_password, r.keep_last, r.delete_untagged, r.created_at, r.updated_at FROM virtual_repo_members m
+JOIN repositories r ON r.id = m.member_repo_id
+WHERE m.virtual_repo_id = ?
+ORDER BY m.position ASC
+`
+
+// Member repositories of a virtual repository, in configured order.
+func (q *Queries) ListVirtualMembers(ctx context.Context, virtualRepoID string) ([]Repository, error) {
+	rows, err := q.db.QueryContext(ctx, listVirtualMembers, virtualRepoID)
 	if err != nil {
 		return nil, err
 	}

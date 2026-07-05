@@ -53,8 +53,10 @@ type repoConfigResponse struct {
 	Mode      string           `json:"mode"`
 	Upstream  *upstreamPayload `json:"upstream,omitempty"` // password never returned
 	Retention retentionPayload `json:"retention"`
-	CreatedAt time.Time        `json:"createdAt"`
-	UpdatedAt time.Time        `json:"updatedAt"`
+	// Members is the ordered member repository keys of a virtual repository.
+	Members   []string  `json:"members,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 func toRepoConfigResponse(r repository.Repository) repoConfigResponse {
@@ -64,6 +66,7 @@ func toRepoConfigResponse(r repository.Repository) repoConfigResponse {
 		Format:    string(r.Format),
 		Mode:      string(r.Mode),
 		Retention: retentionPayload{KeepLast: r.Retention.KeepLast, DeleteUntagged: r.Retention.DeleteUntagged},
+		Members:   r.MemberKeys,
 		CreatedAt: r.CreatedAt,
 		UpdatedAt: r.UpdatedAt,
 	}
@@ -73,6 +76,22 @@ func toRepoConfigResponse(r repository.Repository) repoConfigResponse {
 	return resp
 }
 
+// populateMembers fills a virtual repository's member keys for the response
+// (Get/List do not, to keep the hot resolve path cheap).
+func (h repositoriesHandler) populateMembers(r *http.Request, repo *repository.Repository) error {
+	if repo.Mode != repository.ModeVirtual || repo.MemberKeys != nil {
+		return nil
+	}
+	members, err := h.repos.Members(r.Context(), repo.ID)
+	if err != nil {
+		return err
+	}
+	for _, m := range members {
+		repo.MemberKeys = append(repo.MemberKeys, m.Key)
+	}
+	return nil
+}
+
 type createRepositoryRequest struct {
 	Key       string           `json:"key"`
 	Name      string           `json:"name"`
@@ -80,6 +99,8 @@ type createRepositoryRequest struct {
 	Mode      string           `json:"mode"`
 	Upstream  *upstreamPayload `json:"upstream"`
 	Retention retentionPayload `json:"retention"`
+	// Members is the ordered member repository keys for a virtual repository.
+	Members []string `json:"members,omitempty"`
 }
 
 // --- handlers ---
@@ -97,6 +118,11 @@ func (h repositoriesHandler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]repoConfigResponse, 0, len(repos))
 	for _, repo := range repos {
+		if err := h.populateMembers(r, &repo); err != nil {
+			h.log.Error("listing virtual members", slog.String("error", err.Error()))
+			writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+			return
+		}
 		items = append(items, toRepoConfigResponse(repo))
 	}
 	writeJSON(w, h.log, http.StatusOK, map[string]any{"repositories": items})
@@ -117,6 +143,11 @@ func (h repositoriesHandler) get(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
 		return
 	}
+	if err := h.populateMembers(r, &repo); err != nil {
+		h.log.Error("getting virtual members", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
 	writeJSON(w, h.log, http.StatusOK, toRepoConfigResponse(repo))
 }
 
@@ -131,13 +162,14 @@ func (h repositoriesHandler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := repository.CreateInput{
-		ProjectID: proj.ID,
-		Key:       req.Key,
-		Name:      req.Name,
-		Format:    repository.Format(req.Format),
-		Mode:      repository.Mode(req.Mode),
-		Retention: repository.Retention{KeepLast: req.Retention.KeepLast, DeleteUntagged: req.Retention.DeleteUntagged},
-		Actor:     actorFrom(r),
+		ProjectID:  proj.ID,
+		Key:        req.Key,
+		Name:       req.Name,
+		Format:     repository.Format(req.Format),
+		Mode:       repository.Mode(req.Mode),
+		Retention:  repository.Retention{KeepLast: req.Retention.KeepLast, DeleteUntagged: req.Retention.DeleteUntagged},
+		MemberKeys: req.Members,
+		Actor:      actorFrom(r),
 	}
 	if req.Upstream != nil {
 		in.Upstream = &repository.Upstream{URL: req.Upstream.URL, Username: req.Upstream.Username, Password: req.Upstream.Password}

@@ -41,3 +41,17 @@ RETURNING *;
 -- name: DeleteRepository :execrows
 DELETE FROM repositories
 WHERE project_id = ? AND key = ?;
+
+-- name: AddVirtualMember :exec
+INSERT INTO virtual_repo_members (virtual_repo_id, member_repo_id, position)
+VALUES (?, ?, ?);
+
+-- name: ListVirtualMembers :many
+-- Member repositories of a virtual repository, in configured order.
+SELECT r.* FROM virtual_repo_members m
+JOIN repositories r ON r.id = m.member_repo_id
+WHERE m.virtual_repo_id = ?
+ORDER BY m.position ASC;
+
+-- name: DeleteVirtualMembers :exec
+DELETE FROM virtual_repo_members WHERE virtual_repo_id = ?;

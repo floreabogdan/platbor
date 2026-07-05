@@ -1,12 +1,16 @@
 package oci
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
+
+	"github.com/platbor/platbor/internal/core/repository"
 )
 
 // Tag-listing page bounds. `n` requests a page size; we cap it so a single
@@ -50,7 +54,15 @@ func (h *handler) serveTags(w http.ResponseWriter, r *http.Request, p parsedPath
 
 	tags := []string{}
 	var next string
-	if limit > 0 {
+	switch {
+	case repo.Mode == repository.ModeVirtual:
+		var err error
+		tags, next, err = h.virtualTags(r.Context(), repo, image, last, limit)
+		if err != nil {
+			h.internalError(w, "listing virtual tags", err)
+			return
+		}
+	case limit > 0:
 		// Fetch one extra row to detect whether a further page exists.
 		page, err := h.manifests.listTags(r.Context(), repo.ID, image, last, limit+1)
 		if err != nil {
@@ -71,4 +83,43 @@ func (h *handler) serveTags(w http.ResponseWriter, r *http.Request, p parsedPath
 	if err := json.NewEncoder(w).Encode(tagList{Name: p.name, Tags: tags}); err != nil {
 		h.log.Error("encoding tag list", slog.String("error", err.Error()))
 	}
+}
+
+// virtualTags returns one page of a virtual repository's tag list: the union of
+// its members' tags for the image, lexically ordered, applying the spec's
+// `last`/`n` keyset pagination in memory. Each member is scanned up to maxTagPage
+// tags; a member with more is truncated (a group over enormous member tag sets is
+// an edge case, and the per-member cap bounds the work).
+func (h *handler) virtualTags(ctx context.Context, repo repository.Repository, image, last string, limit int) ([]string, string, error) {
+	if limit <= 0 {
+		return []string{}, "", nil
+	}
+	members, err := h.repos.Members(ctx, repo.ID)
+	if err != nil {
+		return nil, "", err
+	}
+	set := make(map[string]struct{})
+	for _, member := range members {
+		page, err := h.manifests.listTags(ctx, member.ID, image, "", maxTagPage)
+		if err != nil {
+			return nil, "", err
+		}
+		for _, t := range page {
+			set[t] = struct{}{}
+		}
+	}
+	all := make([]string, 0, len(set))
+	for t := range set {
+		if t > last { // keyset: strictly after the cursor
+			all = append(all, t)
+		}
+	}
+	sort.Strings(all)
+
+	next := ""
+	if len(all) > limit {
+		next = all[limit-1]
+		all = all[:limit]
+	}
+	return all, next, nil
 }

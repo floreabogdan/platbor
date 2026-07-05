@@ -253,12 +253,39 @@ func (h *handler) setUploadHeaders(w http.ResponseWriter, name, id string, size 
 	w.Header().Set("Range", "0-"+strconv.FormatInt(end, 10))
 }
 
-// maybeCacheBlob fetches a missing blob from the upstream when the name belongs
-// to a proxy repository, returning whether the blob is now present locally. It is
-// consulted only on a cache miss, so local pulls resolve nothing extra.
+// maybeCacheBlob fetches a missing blob from an upstream when the name belongs to
+// a proxy repository (or a virtual repository with a proxy member), returning
+// whether the blob is now present locally. It is consulted only on a cache miss,
+// so local pulls resolve nothing extra. Blobs are content-addressed globally, so
+// a blob any member can supply serves the aggregate.
 func (h *handler) maybeCacheBlob(ctx context.Context, name, digest string) bool {
 	repo, image, ok := h.lookupRepo(ctx, name)
-	if !ok || repo.Mode != repository.ModeProxy || repo.Upstream == nil {
+	if !ok {
+		return false
+	}
+	switch repo.Mode {
+	case repository.ModeProxy:
+		return h.fetchProxyBlob(ctx, repo, image, digest)
+	case repository.ModeVirtual:
+		members, err := h.repos.Members(ctx, repo.ID)
+		if err != nil {
+			return false
+		}
+		for _, member := range members {
+			if member.Mode == repository.ModeProxy && h.fetchProxyBlob(ctx, member, image, digest) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// fetchProxyBlob fetches a blob from a proxy repository's upstream into the local
+// store, reporting success.
+func (h *handler) fetchProxyBlob(ctx context.Context, repo repository.Repository, image, digest string) bool {
+	if repo.Upstream == nil {
 		return false
 	}
 	up := proxy.Upstream{BaseURL: repo.Upstream.URL, Username: repo.Upstream.Username, Password: repo.Upstream.Password}

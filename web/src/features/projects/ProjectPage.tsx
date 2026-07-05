@@ -125,7 +125,12 @@ export function ProjectPage() {
       <MembersPanel projectKey={key} />
 
       {creating ? (
-        <RepositoryModal projectKey={key} onClose={() => setCreating(false)} onSaved={() => void reload()} />
+        <RepositoryModal
+          projectKey={key}
+          repos={repos}
+          onClose={() => setCreating(false)}
+          onSaved={() => void reload()}
+        />
       ) : null}
       {editing ? (
         <RepositoryModal
@@ -191,7 +196,7 @@ function RepoRow({
         </span>
       </Td>
       <Td>
-        <ModeBadge mode={repo.mode} upstream={repo.upstream?.url} />
+        <ModeBadge mode={repo.mode} upstream={repo.upstream?.url} members={repo.members} />
       </Td>
       <Td className="text-slate-500">
         {repo.retention.keepLast > 0 ? `keep last ${String(repo.retention.keepLast)}` : '—'}
@@ -223,7 +228,18 @@ function RepoRow({
   );
 }
 
-function ModeBadge({ mode, upstream }: { mode: string; upstream?: string }) {
+function ModeBadge({ mode, upstream, members }: { mode: string; upstream?: string; members?: string[] }) {
+  if (mode === 'virtual') {
+    const count = members?.length ?? 0;
+    return (
+      <span
+        className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 ring-1 ring-inset ring-violet-600/20"
+        title={members && members.length > 0 ? `Members: ${members.join(', ')}` : 'A read-only view over member repositories'}
+      >
+        {count > 0 ? `Virtual · ${String(count)}` : 'Virtual'}
+      </span>
+    );
+  }
   const proxy = mode === 'proxy';
   return (
     <span

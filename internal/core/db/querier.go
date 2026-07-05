@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	AddVirtualMember(ctx context.Context, arg AddVirtualMemberParams) error
 	CargoVersionExists(ctx context.Context, arg CargoVersionExistsParams) (int64, error)
 	CountProjects(ctx context.Context) (int64, error)
 	// Distinct images across all repositories, for the dashboard summary.
@@ -44,6 +45,7 @@ type Querier interface {
 	DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error)
 	DeleteTagsForDigest(ctx context.Context, arg DeleteTagsForDigestParams) error
 	DeleteTerraformVersion(ctx context.Context, arg DeleteTerraformVersionParams) (int64, error)
+	DeleteVirtualMembers(ctx context.Context, virtualRepoID string) error
 	DeleteWebhook(ctx context.Context, arg DeleteWebhookParams) (int64, error)
 	GemVersionExists(ctx context.Context, arg GemVersionExistsParams) (int64, error)
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (GetAPITokenByHashRow, error)
@@ -257,6 +259,8 @@ type Querier interface {
 	ListTerraformVersionsForRetention(ctx context.Context, repositoryID string) ([]ListTerraformVersionsForRetentionRow, error)
 	// Manifests in a repository that no tag points at, for the delete-untagged policy.
 	ListUntaggedManifests(ctx context.Context, repositoryID string) ([]ListUntaggedManifestsRow, error)
+	// Member repositories of a virtual repository, in configured order.
+	ListVirtualMembers(ctx context.Context, virtualRepoID string) ([]Repository, error)
 	// One row per distinct vulnerability across all stored scans, with the number of
 	// affected artifacts. severity and summary are properties of the vulnerability so
 	// they are constant within a vuln_id; grouping by them yields one row per vuln.

@@ -60,7 +60,7 @@ export type RepoFormat =
   | 'cargo'
   | 'rubygems'
   | 'terraform';
-export type RepoMode = 'local' | 'proxy';
+export type RepoMode = 'local' | 'proxy' | 'virtual';
 
 export interface RepoUpstream {
   url: string;
@@ -80,6 +80,7 @@ export interface Repo {
   mode: RepoMode;
   upstream?: RepoUpstream; // set for proxy repos; password is never returned
   retention: RepoRetention;
+  members?: string[]; // ordered member repo keys, for a virtual repository
   createdAt: string;
   updatedAt: string;
 }
@@ -95,6 +96,7 @@ export interface CreateRepoRequest {
   mode: RepoMode;
   upstream?: { url: string; username?: string; password?: string };
   retention: RepoRetention;
+  members?: string[]; // ordered member repo keys, for a virtual repository
 }
 
 export interface UpdateRepoRequest {

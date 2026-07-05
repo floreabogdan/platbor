@@ -1,11 +1,13 @@
 package oci
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 
 	"github.com/platbor/platbor/internal/core/blob"
+	"github.com/platbor/platbor/internal/core/repository"
 )
 
 // ociImageIndexV1 is the media type of the referrers response — an image index
@@ -49,7 +51,13 @@ func (h *handler) serveReferrers(w http.ResponseWriter, r *http.Request, p parse
 		return
 	}
 
-	rows, err := h.manifests.listReferrers(r.Context(), repo.ID, image, p.ref)
+	var rows []referrerRow
+	var err error
+	if repo.Mode == repository.ModeVirtual {
+		rows, err = h.virtualReferrers(r.Context(), repo, image, p.ref)
+	} else {
+		rows, err = h.manifests.listReferrers(r.Context(), repo.ID, image, p.ref)
+	}
 	if err != nil {
 		h.internalError(w, "listing referrers", err)
 		return
@@ -90,6 +98,32 @@ func (h *handler) serveReferrers(w http.ResponseWriter, r *http.Request, p parse
 	if _, err := w.Write(body); err != nil {
 		h.log.Error("writing referrers index", slog.String("error", err.Error()))
 	}
+}
+
+// virtualReferrers unions the referrers of a subject across a virtual
+// repository's members, deduplicated by digest (the same signature may be cached
+// in more than one member).
+func (h *handler) virtualReferrers(ctx context.Context, repo repository.Repository, image, subject string) ([]referrerRow, error) {
+	members, err := h.repos.Members(ctx, repo.ID)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	var out []referrerRow
+	for _, member := range members {
+		rows, err := h.manifests.listReferrers(ctx, member.ID, image, subject)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if _, dup := seen[row.Digest]; dup {
+				continue
+			}
+			seen[row.Digest] = struct{}{}
+			out = append(out, row)
+		}
+	}
+	return out, nil
 }
 
 // annotationsFromPayload extracts a manifest's top-level annotations, or nil.

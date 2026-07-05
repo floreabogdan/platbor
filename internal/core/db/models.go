@@ -314,6 +314,12 @@ type User struct {
 	UpdatedAt    string `json:"updated_at"`
 }
 
+type VirtualRepoMember struct {
+	VirtualRepoID string `json:"virtual_repo_id"`
+	MemberRepoID  string `json:"member_repo_id"`
+	Position      int64  `json:"position"`
+}
+
 type Webhook struct {
 	ID        string `json:"id"`
 	ProjectID string `json:"project_id"`

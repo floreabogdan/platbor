@@ -38,6 +38,9 @@ type Mode string
 const (
 	ModeLocal Mode = "local"
 	ModeProxy Mode = "proxy"
+	// ModeVirtual aggregates several member repositories behind one URL: a read is
+	// resolved against the members in order, and writes are rejected.
+	ModeVirtual Mode = "virtual"
 )
 
 var (
@@ -78,8 +81,11 @@ type Repository struct {
 	Mode      Mode
 	Upstream  *Upstream // set only for proxy repositories; password never surfaced by the API
 	Retention Retention
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// MemberKeys is the ordered member repository keys of a virtual repository;
+	// empty for local and proxy repositories. Populated on demand (not by Get).
+	MemberKeys []string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // ProjectUsageFunc reports a project's current logical storage in bytes. The
@@ -145,13 +151,25 @@ type CreateInput struct {
 	Mode      Mode
 	Upstream  *Upstream
 	Retention Retention
-	Actor     string
+	// MemberKeys is the ordered member repository keys for a virtual repository.
+	MemberKeys []string
+	Actor      string
 }
 
 // Create validates and inserts a repository with an audit entry.
 func (s *Service) Create(ctx context.Context, in CreateInput) (Repository, error) {
 	if err := validate(in.Key, in.Name, in.Format, in.Mode, in.Upstream); err != nil {
 		return Repository{}, err
+	}
+	// A virtual repository's members are resolved and validated before the write so
+	// a bad member list fails cleanly without a half-created aggregate.
+	var memberIDs []string
+	if in.Mode == ModeVirtual {
+		var err error
+		memberIDs, err = s.resolveMembers(ctx, in.ProjectID, in.Key, in.MemberKeys)
+		if err != nil {
+			return Repository{}, err
+		}
 	}
 	ts := s.now().Format(time.RFC3339Nano)
 	repoID := id.New("repo")
@@ -188,6 +206,13 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Repository, error
 		}
 		return Repository{}, fmt.Errorf("creating repository: %w", err)
 	}
+	for pos, memberID := range memberIDs {
+		if err := qtx.AddVirtualMember(ctx, db.AddVirtualMemberParams{
+			VirtualRepoID: repoID, MemberRepoID: memberID, Position: int64(pos),
+		}); err != nil {
+			return Repository{}, fmt.Errorf("adding virtual member: %w", err)
+		}
+	}
 	if err := s.audit(ctx, qtx, in.ProjectID, in.Actor, "repository.create", repoID, ts,
 		fmt.Sprintf(`{"key":%q,"format":%q,"mode":%q}`, in.Key, in.Format, in.Mode)); err != nil {
 		return Repository{}, err
@@ -195,7 +220,61 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Repository, error
 	if err := tx.Commit(); err != nil {
 		return Repository{}, fmt.Errorf("commit: %w", err)
 	}
-	return toDomain(row), nil
+	repo := toDomain(row)
+	repo.MemberKeys = in.MemberKeys
+	return repo, nil
+}
+
+// resolveMembers validates a virtual repository's member keys and returns their
+// repository IDs in order. Members must be existing OCI local/proxy repositories
+// in the same project; virtual repositories do not nest, and duplicates and the
+// aggregate's own key are rejected.
+func (s *Service) resolveMembers(ctx context.Context, projectID, ownKey string, keys []string) ([]string, error) {
+	if len(keys) == 0 {
+		return nil, &ValidationError{"a virtual repository requires at least one member"}
+	}
+	seen := make(map[string]struct{}, len(keys))
+	ids := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if k == "" {
+			return nil, &ValidationError{"member repository key must not be empty"}
+		}
+		if k == ownKey {
+			return nil, &ValidationError{"a virtual repository cannot contain itself"}
+		}
+		if _, dup := seen[k]; dup {
+			return nil, &ValidationError{"duplicate member repository: " + k}
+		}
+		seen[k] = struct{}{}
+		member, err := s.Get(ctx, projectID, k)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return nil, &ValidationError{"member repository does not exist: " + k}
+			}
+			return nil, err
+		}
+		if member.Format != FormatOCI {
+			return nil, &ValidationError{"member must be an OCI repository: " + k}
+		}
+		if member.Mode == ModeVirtual {
+			return nil, &ValidationError{"a virtual repository cannot contain another virtual repository: " + k}
+		}
+		ids = append(ids, member.ID)
+	}
+	return ids, nil
+}
+
+// Members returns a virtual repository's member repositories in configured order.
+func (s *Service) Members(ctx context.Context, virtualRepoID string) ([]Repository, error) {
+	rows, err := s.q.ListVirtualMembers(ctx, virtualRepoID)
+	if err != nil {
+		return nil, fmt.Errorf("listing virtual members: %w", err)
+	}
+	out := make([]Repository, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, toDomain(r))
+	}
+	return out, nil
 }
 
 // Get returns a repository by project and key, or ErrNotFound.
@@ -381,8 +460,15 @@ func validate(key, name string, format Format, mode Mode, up *Upstream) error {
 		if up == nil || up.URL == "" {
 			return &ValidationError{"a proxy repository requires an upstream url"}
 		}
+	case ModeVirtual:
+		if format != FormatOCI {
+			return &ValidationError{"virtual repositories are supported for the oci format only"}
+		}
+		if up != nil && up.URL != "" {
+			return &ValidationError{"a virtual repository has members, not an upstream"}
+		}
 	default:
-		return &ValidationError{"mode must be local or proxy"}
+		return &ValidationError{"mode must be local, proxy, or virtual"}
 	}
 	return nil
 }

@@ -107,14 +107,15 @@ type Adapter interface {
 }
 ```
 
-`Deps` provides the blob store, a metadata service scoped to the repository, and the auth checker. The **proxy** repository type wraps any adapter: on cache miss it fetches from the configured upstream (Docker Hub, registry.npmjs.org, api.nuget.org), stores blobs + metadata, then serves locally. Virtual/group repositories (one URL aggregating local + proxy) are deferred to Phase 4 but the URL scheme reserves space for them.
+`Deps` provides the blob store, a metadata service scoped to the repository, and the auth checker. The **proxy** repository type wraps any adapter: on cache miss it fetches from the configured upstream (Docker Hub, registry.npmjs.org, api.nuget.org), stores blobs + metadata, then serves locally. A **virtual** (group) repository (`mode: virtual`, OCI) aggregates an ordered list of member repositories behind one URL: a read resolves against the members in order and returns the first hit (a proxy member fetches from its upstream on the way), while `tags/list` and the referrers API return the union across members; writes are rejected, since a virtual repository is a read-only view (you push to a member). This rides the existing single-repository read path unchanged — the virtual case only iterates members and reuses `loadManifest` / the proxy blob fetch per member — so the conformance-critical OCI logic is untouched.
 
 ### Projects, repositories, and the URL scheme
 
 A **project** is the tenant boundary (RBAC, grouping). Inside it live **typed
 repositories** — the configured containers that actually hold artifacts of one
 format. A repository has a `format` (oci, npm, nuget, generic), a `mode` (local,
-or a pull-through `proxy` of an upstream), and its own retention policy. You can
+a pull-through `proxy` of an upstream, or — for OCI — a `virtual` aggregate of
+member repositories), and its own retention policy. You can
 create and configure a repository *before* pushing, or — when the project's
 `allowAutoCreate` is on (the default) — a push to a new repo path auto-creates a
 local repository of that format. Pushing a second format into an existing

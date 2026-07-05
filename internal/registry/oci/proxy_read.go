@@ -65,6 +65,33 @@ func (h *handler) loadManifest(ctx context.Context, repo repository.Repository, 
 	return storedManifest{}, err
 }
 
+// loadManifestVirtual resolves a manifest for a virtual (group) repository by
+// trying each member in configured order and returning the first hit. A member
+// that is a proxy fills its own cache on the way, so `docker pull` against the
+// aggregate transparently reaches an upstream. It returns ErrManifestNotFound
+// only when no member has (or can fetch) the manifest; a member's non-not-found
+// error is remembered and surfaced when nothing else resolves, so a genuine
+// failure is not masked as a 404.
+func (h *handler) loadManifestVirtual(ctx context.Context, repo repository.Repository, image, ref string) (storedManifest, error) {
+	members, err := h.repos.Members(ctx, repo.ID)
+	if err != nil {
+		return storedManifest{}, err
+	}
+	lastErr := error(ErrManifestNotFound)
+	for _, member := range members {
+		m, err := h.loadManifest(ctx, member, image, ref)
+		if err == nil {
+			return m, nil
+		}
+		if !errors.Is(err, ErrManifestNotFound) {
+			h.log.Warn("virtual member manifest lookup failed",
+				slog.String("member", member.Key), slog.String("ref", ref), slog.String("error", err.Error()))
+			lastErr = err
+		}
+	}
+	return storedManifest{}, lastErr
+}
+
 // cachedTag returns the last cached manifest a tag pointed at, if any.
 func (h *handler) cachedTag(ctx context.Context, repositoryID, image, tag string) (storedManifest, bool) {
 	digest, err := h.manifests.resolveTag(ctx, repositoryID, image, tag)
