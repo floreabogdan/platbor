@@ -28,6 +28,22 @@ func TestLoadZeroConfig(t *testing.T) {
 	}
 }
 
+// TestExampleConfigLoads guards the shipped sample against schema drift: it must
+// parse and validate exactly as an operator would load it.
+func TestExampleConfigLoads(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "configs", "platbor.example.yaml")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("example config must load and validate: %v", err)
+	}
+	if cfg.Addr != ":8080" || cfg.DataDir != "platbor-data" {
+		t.Errorf("example config values not applied: %+v", cfg)
+	}
+	if cfg.ShutdownTimeout != 15*time.Second {
+		t.Errorf("shutdownTimeout = %s, want 15s (duration string must parse from YAML)", cfg.ShutdownTimeout)
+	}
+}
+
 func TestMaintenanceIntervals(t *testing.T) {
 	// Disabled by default.
 	if d := Default().Maintenance.GCInterval; d != 0 {

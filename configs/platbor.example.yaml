@@ -1,0 +1,53 @@
+# Platbor configuration — every key is optional. Defaults yield a working,
+# zero-config single-binary instance, so set only what you need to change.
+# Run with: platbor --config /path/to/platbor.yaml
+# Every key can also be set via a PLATBOR_* environment variable, which wins over
+# this file. See docs/CONFIGURATION.md for the full reference.
+
+# host:port to listen on.
+addr: ":8080"
+
+# Holds the SQLite database and (for the fs blob driver) the blobs. In-progress
+# uploads always stage under {dataDir}/uploads.
+dataDir: "platbor-data"
+
+# Grace window for draining in-flight requests on shutdown.
+shutdownTimeout: "15s"
+
+database:
+  # sqlite (zero-config) or postgres.
+  driver: "sqlite"
+  # SQLite uses {dataDir}/platbor.db when empty; postgres requires a DSN, e.g.
+  # postgres://user:pass@host:5432/platbor?sslmode=disable
+  dsn: ""
+
+blob:
+  # fs (default) or s3. Object storage is the right choice for large artifacts.
+  driver: "fs"
+  s3:
+    endpoint: ""          # host[:port] of the S3 API (required for s3)
+    bucket: ""            # bucket for blobs (required for s3; created if absent)
+    region: ""            # optional for MinIO
+    accessKeyId: ""       # empty key + secret => ambient credentials (env, IAM)
+    secretAccessKey: ""
+    useSSL: false         # HTTPS to the endpoint
+    prefix: ""            # optional key prefix within the bucket
+
+maintenance:
+  # Scheduled housekeeping, off by default. Both remain available on demand via
+  # the admin API. Must be >= 1m when set. Enable on a single instance in a fleet.
+  gcInterval: "0"         # e.g. "24h" to sweep unreferenced blobs daily
+  retentionInterval: "0"  # e.g. "24h" to prune keep-last-N daily
+
+auth:
+  adminUsername: "admin"
+  # First-run admin password. Empty => a random one is generated and logged once.
+  adminPassword: ""
+  # Set the Secure flag on the session cookie when serving over HTTPS.
+  cookieSecure: false
+  # Opt into the OCI bearer-token flow; HTTP Basic keeps working either way.
+  ociBearer: false
+
+log:
+  level: "info"   # debug | info | warn | error
+  format: "text"  # text (human) | json (log pipelines)

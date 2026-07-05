@@ -60,8 +60,9 @@ docker push localhost:8080/library/alpine:latest
 ```
 
 Runtime configuration is via `PLATBOR_*` environment variables (`PLATBOR_ADDR`,
-`PLATBOR_DATA_DIR`, `PLATBOR_ADMIN_PASSWORD`, …) or a mounted YAML config; see
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Without Docker, `make build`
+`PLATBOR_DATA_DIR`, `PLATBOR_ADMIN_PASSWORD`, …) or a mounted YAML config — see
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full reference and a
+[sample config](configs/platbor.example.yaml). Without Docker, `make build`
 produces the same self-contained binary.
 
 > A published image (`docker run ghcr.io/platbor/platbor`) lands with the first
@@ -72,6 +73,7 @@ produces the same self-contained binary.
 | Doc | Contents |
 |-----|----------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data model, module layout, key decisions |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every config key (YAML + env), health probes, examples |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Phased delivery plan with acceptance criteria |
 | [docs/CODING-STANDARDS.md](docs/CODING-STANDARDS.md) | Go, TypeScript/React, testing, git conventions |
 | [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md) | UI design tokens and component recipes |
