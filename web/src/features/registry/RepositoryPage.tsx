@@ -15,7 +15,9 @@ import type {
   SbomResponse,
   ScanFinding,
   ScanResult,
+  SignatureVerification,
   TagSummary,
+  VerifyResponse,
 } from '../../lib/types';
 import { SEVERITY_ORDER } from './severity';
 import { SeverityBadge, SeverityCount } from './SeverityBadge';
@@ -288,8 +290,150 @@ function ManifestPanel({
         <ReferrersSection referrers={referrers} project={project} repo={repo} image={image} />
       ) : null}
 
+      {referrers.some((r) => referrerLabel(r.artifactType) === 'Signature' || referrerLabel(r.artifactType) === 'Attestation') ? (
+        <VerifyPanel project={project} repo={repo} image={image} digest={manifest.digest} />
+      ) : null}
+
       <ScanPanel project={project} repo={repo} image={image} digest={manifest.digest} />
     </Card>
+  );
+}
+
+// VerifyPanel cryptographically checks the cosign signatures on a manifest (not
+// merely that they exist) and lists its attestations' predicate types. Keyless
+// signatures verify against their embedded certificate and reveal the signer
+// identity; key-based signatures verify against the project's configured key.
+function VerifyPanel({
+  project,
+  repo,
+  image,
+  digest,
+}: {
+  project: string;
+  repo: string;
+  image: string;
+  digest: string;
+}) {
+  const [result, setResult] = useState<VerifyResponse>();
+  const [state, setState] = useState<'idle' | 'verifying' | 'error'>('idle');
+  const [message, setMessage] = useState<string>();
+
+  async function verify() {
+    setState('verifying');
+    setMessage(undefined);
+    try {
+      setResult(await api.verifySignatures(project, repo, image, digest));
+      setState('idle');
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Verification failed');
+      setState('error');
+    }
+  }
+
+  const busy = state === 'verifying';
+
+  return (
+    <div className="mt-6 border-t border-slate-200/70 pt-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-xs font-medium uppercase tracking-wide text-slate-400">Signature verification</h3>
+        <button
+          type="button"
+          onClick={() => void verify()}
+          disabled={busy}
+          className={cx(
+            'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ring-1 ring-inset transition-colors',
+            busy ? 'cursor-wait text-slate-400 ring-slate-200' : 'text-teal-700 ring-teal-200 hover:bg-teal-50',
+          )}
+        >
+          {busy ? 'Verifying…' : result ? 'Re-verify' : 'Verify signatures'}
+        </button>
+      </div>
+
+      {message ? <p className="mt-3 text-xs text-red-600">{message}</p> : null}
+
+      {result ? (
+        <div className="mt-3 space-y-3">
+          {result.signatures.length === 0 ? (
+            <p className="text-sm text-slate-500">No cosign signatures attached.</p>
+          ) : (
+            result.signatures.map((s) => <SignatureRow key={s.digest} sig={s} keyConfigured={result.keyConfigured} />)
+          )}
+          {result.attestations.length > 0 ? (
+            <div>
+              <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">Attestations</div>
+              <ul className="space-y-1">
+                {result.attestations.map((a) => (
+                  <li key={a.digest} className="flex items-center gap-2 text-sm">
+                    <span className="inline-flex items-center rounded-full bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-700 ring-1 ring-inset ring-violet-600/20">
+                      in-toto
+                    </span>
+                    <span className="font-mono text-xs text-slate-600">{a.predicateType || a.artifactType || '—'}</span>
+                    <span className="font-mono text-xs text-slate-300">{shortDigest(a.digest)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SignatureRow({ sig, keyConfigured }: { sig: SignatureVerification; keyConfigured: boolean }) {
+  return (
+    <div className="rounded-lg border border-slate-200/80 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {sig.verified ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+            ✓ Verified
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-inset ring-slate-500/20">
+            Unverified
+          </span>
+        )}
+        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+          {sig.keyType === 'keyless' ? 'keyless' : sig.keyType === 'key' ? 'key' : '—'}
+        </span>
+        {sig.verified && !sig.digestMatch ? (
+          <span
+            className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 ring-1 ring-inset ring-amber-600/20"
+            title="The signature is valid but its payload names a different image digest."
+          >
+            digest mismatch
+          </span>
+        ) : null}
+        {sig.algorithm ? <span className="font-mono text-xs text-slate-400">{sig.algorithm}</span> : null}
+      </div>
+
+      {sig.identity || sig.issuer ? (
+        <dl className="mt-2 grid gap-1 text-xs sm:grid-cols-2">
+          {sig.identity ? (
+            <div>
+              <dt className="uppercase tracking-wide text-slate-400">Signed by</dt>
+              <dd className="font-mono text-slate-700">{sig.identity}</dd>
+            </div>
+          ) : null}
+          {sig.issuer ? (
+            <div>
+              <dt className="uppercase tracking-wide text-slate-400">Issuer</dt>
+              <dd className="font-mono text-slate-600">{sig.issuer}</dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
+
+      {!sig.verified ? (
+        <p className="mt-2 text-xs text-slate-500">
+          {sig.reason || 'Could not verify.'}
+          {sig.keyType === 'unverified' && !keyConfigured
+            ? ' Configure a verification key on the project to check key-based signatures.'
+            : ''}
+        </p>
+      ) : null}
+      {sig.keyId ? <p className="mt-1 font-mono text-[10px] text-slate-300">key {sig.keyId}</p> : null}
+    </div>
   );
 }
 

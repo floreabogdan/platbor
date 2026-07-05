@@ -37,11 +37,12 @@ var (
 // a referenced blob (config/layer) or child manifest, plus the platform an
 // index entry targets.
 type descriptor struct {
-	MediaType string    `json:"mediaType"`
-	Digest    string    `json:"digest"`
-	Size      int64     `json:"size"`
-	Platform  *platform `json:"platform,omitempty"`
-	URLs      []string  `json:"urls,omitempty"`
+	MediaType   string            `json:"mediaType"`
+	Digest      string            `json:"digest"`
+	Size        int64             `json:"size"`
+	Platform    *platform         `json:"platform,omitempty"`
+	URLs        []string          `json:"urls,omitempty"`
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // platform is an index entry's target OS/architecture.

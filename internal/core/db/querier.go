@@ -297,6 +297,7 @@ type Querier interface {
 	SetGemYanked(ctx context.Context, arg SetGemYankedParams) (int64, error)
 	SetProjectAutoCreate(ctx context.Context, arg SetProjectAutoCreateParams) error
 	SetProjectQuota(ctx context.Context, arg SetProjectQuotaParams) error
+	SetProjectVerificationKey(ctx context.Context, arg SetProjectVerificationKeyParams) error
 	// Fill a proxied file's cached blob after downloading it from the upstream.
 	SetPypiFileBlob(ctx context.Context, arg SetPypiFileBlobParams) error
 	SetWebhookCursor(ctx context.Context, arg SetWebhookCursorParams) error

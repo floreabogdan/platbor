@@ -42,6 +42,7 @@ import type {
   ScanResult,
   Token,
   SbomResponse,
+  VerifyResponse,
   UpdateRepoRequest,
   User,
   Webhook,
@@ -119,6 +120,12 @@ export const api = {
     request<Project>(`/projects/${encodeURIComponent(project)}/quota`, {
       method: 'PUT',
       body: JSON.stringify({ quotaBytes }),
+    }),
+
+  setVerificationKey: (project: string, verificationKey: string): Promise<Project> =>
+    request<Project>(`/projects/${encodeURIComponent(project)}/verification-key`, {
+      method: 'PUT',
+      body: JSON.stringify({ verificationKey }),
     }),
 
   // Repositories (typed containers inside a project)
@@ -228,6 +235,10 @@ export const api = {
 
   getVulnerability: (id: string): Promise<AffectedResponse> =>
     request<AffectedResponse>(`/vulnerabilities/${encodeURIComponent(id)}`),
+
+  // Signature verification (cosign, key or keyless)
+  verifySignatures: (project: string, repo: string, image: string, digest: string): Promise<VerifyResponse> =>
+    request<VerifyResponse>(`/registry/${encodeURIComponent(project)}/verify${query({ repo, image, digest })}`),
 
   // npm package browser
   listPackages: (): Promise<ListPackagesResponse> =>

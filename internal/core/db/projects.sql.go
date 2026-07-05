@@ -23,7 +23,7 @@ func (q *Queries) CountProjects(ctx context.Context) (int64, error) {
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (id, key, name, description, allow_auto_create, quota_bytes, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, "key", name, description, created_at, updated_at, allow_auto_create, quota_bytes
+RETURNING id, "key", name, description, created_at, updated_at, allow_auto_create, quota_bytes, verification_key
 `
 
 type CreateProjectParams struct {
@@ -58,12 +58,13 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.UpdatedAt,
 		&i.AllowAutoCreate,
 		&i.QuotaBytes,
+		&i.VerificationKey,
 	)
 	return i, err
 }
 
 const getProjectByID = `-- name: GetProjectByID :one
-SELECT id, "key", name, description, created_at, updated_at, allow_auto_create, quota_bytes FROM projects WHERE id = ?
+SELECT id, "key", name, description, created_at, updated_at, allow_auto_create, quota_bytes, verification_key FROM projects WHERE id = ?
 `
 
 func (q *Queries) GetProjectByID(ctx context.Context, id string) (Project, error) {
@@ -78,12 +79,13 @@ func (q *Queries) GetProjectByID(ctx context.Context, id string) (Project, error
 		&i.UpdatedAt,
 		&i.AllowAutoCreate,
 		&i.QuotaBytes,
+		&i.VerificationKey,
 	)
 	return i, err
 }
 
 const getProjectByKey = `-- name: GetProjectByKey :one
-SELECT id, "key", name, description, created_at, updated_at, allow_auto_create, quota_bytes FROM projects WHERE key = ?
+SELECT id, "key", name, description, created_at, updated_at, allow_auto_create, quota_bytes, verification_key FROM projects WHERE key = ?
 `
 
 func (q *Queries) GetProjectByKey(ctx context.Context, key string) (Project, error) {
@@ -98,12 +100,13 @@ func (q *Queries) GetProjectByKey(ctx context.Context, key string) (Project, err
 		&i.UpdatedAt,
 		&i.AllowAutoCreate,
 		&i.QuotaBytes,
+		&i.VerificationKey,
 	)
 	return i, err
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, "key", name, description, created_at, updated_at, allow_auto_create, quota_bytes FROM projects
+SELECT id, "key", name, description, created_at, updated_at, allow_auto_create, quota_bytes, verification_key FROM projects
 WHERE key > ?
 ORDER BY key ASC
 LIMIT ?
@@ -135,6 +138,7 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.UpdatedAt,
 			&i.AllowAutoCreate,
 			&i.QuotaBytes,
+			&i.VerificationKey,
 		); err != nil {
 			return nil, err
 		}
@@ -176,5 +180,20 @@ type SetProjectQuotaParams struct {
 
 func (q *Queries) SetProjectQuota(ctx context.Context, arg SetProjectQuotaParams) error {
 	_, err := q.db.ExecContext(ctx, setProjectQuota, arg.QuotaBytes, arg.UpdatedAt, arg.Key)
+	return err
+}
+
+const setProjectVerificationKey = `-- name: SetProjectVerificationKey :exec
+UPDATE projects SET verification_key = ?, updated_at = ? WHERE key = ?
+`
+
+type SetProjectVerificationKeyParams struct {
+	VerificationKey string `json:"verification_key"`
+	UpdatedAt       string `json:"updated_at"`
+	Key             string `json:"key"`
+}
+
+func (q *Queries) SetProjectVerificationKey(ctx context.Context, arg SetProjectVerificationKeyParams) error {
+	_, err := q.db.ExecContext(ctx, setProjectVerificationKey, arg.VerificationKey, arg.UpdatedAt, arg.Key)
 	return err
 }

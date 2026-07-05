@@ -6,15 +6,31 @@ package project
 
 import (
 	"context"
+	"crypto/x509"
 	"database/sql"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/platbor/platbor/internal/core/db"
 	"github.com/platbor/platbor/internal/core/id"
 )
+
+// validatePublicKeyPEM rejects a verification key that is not a parseable PEM
+// public key, so a typo surfaces when the key is set rather than at verify time.
+func validatePublicKeyPEM(pemKey string) error {
+	block, _ := pem.Decode([]byte(pemKey))
+	if block == nil {
+		return errors.New("not a PEM-encoded key")
+	}
+	if _, err := x509.ParsePKIXPublicKey(block.Bytes); err != nil {
+		return errors.New("not a valid public key")
+	}
+	return nil
+}
 
 // Sentinel errors let callers (HTTP handlers) map failures to status codes
 // without depending on the storage layer.
@@ -51,8 +67,11 @@ type Project struct {
 	AllowAutoCreate bool
 	// QuotaBytes caps the project's logical storage; 0 means unlimited.
 	QuotaBytes int64
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// VerificationKey is a cosign signature-verification public key (PEM); empty
+	// means only keyless signatures can be cryptographically verified.
+	VerificationKey string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // Service provides project operations backed by the metadata store.
@@ -175,6 +194,25 @@ func (s *Service) SetQuota(ctx context.Context, key string, quotaBytes int64) er
 	return nil
 }
 
+// SetVerificationKey sets (or clears, when empty) a project's cosign
+// signature-verification public key. A non-empty key must be a parseable PEM
+// public key.
+func (s *Service) SetVerificationKey(ctx context.Context, key, pemKey string) error {
+	pemKey = strings.TrimSpace(pemKey)
+	if pemKey != "" {
+		if err := validatePublicKeyPEM(pemKey); err != nil {
+			return &ValidationError{Field: "verificationKey", Message: err.Error()}
+		}
+	}
+	ts := s.now().Format(time.RFC3339Nano)
+	if err := s.q.SetProjectVerificationKey(ctx, db.SetProjectVerificationKeyParams{
+		VerificationKey: pemKey, UpdatedAt: ts, Key: key,
+	}); err != nil {
+		return fmt.Errorf("setting verification key: %w", err)
+	}
+	return nil
+}
+
 // Count returns the total number of projects (for the dashboard summary).
 func (s *Service) Count(ctx context.Context) (int, error) {
 	n, err := s.q.CountProjects(ctx)
@@ -283,6 +321,7 @@ func toDomain(row db.Project) (Project, error) {
 		Description:     row.Description,
 		AllowAutoCreate: row.AllowAutoCreate != 0,
 		QuotaBytes:      row.QuotaBytes,
+		VerificationKey: row.VerificationKey,
 		CreatedAt:       created,
 		UpdatedAt:       updated,
 	}, nil

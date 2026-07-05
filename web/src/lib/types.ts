@@ -19,6 +19,10 @@ export interface Project {
   allowAutoCreate: boolean;
   // Logical storage cap in bytes; 0 means unlimited.
   quotaBytes: number;
+  // Cosign signature-verification public key (PEM); present only when set.
+  verificationKey?: string;
+  // Convenience flag: whether a verification key is configured.
+  verificationKeyConfigured: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -598,6 +602,35 @@ export interface AffectedArtifact {
 export interface AffectedResponse {
   vulnId: string;
   affected: AffectedArtifact[];
+}
+
+// --- Signature verification ---
+
+/** SignatureVerification — the result of cryptographically checking one cosign signature. */
+export interface SignatureVerification {
+  digest: string;
+  keyType: 'keyless' | 'key' | 'unverified';
+  verified: boolean;
+  digestMatch: boolean;
+  identity?: string;
+  issuer?: string;
+  keyId?: string;
+  algorithm?: string;
+  reason?: string;
+}
+
+/** AttestationInfo — an in-toto attestation and its predicate type. */
+export interface AttestationInfo {
+  digest: string;
+  artifactType?: string;
+  predicateType?: string;
+}
+
+/** VerifyResponse — signatures and attestations attached to a manifest. */
+export interface VerifyResponse {
+  keyConfigured: boolean;
+  signatures: SignatureVerification[];
+  attestations: AttestationInfo[];
 }
 
 // --- Dashboard ---

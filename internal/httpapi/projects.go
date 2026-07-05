@@ -31,6 +31,7 @@ func (h projectsHandler) mount(r chi.Router) {
 		r.Use(requireProjectManage(h.svc, h.auth))
 		r.Get("/usage", h.getUsage)
 		r.Put("/quota", h.setQuota)
+		r.Put("/verification-key", h.setVerificationKey)
 	})
 }
 
@@ -38,26 +39,32 @@ func (h projectsHandler) mount(r chi.Router) {
 // A project is a tenant that contains typed repositories; allowAutoCreate governs
 // whether a push to an unknown repo path auto-creates a local repo of that format.
 type projectResponse struct {
-	ID              string    `json:"id"`
-	Key             string    `json:"key"`
-	Name            string    `json:"name"`
-	Description     string    `json:"description"`
-	AllowAutoCreate bool      `json:"allowAutoCreate"`
-	QuotaBytes      int64     `json:"quotaBytes"` // 0 = unlimited
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	ID              string `json:"id"`
+	Key             string `json:"key"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	AllowAutoCreate bool   `json:"allowAutoCreate"`
+	QuotaBytes      int64  `json:"quotaBytes"` // 0 = unlimited
+	VerificationKey string `json:"verificationKey,omitempty"`
+	// VerificationKeyConfigured is a convenience flag so the UI can show trust
+	// state without echoing the (public) key everywhere.
+	VerificationKeyConfigured bool      `json:"verificationKeyConfigured"`
+	CreatedAt                 time.Time `json:"createdAt"`
+	UpdatedAt                 time.Time `json:"updatedAt"`
 }
 
 func toProjectResponse(p project.Project) projectResponse {
 	return projectResponse{
-		ID:              p.ID,
-		Key:             p.Key,
-		Name:            p.Name,
-		Description:     p.Description,
-		AllowAutoCreate: p.AllowAutoCreate,
-		QuotaBytes:      p.QuotaBytes,
-		CreatedAt:       p.CreatedAt,
-		UpdatedAt:       p.UpdatedAt,
+		ID:                        p.ID,
+		Key:                       p.Key,
+		Name:                      p.Name,
+		Description:               p.Description,
+		AllowAutoCreate:           p.AllowAutoCreate,
+		QuotaBytes:                p.QuotaBytes,
+		VerificationKey:           p.VerificationKey,
+		VerificationKeyConfigured: p.VerificationKey != "",
+		CreatedAt:                 p.CreatedAt,
+		UpdatedAt:                 p.UpdatedAt,
 	}
 }
 
@@ -184,6 +191,37 @@ func (h projectsHandler) setQuota(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.log.Error("setting project quota", slog.String("error", err.Error()))
+		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
+		return
+	}
+	proj, err := h.svc.GetByKey(r.Context(), key)
+	if err != nil {
+		h.writeProjectLookupError(w, err)
+		return
+	}
+	writeJSON(w, h.log, http.StatusOK, toProjectResponse(proj))
+}
+
+type setVerificationKeyRequest struct {
+	// VerificationKey is a PEM public key, or "" to clear it.
+	VerificationKey string `json:"verificationKey"`
+}
+
+// setVerificationKey sets (or clears) a project's cosign verification public key.
+func (h projectsHandler) setVerificationKey(w http.ResponseWriter, r *http.Request) {
+	key := chi.URLParam(r, "project")
+	var req setVerificationKeyRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeProblem(w, http.StatusBadRequest, "Invalid request body", err.Error())
+		return
+	}
+	if err := h.svc.SetVerificationKey(r.Context(), key, req.VerificationKey); err != nil {
+		var ve *project.ValidationError
+		if errors.As(err, &ve) {
+			writeProblem(w, http.StatusBadRequest, "Invalid verification key", ve.Error())
+			return
+		}
+		h.log.Error("setting verification key", slog.String("error", err.Error()))
 		writeProblem(w, http.StatusInternalServerError, "Internal Server Error", "")
 		return
 	}

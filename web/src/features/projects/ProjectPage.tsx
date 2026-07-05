@@ -10,6 +10,7 @@ import { formatDate } from '../../lib/format';
 import type { Repo, RepoFormat } from '../../lib/types';
 import { MembersPanel } from './MembersPanel';
 import { StoragePanel } from './StoragePanel';
+import { TrustPanel } from './TrustPanel';
 import { WebhooksPanel } from './WebhooksPanel';
 import { RepositoryModal } from './RepositoryModal';
 import { useProjects } from './useProjects';
@@ -116,6 +117,8 @@ export function ProjectPage() {
       ) : null}
 
       <StoragePanel projectKey={key} />
+
+      {project ? <TrustPanel project={project} /> : null}
 
       <WebhooksPanel projectKey={key} />
 

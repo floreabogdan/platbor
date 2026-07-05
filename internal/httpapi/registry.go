@@ -84,6 +84,7 @@ func (h registryHandler) mount(r chi.Router) {
 		r.Get("/sbom", h.getSBOM)                // ?repo=<repo>&image=<image>&digest=<sbom-referrer-digest>
 		r.Get("/scan", h.getScan)                // ?repo=<repo>&image=<image>&digest=<manifest-digest>
 		r.Post("/scan", h.runScan)               // ?repo=<repo>&image=<image>&digest=<manifest-digest>
+		r.Get("/verify", h.verify)               // ?repo=<repo>&image=<image>&digest=<manifest-digest>
 		r.Get("/package", h.getPackage)          // ?repo=<repo>&name=<pkg> (npm detail)
 		r.Get("/nuget-package", h.getNuget)      // ?repo=<repo>&id=<id> (NuGet detail)
 		r.Get("/pypi-package", h.getPypi)        // ?repo=<repo>&name=<pkg> (PyPI detail)

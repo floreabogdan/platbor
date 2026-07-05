@@ -62,6 +62,10 @@ type LayerRef struct {
 	MediaType string
 	Digest    string
 	Size      int64
+	// Annotations carries the layer descriptor's annotations. Cosign stores a
+	// signature (and, for keyless, the signing certificate) here, so verification
+	// reads them off the signature manifest's layer.
+	Annotations map[string]string
 }
 
 // IndexEntry is a child manifest referenced by an image index (multi-arch).
@@ -336,7 +340,7 @@ func buildManifestView(digest, mediaType string, payload []byte) ManifestView {
 		}
 	}
 	for _, l := range doc.Layers {
-		view.Layers = append(view.Layers, LayerRef{MediaType: l.MediaType, Digest: l.Digest, Size: l.Size})
+		view.Layers = append(view.Layers, LayerRef{MediaType: l.MediaType, Digest: l.Digest, Size: l.Size, Annotations: l.Annotations})
 		view.TotalSize += l.Size
 	}
 	return view
