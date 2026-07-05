@@ -18,6 +18,7 @@ import (
 	"github.com/platbor/platbor/internal/core/blob"
 	"github.com/platbor/platbor/internal/core/config"
 	"github.com/platbor/platbor/internal/core/project"
+	"github.com/platbor/platbor/internal/registry/oci"
 )
 
 // API bundles the application services the HTTP layer depends on, plus the few
@@ -46,10 +47,14 @@ const (
 // Server owns the HTTP listener and its graceful-shutdown lifecycle, plus the
 // background maintenance the instance runs while serving.
 type Server struct {
-	http     *http.Server
-	log      *slog.Logger
-	blobs    blob.Store
-	shutdown time.Duration
+	http              *http.Server
+	log               *slog.Logger
+	blobs             blob.Store
+	collector         *oci.Collector
+	retention         *RetentionService
+	gcInterval        time.Duration
+	retentionInterval time.Duration
+	shutdown          time.Duration
 }
 
 // NewServer builds the server from resolved config, a logger, the embedded UI
@@ -61,9 +66,13 @@ func NewServer(cfg config.Config, log *slog.Logger, assets fs.FS, api API) *Serv
 			Handler:           newRouter(log, assets, api),
 			ReadHeaderTimeout: 10 * time.Second,
 		},
-		log:      log,
-		blobs:    api.Blobs,
-		shutdown: cfg.ShutdownTimeout,
+		log:               log,
+		blobs:             api.Blobs,
+		collector:         newCollector(api.DB, api.Blobs),
+		retention:         newRetention(api.DB),
+		gcInterval:        cfg.Maintenance.GCInterval,
+		retentionInterval: cfg.Maintenance.RetentionInterval,
+		shutdown:          cfg.ShutdownTimeout,
 	}
 }
 
@@ -71,6 +80,7 @@ func NewServer(cfg config.Config, log *slog.Logger, assets fs.FS, api API) *Serv
 // configured shutdown timeout. It returns nil on a clean shutdown.
 func (s *Server) Run(ctx context.Context) error {
 	go s.sweepUploads(ctx)
+	go s.runScheduledMaintenance(ctx)
 
 	errc := make(chan error, 1)
 	go func() {
@@ -121,6 +131,72 @@ func (s *Server) sweepUploads(ctx context.Context) {
 		case <-t.C:
 			sweep()
 		}
+	}
+}
+
+// runScheduledMaintenance runs garbage collection and retention on their
+// configured intervals, until ctx is cancelled. Either job is disabled when its
+// interval is zero (the default); both stay available on demand via the admin
+// API regardless. Runs are not fired at boot — the first happens one interval in
+// — so a fleet restart does not stampede the shared backend.
+func (s *Server) runScheduledMaintenance(ctx context.Context) {
+	if s.gcInterval <= 0 && s.retentionInterval <= 0 {
+		return
+	}
+
+	var gcTick, retentionTick <-chan time.Time
+	if s.gcInterval > 0 {
+		t := time.NewTicker(s.gcInterval)
+		defer t.Stop()
+		gcTick = t.C
+		s.log.Info("scheduled garbage collection enabled", slog.Duration("interval", s.gcInterval))
+	}
+	if s.retentionInterval > 0 {
+		t := time.NewTicker(s.retentionInterval)
+		defer t.Stop()
+		retentionTick = t.C
+		s.log.Info("scheduled retention enabled", slog.Duration("interval", s.retentionInterval))
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-gcTick:
+			s.runGC(ctx)
+		case <-retentionTick:
+			s.runRetention(ctx)
+		}
+	}
+}
+
+// runGC performs one garbage-collection sweep as the system actor, logging the
+// outcome. Failures are logged, not fatal — the next tick tries again.
+func (s *Server) runGC(ctx context.Context) {
+	report, err := s.collector.Collect(ctx, "system", gcGracePeriod, false, time.Now().UTC())
+	if err != nil {
+		s.log.Warn("scheduled garbage collection", slog.String("error", err.Error()))
+		return
+	}
+	s.log.Info("scheduled garbage collection complete",
+		slog.Int("scanned", report.Scanned),
+		slog.Int("deleted", report.Deleted),
+		slog.Int64("reclaimedBytes", report.ReclaimedBytes),
+		slog.Int("kept", report.Kept))
+}
+
+// runRetention performs one retention pass across policied repositories as the
+// system actor, logging the outcome.
+func (s *Server) runRetention(ctx context.Context) {
+	report, err := s.retention.Run(ctx, false, "system")
+	if err != nil {
+		s.log.Warn("scheduled retention", slog.String("error", err.Error()))
+		return
+	}
+	if report.Deleted > 0 {
+		s.log.Info("scheduled retention complete",
+			slog.Int("deleted", report.Deleted),
+			slog.Int("repositories", len(report.Repositories)))
 	}
 }
 

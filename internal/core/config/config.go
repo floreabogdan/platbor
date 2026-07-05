@@ -31,6 +31,8 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 	// Blob configures the content-addressable blob store.
 	Blob BlobConfig `yaml:"blob"`
+	// Maintenance configures optional scheduled background jobs.
+	Maintenance MaintenanceConfig `yaml:"maintenance"`
 	// Auth configures identity and sessions.
 	Auth AuthConfig `yaml:"auth"`
 	// Log configures structured logging.
@@ -77,6 +79,19 @@ type S3Config struct {
 	UseSSL bool `yaml:"useSSL"`
 	// Prefix is an optional key prefix within the bucket.
 	Prefix string `yaml:"prefix"`
+}
+
+// MaintenanceConfig schedules the housekeeping an instance can run for itself.
+// Both jobs are off by default (zero-config stays hands-off) and remain available
+// on demand through the admin API regardless. When several instances share one
+// backend, enable these on a single instance to avoid redundant concurrent runs.
+type MaintenanceConfig struct {
+	// GCInterval schedules automatic garbage collection (unreferenced-blob sweep).
+	// Zero disables it. Must be at least a minute when set.
+	GCInterval time.Duration `yaml:"gcInterval"`
+	// RetentionInterval schedules automatic retention runs (keep-last-N pruning).
+	// Zero disables it. Must be at least a minute when set.
+	RetentionInterval time.Duration `yaml:"retentionInterval"`
 }
 
 // AuthConfig configures the identity layer.
@@ -213,6 +228,20 @@ func applyEnv(cfg *Config) error {
 	if v, ok := lookup("S3_PREFIX"); ok {
 		cfg.Blob.S3.Prefix = v
 	}
+	if v, ok := lookup("GC_INTERVAL"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("parsing %sGC_INTERVAL %q: %w", envPrefix, v, err)
+		}
+		cfg.Maintenance.GCInterval = d
+	}
+	if v, ok := lookup("RETENTION_INTERVAL"); ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("parsing %sRETENTION_INTERVAL %q: %w", envPrefix, v, err)
+		}
+		cfg.Maintenance.RetentionInterval = d
+	}
 	if v, ok := lookup("ADMIN_USERNAME"); ok {
 		cfg.Auth.AdminUsername = v
 	}
@@ -292,6 +321,12 @@ func (c Config) validate() error {
 			return errors.New("blob.s3.endpoint and blob.s3.bucket are required when blob.driver is s3")
 		}
 	}
+	if err := validateInterval("maintenance.gcInterval", c.Maintenance.GCInterval); err != nil {
+		return err
+	}
+	if err := validateInterval("maintenance.retentionInterval", c.Maintenance.RetentionInterval); err != nil {
+		return err
+	}
 	if !validLevels[c.Log.Level] {
 		return fmt.Errorf("log.level %q must be one of debug, info, warn, error", c.Log.Level)
 	}
@@ -300,6 +335,19 @@ func (c Config) validate() error {
 	}
 	if c.ShutdownTimeout <= 0 {
 		return fmt.Errorf("shutdownTimeout %s must be positive", c.ShutdownTimeout)
+	}
+	return nil
+}
+
+// validateInterval rejects a negative schedule and a positive-but-too-frequent
+// one (a sub-minute maintenance interval is almost always a mistake). Zero means
+// the job is disabled.
+func validateInterval(name string, d time.Duration) error {
+	if d < 0 {
+		return fmt.Errorf("%s %s must not be negative", name, d)
+	}
+	if d > 0 && d < time.Minute {
+		return fmt.Errorf("%s %s must be at least 1m when set", name, d)
 	}
 	return nil
 }

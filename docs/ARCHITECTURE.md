@@ -74,7 +74,9 @@ All binary content — image layers, package tarballs, chart archives — lives 
 
 - Drivers: `fs` (default, `{data-dir}/blobs/sha256/ab/abcdef...`) and `s3` (any S3-compatible — AWS S3, MinIO, R2; keys `<prefix>/blobs/<algo>/<hex>`). Both share the same `blob.Store` contract test, so they are fully substitutable.
 - Uploads are session-based and resumable (the OCI spec requires it; others benefit). Both drivers stage an in-progress upload as a local temp file under `{data-dir}/uploads` and differ only in the commit step: `fs` renames it into the CAS tree, `s3` flushes it to the bucket (multipart for large blobs). Staging is node-local, so a resumable upload must be resumed on the node that began it; committed blobs are shared. Object storage is the unlock for large artifacts — container images and, ahead, ML models.
-- Deletion is mark-and-sweep GC over the `blob_refs` table, run by the job runner. Never delete inline — shared blobs make inline deletion a correctness trap.
+- Deletion is mark-and-sweep GC: the collector unions every format's blob referencers, then sweeps the unreferenced remainder (with a grace window sparing freshly-uploaded blobs). Never delete inline — shared blobs make inline deletion a correctness trap. GC and retention (keep-last-N pruning) run on demand via the admin API, and optionally on a schedule (`maintenance.gcInterval` / `maintenance.retentionInterval`, both off by default; enable on a single instance in a fleet). Abandoned resumable-upload staging files are reclaimed by a background sweeper (older than 24h).
+
+**Operational probes.** `/healthz` is liveness (the process can serve; no dependency checks, so a transient DB blip never restart-loops it). `/readyz` is readiness: it probes the metadata DB and the blob store and returns 503 with a per-check breakdown when either is unreachable, so an orchestrator stops routing to an instance that cannot serve.
 
 ### Database: SQLite first, Postgres for scale
 

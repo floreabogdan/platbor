@@ -28,6 +28,30 @@ func TestLoadZeroConfig(t *testing.T) {
 	}
 }
 
+func TestMaintenanceIntervals(t *testing.T) {
+	// Disabled by default.
+	if d := Default().Maintenance.GCInterval; d != 0 {
+		t.Errorf("default GCInterval = %s, want 0 (disabled)", d)
+	}
+
+	// Valid intervals from env are parsed.
+	t.Setenv("PLATBOR_GC_INTERVAL", "6h")
+	t.Setenv("PLATBOR_RETENTION_INTERVAL", "24h")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Maintenance.GCInterval != 6*time.Hour || cfg.Maintenance.RetentionInterval != 24*time.Hour {
+		t.Fatalf("intervals not applied: %+v", cfg.Maintenance)
+	}
+
+	// A sub-minute interval is rejected as almost certainly a mistake.
+	t.Setenv("PLATBOR_GC_INTERVAL", "5s")
+	if _, err := Load(""); err == nil {
+		t.Error("expected an error for a sub-minute GC interval")
+	}
+}
+
 func TestEnvOverridesFileOverridesDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "platbor.yaml")
