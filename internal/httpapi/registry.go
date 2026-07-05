@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/platbor/platbor/internal/core/blob"
 	"github.com/platbor/platbor/internal/core/project"
 	"github.com/platbor/platbor/internal/core/repository"
 	"github.com/platbor/platbor/internal/registry/cargo"
@@ -46,6 +47,7 @@ type registryHandler struct {
 	retention *RetentionService
 	repos     *repository.Service
 	projects  *project.Service
+	blobs     blob.Store
 	log       *slog.Logger
 }
 
@@ -72,6 +74,7 @@ func (h registryHandler) mount(r chi.Router) {
 		r.Get("/manifests", h.getManifest)       // ?repo=<repo>&image=<image>&reference=<tag|digest>
 		r.Delete("/manifests", h.deleteManifest) // ?repo=<repo>&image=<image>&reference=<tag|digest>
 		r.Get("/referrers", h.listReferrers)     // ?repo=<repo>&image=<image>&subject=<digest>
+		r.Get("/sbom", h.getSBOM)                // ?repo=<repo>&image=<image>&digest=<sbom-referrer-digest>
 		r.Get("/package", h.getPackage)          // ?repo=<repo>&name=<pkg> (npm detail)
 		r.Get("/nuget-package", h.getNuget)      // ?repo=<repo>&id=<id> (NuGet detail)
 		r.Get("/pypi-package", h.getPypi)        // ?repo=<repo>&name=<pkg> (PyPI detail)

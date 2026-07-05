@@ -102,6 +102,7 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 				collector: newCollector(api.DB, api.Blobs),
 				retention: newRetention(api.DB),
 				repos:     repository.NewService(api.DB),
+				blobs:     api.Blobs,
 				projects:  api.Projects,
 				log:       log,
 			}.mount)

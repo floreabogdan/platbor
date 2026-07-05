@@ -38,6 +38,7 @@ import type {
   PyPIPackageDetail,
   Repo,
   Token,
+  SbomResponse,
   UpdateRepoRequest,
   User,
   Webhook,
@@ -206,6 +207,9 @@ export const api = {
     request<ListReferrersResponse>(
       `/registry/${encodeURIComponent(project)}/referrers${query({ repo, image, subject })}`,
     ),
+
+  getSBOM: (project: string, repo: string, image: string, digest: string): Promise<SbomResponse> =>
+    request<SbomResponse>(`/registry/${encodeURIComponent(project)}/sbom${query({ repo, image, digest })}`),
 
   // npm package browser
   listPackages: (): Promise<ListPackagesResponse> =>

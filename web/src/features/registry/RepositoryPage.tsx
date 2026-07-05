@@ -3,9 +3,10 @@ import type { ReactNode } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Breadcrumb, Card, CopyButton, EmptyState, PageHeader } from '../../components/ui';
 import { LayersIcon, RegistryIcon, TrashIcon } from '../../components/icons';
+import { api } from '../../lib/api';
 import { cx } from '../../lib/cx';
 import { formatBytes, formatDate, shortDigest } from '../../lib/format';
-import type { IndexEntry, Layer, ManifestDetail, ManifestKind, Referrer, TagSummary } from '../../lib/types';
+import type { IndexEntry, Layer, ManifestDetail, ManifestKind, Referrer, SbomResponse, TagSummary } from '../../lib/types';
 import { DeleteDialog, type DeleteTarget } from './DeleteDialog';
 import { splitRepoAndRest } from './packageRoute';
 import { useManifest, useReferrers, useRepoTags } from './useRegistry';
@@ -234,6 +235,7 @@ function ManifestPanel({
           <LayersIcon className="h-5 w-5 text-slate-400" />
           <h2 className="font-semibold text-slate-900">Manifest</h2>
           <KindBadge kind={manifest.kind} />
+          <TrustBadges referrers={referrers} />
         </div>
         <div className="flex items-center gap-3">
           {manifest.kind !== 'index' ? (
@@ -270,8 +272,34 @@ function ManifestPanel({
         <LayersTable config={manifest.config} layers={manifest.layers} />
       )}
 
-      {referrers.length > 0 ? <ReferrersSection referrers={referrers} /> : null}
+      {referrers.length > 0 ? (
+        <ReferrersSection referrers={referrers} project={project} repo={repo} image={image} />
+      ) : null}
     </Card>
+  );
+}
+
+// TrustBadges surfaces the provenance attached to an image at a glance: whether
+// it is signed and whether it ships an SBOM (derived from its referrers).
+function TrustBadges({ referrers }: { referrers: Referrer[] }) {
+  const signed = referrers.some((r) => referrerLabel(r.artifactType) === 'Signature');
+  const sbom = referrers.some((r) => referrerLabel(r.artifactType) === 'SBOM');
+  if (!signed && !sbom) {
+    return null;
+  }
+  return (
+    <div className="flex items-center gap-1.5">
+      {signed ? (
+        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+          ✓ Signed
+        </span>
+      ) : null}
+      {sbom ? (
+        <span className="inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700 ring-1 ring-inset ring-sky-600/20">
+          SBOM
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -297,7 +325,17 @@ function referrerLabel(artifactType?: string): string {
   return artifactType;
 }
 
-function ReferrersSection({ referrers }: { referrers: Referrer[] }) {
+function ReferrersSection({
+  referrers,
+  project,
+  repo,
+  image,
+}: {
+  referrers: Referrer[];
+  project: string;
+  repo: string;
+  image: string;
+}) {
   return (
     <div className="mt-6">
       <div className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
@@ -316,19 +354,119 @@ function ReferrersSection({ referrers }: { referrers: Referrer[] }) {
           </thead>
           <tbody>
             {referrers.map((ref, i) => (
-              <tr key={`${ref.digest}-${String(i)}`} className="border-b border-slate-100 last:border-0">
+              <ReferrerRow key={`${ref.digest}-${String(i)}`} referrer={ref} project={project} repo={repo} image={image} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function ReferrerRow({
+  referrer,
+  project,
+  repo,
+  image,
+}: {
+  referrer: Referrer;
+  project: string;
+  repo: string;
+  image: string;
+}) {
+  const isSbom = referrerLabel(referrer.artifactType) === 'SBOM';
+  const [open, setOpen] = useState(false);
+  const [sbom, setSbom] = useState<SbomResponse>();
+  const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [error, setError] = useState<string>();
+
+  async function toggle() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    if (sbom || state === 'loading') {
+      return;
+    }
+    setState('loading');
+    try {
+      setSbom(await api.getSBOM(project, repo, image, referrer.digest));
+      setState('idle');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load SBOM');
+      setState('error');
+    }
+  }
+
+  return (
+    <>
+      <tr className="border-b border-slate-100 last:border-0">
+        <Td>
+          <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
+            {referrerLabel(referrer.artifactType)}
+          </span>
+        </Td>
+        <Td>
+          <span className="font-mono text-xs text-slate-400">{referrer.artifactType || '—'}</span>
+        </Td>
+        <Td>
+          <span className="font-mono text-xs text-slate-600">{shortDigest(referrer.digest)}</span>
+          {isSbom ? (
+            <button
+              type="button"
+              onClick={() => void toggle()}
+              className="ml-3 text-xs font-medium text-teal-700 hover:text-teal-900"
+            >
+              {open ? 'Hide components' : 'View components'}
+            </button>
+          ) : null}
+        </Td>
+        <Td className="text-right tabular-nums text-slate-600">{formatBytes(referrer.size)}</Td>
+      </tr>
+      {isSbom && open ? (
+        <tr className="bg-slate-50/60">
+          <td colSpan={4} className="px-4 py-3">
+            {state === 'loading' ? <p className="text-xs text-slate-400">Loading SBOM…</p> : null}
+            {state === 'error' ? <p className="text-xs text-red-600">{error}</p> : null}
+            {sbom ? <SbomComponents sbom={sbom} /> : null}
+          </td>
+        </tr>
+      ) : null}
+    </>
+  );
+}
+
+function SbomComponents({ sbom }: { sbom: SbomResponse }) {
+  if (sbom.components.length === 0) {
+    return <p className="text-xs text-slate-400">No components listed in this {sbom.format} SBOM.</p>;
+  }
+  return (
+    <div>
+      <div className="mb-1.5 text-xs text-slate-400">
+        {sbom.components.length} components · <span className="uppercase">{sbom.format}</span>
+      </div>
+      <div className="max-h-72 overflow-y-auto rounded-md border border-slate-200/80 bg-white">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 bg-white">
+            <tr className="border-b border-slate-200/80 text-left text-xs uppercase tracking-wide text-slate-400">
+              <Th>Component</Th>
+              <Th>Version</Th>
+              <Th>License</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {sbom.components.map((c, i) => (
+              <tr key={`${c.name}-${c.version ?? ''}-${String(i)}`} className="border-b border-slate-100 last:border-0">
                 <Td>
-                  <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-                    {referrerLabel(ref.artifactType)}
-                  </span>
+                  <span className="font-mono text-xs text-slate-800">{c.name}</span>
                 </Td>
                 <Td>
-                  <span className="font-mono text-xs text-slate-400">{ref.artifactType || '—'}</span>
+                  <span className="font-mono text-xs text-slate-500">{c.version || '—'}</span>
                 </Td>
                 <Td>
-                  <span className="font-mono text-xs text-slate-600">{shortDigest(ref.digest)}</span>
+                  <span className="text-xs text-slate-500">{c.license || '—'}</span>
                 </Td>
-                <Td className="text-right tabular-nums text-slate-600">{formatBytes(ref.size)}</Td>
               </tr>
             ))}
           </tbody>

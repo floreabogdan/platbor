@@ -528,6 +528,20 @@ export interface ListReferrersResponse {
   referrers: Referrer[];
 }
 
+/** SbomComponent — one package/library listed in an SBOM. */
+export interface SbomComponent {
+  name: string;
+  version?: string;
+  license?: string;
+  type?: string;
+}
+
+/** SbomResponse — a parsed SBOM (CycloneDX or SPDX) attached to an image. */
+export interface SbomResponse {
+  format: string; // "cyclonedx" | "spdx"
+  components: SbomComponent[];
+}
+
 // --- Dashboard ---
 
 /** DashboardSummary — coarse instance counts. */
