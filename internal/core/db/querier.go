@@ -20,6 +20,7 @@ type Querier interface {
 	CreateRepository(ctx context.Context, arg CreateRepositoryParams) (Repository, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	CreateWebhook(ctx context.Context, arg CreateWebhookParams) (Webhook, error)
 	DeleteAPIToken(ctx context.Context, arg DeleteAPITokenParams) (int64, error)
 	DeleteCargoVersion(ctx context.Context, arg DeleteCargoVersionParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context, expiresAt string) error
@@ -38,6 +39,7 @@ type Querier interface {
 	DeleteTag(ctx context.Context, arg DeleteTagParams) (int64, error)
 	DeleteTagsForDigest(ctx context.Context, arg DeleteTagsForDigestParams) error
 	DeleteTerraformVersion(ctx context.Context, arg DeleteTerraformVersionParams) (int64, error)
+	DeleteWebhook(ctx context.Context, arg DeleteWebhookParams) (int64, error)
 	GemVersionExists(ctx context.Context, arg GemVersionExistsParams) (int64, error)
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (GetAPITokenByHashRow, error)
 	// Resolve a crate version to its content for download (by lowercased name).
@@ -68,6 +70,8 @@ type Querier interface {
 	GetTerraformVersion(ctx context.Context, arg GetTerraformVersionParams) (GetTerraformVersionRow, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
+	GetWebhook(ctx context.Context, arg GetWebhookParams) (Webhook, error)
+	GetWebhookCursor(ctx context.Context) (GetWebhookCursorRow, error)
 	InsertAuditEntry(ctx context.Context, arg InsertAuditEntryParams) (AuditLog, error)
 	// Record a crate version. On conflict (a proxy re-listing, or a download filling
 	// a cached row) update metadata and only overwrite the blob when a real digest is
@@ -87,6 +91,8 @@ type Querier interface {
 	InsertPypiFile(ctx context.Context, arg InsertPypiFileParams) error
 	InsertTerraformVersion(ctx context.Context, arg InsertTerraformVersionParams) error
 	ListAPITokensByUser(ctx context.Context, userID string) ([]ApiToken, error)
+	// Active webhooks for a project, for the dispatcher to match against an event.
+	ListActiveWebhooksForProject(ctx context.Context, projectID string) ([]ListActiveWebhooksForProjectRow, error)
 	// Every Cargo crate across all repositories, with version count, total cached
 	// size, and a proxy flag, for the browser's project-grouped index.
 	ListAllCargoCrates(ctx context.Context) ([]ListAllCargoCratesRow, error)
@@ -124,6 +130,10 @@ type Querier interface {
 	// and a proxy flag (always local), for the browser's project-grouped index.
 	ListAllTerraformModules(ctx context.Context) ([]ListAllTerraformModulesRow, error)
 	ListAuditByProject(ctx context.Context, arg ListAuditByProjectParams) ([]AuditLog, error)
+	// Audit entries after the dispatcher's cursor, oldest first, with the project key
+	// for the delivery payload. Keyset on (created_at, id): created_at is RFC3339Nano
+	// (fixed width, so it orders lexically) and id breaks ties.
+	ListAuditSince(ctx context.Context, arg ListAuditSinceParams) ([]ListAuditSinceRow, error)
 	// Distinct blob digests every cached/published .crate references, for GC.
 	ListCargoBlobDigests(ctx context.Context) ([]string, error)
 	// Every version's index line for a crate (by lowercased name), newest last, for
@@ -235,7 +245,10 @@ type Querier interface {
 	ListTerraformVersionsForRetention(ctx context.Context, repositoryID string) ([]ListTerraformVersionsForRetentionRow, error)
 	// Manifests in a repository that no tag points at, for the delete-untagged policy.
 	ListUntaggedManifests(ctx context.Context, repositoryID string) ([]ListUntaggedManifestsRow, error)
+	ListWebhooksByProject(ctx context.Context, projectID string) ([]Webhook, error)
 	ManifestExists(ctx context.Context, arg ManifestExistsParams) (int64, error)
+	// The newest audit entry, to seed the dispatcher cursor on first run.
+	MaxAuditCursor(ctx context.Context) (MaxAuditCursorRow, error)
 	// Whether a specific version is already published. npm forbids overwriting a
 	// published version, so the handler rejects a re-publish before inserting.
 	NpmVersionExists(ctx context.Context, arg NpmVersionExistsParams) (int64, error)
@@ -270,6 +283,7 @@ type Querier interface {
 	SetProjectQuota(ctx context.Context, arg SetProjectQuotaParams) error
 	// Fill a proxied file's cached blob after downloading it from the upstream.
 	SetPypiFileBlob(ctx context.Context, arg SetPypiFileBlobParams) error
+	SetWebhookCursor(ctx context.Context, arg SetWebhookCursorParams) error
 	TerraformVersionExists(ctx context.Context, arg TerraformVersionExistsParams) (int64, error)
 	UpdateRepository(ctx context.Context, arg UpdateRepositoryParams) (Repository, error)
 	// Ensure the crate row for (repository, lowercased name) exists, returning its id.

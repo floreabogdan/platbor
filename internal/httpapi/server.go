@@ -18,6 +18,7 @@ import (
 	"github.com/platbor/platbor/internal/core/blob"
 	"github.com/platbor/platbor/internal/core/config"
 	"github.com/platbor/platbor/internal/core/project"
+	"github.com/platbor/platbor/internal/core/webhook"
 	"github.com/platbor/platbor/internal/registry/oci"
 )
 
@@ -52,6 +53,7 @@ type Server struct {
 	blobs             blob.Store
 	collector         *oci.Collector
 	retention         *RetentionService
+	dispatcher        *webhook.Dispatcher
 	gcInterval        time.Duration
 	retentionInterval time.Duration
 	shutdown          time.Duration
@@ -70,6 +72,7 @@ func NewServer(cfg config.Config, log *slog.Logger, assets fs.FS, api API) *Serv
 		blobs:             api.Blobs,
 		collector:         newCollector(api.DB, api.Blobs),
 		retention:         newRetention(api.DB),
+		dispatcher:        webhook.NewDispatcher(api.DB, log),
 		gcInterval:        cfg.Maintenance.GCInterval,
 		retentionInterval: cfg.Maintenance.RetentionInterval,
 		shutdown:          cfg.ShutdownTimeout,
@@ -81,6 +84,7 @@ func NewServer(cfg config.Config, log *slog.Logger, assets fs.FS, api API) *Serv
 func (s *Server) Run(ctx context.Context) error {
 	go s.sweepUploads(ctx)
 	go s.runScheduledMaintenance(ctx)
+	go s.dispatcher.Run(ctx)
 
 	errc := make(chan error, 1)
 	go func() {

@@ -15,6 +15,7 @@ import (
 	"github.com/platbor/platbor/internal/core/audit"
 	"github.com/platbor/platbor/internal/core/blob"
 	"github.com/platbor/platbor/internal/core/repository"
+	"github.com/platbor/platbor/internal/core/webhook"
 	"github.com/platbor/platbor/internal/registry"
 	"github.com/platbor/platbor/internal/registry/cargo"
 	"github.com/platbor/platbor/internal/registry/generic"
@@ -78,6 +79,12 @@ func newRouter(log *slog.Logger, assets fs.FS, api API) http.Handler {
 			r.Route("/projects/{project}/members", membersHandler{
 				auth:     api.Auth,
 				projects: api.Projects,
+				log:      log,
+			}.mount)
+			r.Route("/projects/{project}/webhooks", webhooksHandler{
+				svc:      webhook.NewService(api.DB),
+				projects: api.Projects,
+				auth:     api.Auth,
 				log:      log,
 			}.mount)
 			r.Route("/registry", registryHandler{

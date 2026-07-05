@@ -1,5 +1,6 @@
 import type {
   CreateProjectRequest,
+  CreateWebhookRequest,
   CreateRepoRequest,
   CreateTokenRequest,
   CreateTokenResponse,
@@ -12,6 +13,7 @@ import type {
   ListRubyGemsResponse,
   ListTerraformModulesResponse,
   ListMembersResponse,
+  ListWebhooksResponse,
   ListNugetsResponse,
   ListPackagesResponse,
   ListProjectsResponse,
@@ -38,6 +40,7 @@ import type {
   Token,
   UpdateRepoRequest,
   User,
+  Webhook,
 } from './types';
 
 const BASE = '/api/v1';
@@ -150,6 +153,21 @@ export const api = {
 
   removeMember: (project: string, username: string): Promise<void> =>
     request<undefined>(`/projects/${encodeURIComponent(project)}/members/${encodeURIComponent(username)}`, {
+      method: 'DELETE',
+    }),
+
+  // Webhooks (project event subscriptions)
+  listWebhooks: (project: string): Promise<ListWebhooksResponse> =>
+    request<ListWebhooksResponse>(`/projects/${encodeURIComponent(project)}/webhooks`),
+
+  createWebhook: (project: string, body: CreateWebhookRequest): Promise<Webhook> =>
+    request<Webhook>(`/projects/${encodeURIComponent(project)}/webhooks`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  deleteWebhook: (project: string, id: string): Promise<void> =>
+    request<undefined>(`/projects/${encodeURIComponent(project)}/webhooks/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     }),
 

@@ -192,6 +192,27 @@ export interface ListMembersResponse {
   members: Member[];
 }
 
+/** Webhook — a project's event subscription. `secret` is present only in the
+ *  create response (shown once). */
+export interface Webhook {
+  id: string;
+  url: string;
+  events: string; // comma-separated action prefixes, or "*"
+  active: boolean;
+  createdAt: string;
+  secret?: string;
+}
+
+export interface ListWebhooksResponse {
+  webhooks: Webhook[];
+}
+
+export interface CreateWebhookRequest {
+  url: string;
+  events?: string;
+  secret?: string;
+}
+
 /** NpmPackageDetail — a package with its versions (newest first) and dist-tags. */
 export interface NpmPackageDetail {
   name: string;
